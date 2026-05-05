@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Локальные настройки Claude Code — у каждого топа свои
+.claude/settings.local.json
+
+# SESSION.md в каждой папке — это локальный контекст, не делимый
+*/SESSION.md
+PUSH_TO_GITHUB.md
+
+# Артефакты сборки дашборда — собираются в GitHub Action на каждый push
+_site/
+dashboard/events.jsonl

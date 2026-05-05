@@ -1,0 +1,34 @@
+# CODEOWNERS — кто отвечает за какую часть репо в Pull Requests.
+#
+# GitHub автоматически запрашивает review у указанных людей,
+# когда кто-то открывает PR на их часть.
+#
+# ВАЖНО: эти github-юзернеймы — заглушки. Перед воркшопом замени
+# на реальные аккаунты участников (или удали файл если не используешь GitHub-аккаунты).
+
+# Корневые файлы — на ведущих воркшопа
+/CLAUDE.md           @ErokhinVi
+/TEAM.md             @ErokhinVi
+/RULES.md            @ErokhinVi
+/README.md           @ErokhinVi
+/docker-compose.yml  @ErokhinVi
+/.github/            @ErokhinVi
+/.claude/            @ErokhinVi
+/contracts/shared.py @ErokhinVi
+/infra/              @ErokhinVi
+
+# Блоки — каждый член правления отвечает за свой
+/ceo/                @sergey-monin
+/cib/                @nikita-patrahin
+/retail/             @ivan-kurochkin
+/it/                 @aleksandr-lozhechkin
+/finance/            @gert-hebenstreit
+/risk/               @roland-vass
+
+# OpenAPI спеки — owner блока
+/contracts/api_specs/ceo.yaml      @sergey-monin
+/contracts/api_specs/cib.yaml      @nikita-patrahin
+/contracts/api_specs/retail.yaml   @ivan-kurochkin
+/contracts/api_specs/it.yaml       @aleksandr-lozhechkin
+/contracts/api_specs/finance.yaml  @gert-hebenstreit
+/contracts/api_specs/risk.yaml     @roland-vass

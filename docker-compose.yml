@@ -1,0 +1,77 @@
+version: "3.9"
+
+# Райффайзен Sandbox — выездной AI-воркшоп правления, 3 мая 2026.
+# Запуск: docker-compose up
+# Проверка: python infra/test_client.py
+
+services:
+
+  ceo:
+    build:
+      context: .
+      dockerfile: ceo/Dockerfile
+    image: raif-ceo
+    container_name: raif-ceo
+    ports:
+      - "8000:8000"
+    networks:
+      - raif
+
+  cib:
+    build:
+      context: .
+      dockerfile: cib/Dockerfile
+    image: raif-cib
+    container_name: raif-cib
+    ports:
+      - "8010:8010"
+    networks:
+      - raif
+
+  retail:
+    build:
+      context: .
+      dockerfile: retail/Dockerfile
+    image: raif-retail
+    container_name: raif-retail
+    ports:
+      - "8020:8020"
+    networks:
+      - raif
+
+  it:
+    build:
+      context: .
+      dockerfile: it/Dockerfile
+    image: raif-it
+    container_name: raif-it
+    ports:
+      - "8030:8030"
+    networks:
+      - raif
+
+  finance:
+    build:
+      context: .
+      dockerfile: finance/Dockerfile
+    image: raif-finance
+    container_name: raif-finance
+    ports:
+      - "8040:8040"
+    networks:
+      - raif
+
+  risk:
+    build:
+      context: .
+      dockerfile: risk/Dockerfile
+    image: raif-risk
+    container_name: raif-risk
+    ports:
+      - "8050:8050"
+    networks:
+      - raif
+
+networks:
+  raif:
+    driver: bridge
