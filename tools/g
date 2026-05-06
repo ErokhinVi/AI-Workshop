@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# tools/g — обёртка над git для sandbox-а Claude в Cowork-режиме.
+#
+# Зачем:
+#   Mount-FS Cowork-режима не разрешает sandbox-у unlink файлов внутри .git/ — git
+#   создаёт служебные .lock и tmp_obj_* и не может их удалить. Один залипший
+#   .git/index.lock убивает все последующие git-команды для всей сессии (а у
+#   топ-менеджера на маке — между сессиями), и почистить его агент не может.
+#
+# Решение:
+#   Параллельный «теневой» git-dir в $HOME/.cache/raif-git/ (внутри sandbox-а,
+#   нормальная FS). Index, locks, objects, refs — всё там. Mount-овский
+#   <repo>/.git мы вообще не трогаем. Wrapper делает то же, что обычный git,
+#   но передаёт ему правильные --git-dir и --work-tree.
+#
+# Использование (из любой подпапки репо):
+#   tools/g status
+#   tools/g add <файл>
+#   tools/g commit -m "..."
+#   tools/g push
+#   tools/g pull --rebase
+#
+# Никогда не вызывай напрямую `git` в sandbox-е — это вернёт нас к проблеме
+# залипшего .lock в mount-овском .git.
+#
+# Один раз shadow git-dir поднимается через tools/cowork-onboard.py.
+
+set -eo pipefail
+
+# Корень репо = родитель папки, где лежит этот скрипт.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+WORK_TREE="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+GIT_DIR="${RAIF_SHADOW_GIT_DIR:-$HOME/.cache/raif-git/git-dir}"
+
+if [[ ! -d "$GIT_DIR" ]] || [[ ! -f "$GIT_DIR/HEAD" ]]; then
+    cat >&2 <<EOF
+✗ shadow git-dir не настроен: $GIT_DIR
+  Поднять: python3 "$WORK_TREE/tools/cowork-onboard.py"
+
+  (Этот wrapper нужен потому, что mount-FS Cowork-режима не даёт удалять
+  файлы из <repo>/.git, и любой залипший .lock убивает обычный git.)
+EOF
+    exit 2
+fi
+
+exec git --git-dir="$GIT_DIR" --work-tree="$WORK_TREE" "$@"
