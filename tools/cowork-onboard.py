@@ -38,14 +38,20 @@ SSH_CONFIG = SSH_DIR / "config"
 KNOWN_HOSTS = SSH_DIR / "known_hosts"
 
 SSH_CONFIG_MARKER = "# raif-workshop-2026"
+SSH_CONFIG_END_MARKER = "# /raif-workshop-2026"
+# В sandbox-е Cowork-режима исходящий tcp:22 наружу часто закрыт корпоративной сетью —
+# обычный github.com:22 виснет по таймауту. ssh.github.com:443 работает везде, где
+# вообще выпускают наружу https, поэтому всегда садимся на него.
 SSH_CONFIG_BLOCK = f"""
 {SSH_CONFIG_MARKER}
 Host github.com
-  HostName github.com
+  HostName ssh.github.com
+  Port 443
   User git
   IdentityFile {KEY_DST}
   IdentitiesOnly yes
   StrictHostKeyChecking accept-new
+{SSH_CONFIG_END_MARKER}
 """
 
 
@@ -80,16 +86,36 @@ def setup_ssh() -> None:
     ok(f"Ключ: {KEY_DST}")
 
     cfg = SSH_CONFIG.read_text() if SSH_CONFIG.exists() else ""
-    if SSH_CONFIG_MARKER not in cfg:
+    needs_write = SSH_CONFIG_MARKER not in cfg
+    needs_migration = (
+        SSH_CONFIG_MARKER in cfg
+        and "ssh.github.com" not in cfg.split(SSH_CONFIG_MARKER, 1)[1].split(SSH_CONFIG_END_MARKER, 1)[0]
+    )
+
+    if needs_migration:
+        # Старый блок (порт 22) — выкусываем и заменяем актуальным.
+        before, _, rest = cfg.partition(SSH_CONFIG_MARKER)
+        if SSH_CONFIG_END_MARKER in rest:
+            _, _, after = rest.partition(SSH_CONFIG_END_MARKER)
+        else:
+            # Очень старая версия без end-маркера — режем до конца файла.
+            after = ""
+        cfg = before.rstrip() + "\n"
+        SSH_CONFIG.write_text(cfg + after.lstrip())
+        SSH_CONFIG.chmod(0o600)
+        needs_write = True
+        warn("Старый блок github.com (порт 22) удалён — переписываю на ssh.github.com:443")
+
+    if needs_write:
         with SSH_CONFIG.open("a") as f:
             f.write(SSH_CONFIG_BLOCK)
         SSH_CONFIG.chmod(0o600)
-        ok(f"Запись для github.com дописана в {SSH_CONFIG}")
+        ok(f"Запись для github.com (через ssh.github.com:443) записана в {SSH_CONFIG}")
     else:
-        ok(f"{SSH_CONFIG} уже содержит запись для github.com")
+        ok(f"{SSH_CONFIG} уже содержит актуальную запись для github.com")
 
     res = subprocess.run(
-        ["ssh-keyscan", "-t", "ed25519,ecdsa,rsa", "github.com"],
+        ["ssh-keyscan", "-p", "443", "-t", "ed25519,ecdsa,rsa", "ssh.github.com"],
         capture_output=True, text=True, timeout=10,
     )
     if res.returncode == 0 and res.stdout:
