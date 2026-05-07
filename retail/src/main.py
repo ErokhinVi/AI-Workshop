@@ -19,6 +19,7 @@ Persistence:
 лидогенерация и т.п.) — решает Иван вместе со своим AI-помощником
 по ходу воркшопа.
 """
+# redeploy-trigger: 2026-05-07T08:43:17Z
 
 from __future__ import annotations
 
