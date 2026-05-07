@@ -268,15 +268,30 @@
     .edge {
       fill: none;
       stroke-linecap: round;
-      transition: stroke-opacity 240ms, opacity 240ms;
+      stroke-linejoin: round;
+      transition: stroke-opacity 240ms, opacity 240ms, stroke-width 240ms;
       cursor: pointer;
     }
+    .edge.idle    { stroke-opacity: 0.32; }
+    .edge.recent  { stroke-opacity: 0.85; }
+    .edge.waiting { stroke-dasharray: 6 5; animation: edgeDash 1.2s linear infinite; }
+    @keyframes edgeDash { to { stroke-dashoffset: -22; } }
     .edge:hover { stroke-opacity: 1 !important; }
-    .edge-count {
-      font-family: "Geist", system-ui, sans-serif;
-      font-size: 13px; fill: var(--text);
+
+    .edge-glow {
+      fill: none; stroke-linecap: round;
+      stroke-opacity: 0.18; stroke-width: 7;
       pointer-events: none;
-      paint-order: stroke; stroke: var(--ink); stroke-width: 4;
+      filter: blur(2.5px);
+    }
+
+    .edge-count {
+      font-family: "Geist Mono", monospace;
+      font-size: 10px;
+      fill: var(--muted);
+      pointer-events: none;
+      letter-spacing: 0.06em;
+      paint-order: stroke; stroke: var(--ink); stroke-width: 3;
     }
     g.dim .edge { opacity: 0.1; }
     g.dim .node-bg-ring, g.dim .node-circle { opacity: 0.25; }
@@ -1062,13 +1077,17 @@
 
     const POLL_MS = 3000;
     const NEW_FRESHNESS_SEC = 90;
+    // Цвета статусов рёбер. Приглушены сознательно — на табло важна иерархия,
+    // а не яркость. Активность (последняя минута) подсвечивается отдельно.
     const STATUS_COLORS = {
-      open:    "#e0a83c",
-      replied: "#6a8aa8",
-      agreed:  "#8aa05a",
-      done:    "#8aa05a",
-      rejected:"#a52a2a",
+      open:    "#d49a3a",   // ожидаем ответ — тёплый янтарь
+      replied: "#7a96b3",   // ответили — спокойный сине-серый
+      agreed:  "#7a9358",   // договорились — приглушённый оливковый
+      done:    "#7a9358",
+      rejected:"#a55a4a",   // отказ — бордо
     };
+    // Свежесть (мс) — рёбра моложе этого подсвечиваются как «активные»
+    const RECENT_MS = 90 * 1000;
     const BASE_RADIUS = 50;
     const GROWTH = 34;
 
@@ -1094,14 +1113,16 @@
     svg.attr("viewBox", `0 0 ${W} ${H}`);
 
     const defs = svg.append("defs");
+    // Маленький, аккуратный наконечник, отдельно для каждого статуса.
     Object.entries(STATUS_COLORS).forEach(([status, color]) => {
       defs.append("marker")
         .attr("id", `arrow-${status}`)
-        .attr("viewBox", "0 -5 10 10")
+        .attr("viewBox", "0 -4 10 8")
         .attr("refX", 8).attr("refY", 0)
-        .attr("markerWidth", 6).attr("markerHeight", 6)
+        .attr("markerWidth", 5).attr("markerHeight", 5)
         .attr("orient", "auto")
-        .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", color);
+        .attr("markerUnits", "userSpaceOnUse")
+        .append("path").attr("d", "M0,-4L10,0L0,4").attr("fill", color);
     });
 
     const root = svg.append("g").attr("class", "root");
@@ -1166,10 +1187,16 @@
       gNode.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
       gLabel.selectAll("g.node-labels").attr("transform", d => `translate(${d.x},${d.y})`);
       gEdge.selectAll("path.edge").attr("d", edgePath);
+      gEdge.selectAll("path.edge-glow").attr("d", edgePath);
       gPulse.selectAll("circle.node-pulse").attr("cx", d => d.x).attr("cy", d => d.y);
       gFlow.selectAll("text.edge-count")
         .attr("x", d => (d.source.x + d.target.x)/2)
         .attr("y", d => (d.source.y + d.target.y)/2);
+    }
+
+    function isFreshEdge(d) {
+      if (!d.lastTs) return false;
+      return (Date.now() - d.lastTs * 1000) < RECENT_MS;
     }
 
     function edgePath(d) {
@@ -1178,7 +1205,7 @@
       const dx = tx - sx, dy = ty - sy;
       const len = Math.sqrt(dx*dx + dy*dy) || 1;
       const nx = -dy/len, ny = dx/len;
-      const offset = (d.curve || 0) * 38;
+      const offset = (d.curve || 0) * 56;
       const cx = (sx+tx)/2 + nx*offset;
       const cy = (sy+ty)/2 + ny*offset;
       const r1 = (d.source.r || BASE_RADIUS) + 4;
@@ -1243,7 +1270,11 @@
         newEdgeKeys.add(key);
         const prev = linkMap.get(key);
         const reverseHere = reverseExists.has(key);
-        const curve = reverseHere ? (e.source < e.target ? 1 : -1) : 0;
+        // Если есть обратное ребро — кривим в одну и ту же сторону С ТОЧКИ ЗРЕНИЯ
+        // нормали. Из-за переворота направления при обратном ребре, нормаль
+        // тоже инвертируется → реальные кривые ложатся на разные стороны и
+        // не сливаются в одну жирную «двухголовую» дугу.
+        const curve = reverseHere ? 1 : 0;
         const status = dominantStatus(e.byStatus);
         const sn = nodeMap.get(e.source);
         const tn = nodeMap.get(e.target);
@@ -1268,17 +1299,27 @@
       const nodesArr = Array.from(nodeMap.values());
       const linksArr = Array.from(linkMap.values());
 
+      // Glow-подложка: мягкое свечение под активным ребром, чтобы было видно
+      // на проекторе, но не перебивало остальной граф.
+      const glowSel = gEdge.selectAll("path.edge-glow").data(linksArr, d => d.edgeKey);
+      glowSel.exit().remove();
+      const glowEnter = glowSel.enter().append("path").attr("class","edge-glow");
+      glowSel.merge(glowEnter)
+        .attr("stroke", d => STATUS_COLORS[d.status] || "#666")
+        .style("opacity", d => isFreshEdge(d) ? 1 : 0);
+
       const edgeSel = gEdge.selectAll("path.edge").data(linksArr, d => d.edgeKey);
       edgeSel.exit().remove();
       const edgeEnter = edgeSel.enter().append("path").attr("class","edge")
-        .attr("stroke-opacity", 0.7)
         .on("click", (ev, d) => { ev.stopPropagation(); openEdge(d.edgeKey); })
         .on("mouseover", (ev, d) => {
           const lastBody = (d.messages[0] && d.messages[0].body) || "(нет последнего сообщения)";
           const fromT = blocksMeta[d.source.id].title, toT = blocksMeta[d.target.id].title;
+          const statusRu = ({open:"ожидает ответа",replied:"ответили",agreed:"договорились",
+                             done:"договорились",rejected:"отказ"})[d.status] || d.status;
           showTip(`<h4>${fromT} → ${toT}</h4>
             <div class="body">${escapeHTML(lastBody.slice(0,180))}${lastBody.length>180?'…':''}</div>
-            <div class="meta">${d.count} сообщ. · статус ${d.status} · ${fmtAgo(d.lastTs)}</div>
+            <div class="meta">${d.count} сообщ. · ${statusRu} · ${fmtAgo(d.lastTs)}</div>
             <div class="hint">Клик — весь тред.</div>`,
             ev.offsetX, ev.offsetY);
         })
@@ -1288,8 +1329,15 @@
         .attr("data-source", d => d.source.id)
         .attr("data-target", d => d.target.id)
         .attr("stroke", d => STATUS_COLORS[d.status] || "#666")
-        .attr("stroke-width", d => 1.6 + Math.min(7, Math.log2(d.count + 1) * 2.2))
-        .attr("marker-end", d => `url(#arrow-${d.status})`);
+        // Тоньше: 1..2.5 px max. Толщина — слабая функция от количества
+        // сообщений (log), не доминирует.
+        .attr("stroke-width", d => 1.0 + Math.min(1.5, Math.log2(d.count + 1) * 0.5))
+        .attr("marker-end", d => `url(#arrow-${d.status})`)
+        .attr("class", d => {
+          const fresh = isFreshEdge(d);
+          const waiting = d.status === "open" && fresh;
+          return ["edge", fresh ? "recent" : "idle", waiting ? "waiting" : ""].join(" ").trim();
+        });
 
       const cntSel = gFlow.selectAll("text.edge-count").data(linksArr.filter(l => l.count >= 2),
         d => d.edgeKey);
