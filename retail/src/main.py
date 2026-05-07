@@ -1,23 +1,8 @@
-"""
-Блок: Розница
-Owner: Иван Курочкин
-
-Стартовая точка для воркшопа правления (rev. 2026-05-06).
-На дне старта здесь:
- - база из 500 синтетических клиентов и 5000 транзакций (загружается из seed),
- - простой UI мобильного банка с вкладкой «Переводы»,
- - публичные ручки для соседних блоков.
+"""Блок: Розница. Owner: Иван Курочкин.
 
 Persistence:
- - Если задан env DATABASE_URL — все mutations (переводы, кредитные
-   заявки) пишутся в Postgres, переживают перезапуски контейнера.
-   Seed заливается в БД при первом старте, дальше БД источник правды.
- - Если DATABASE_URL не задан — fallback на in-memory; seed читается
-   из cases/_seed/*.jsonl при каждом старте.
-
-Что блок будет делать дальше (выдача кредитов, инвест-кабинет премиум,
-лидогенерация и т.п.) — решает Иван вместе со своим AI-помощником
-по ходу воркшопа.
+ - Если задан env DATABASE_URL — mutations пишутся в Postgres.
+ - Иначе — in-memory fallback с загрузкой seed из cases/_seed/*.jsonl.
 """
 # redeploy-trigger: 2026-05-07T08:43:17Z
 
@@ -278,11 +263,6 @@ async def get_transactions(
 
 @app.post("/api/transfer")
 async def api_transfer(payload: dict) -> dict:
-    """Перевод денег между клиентами банка (или на внешний счёт).
-
-    Через БД — атомарно, переживает перезапуски. В fallback'е (in-memory)
-    также работает, но изменения теряются при деплое.
-    """
     from_id = payload.get("from_client_id")
     to_query = (payload.get("to") or "").strip()
     amount = int(payload.get("amount_rub") or 0)
@@ -356,11 +336,6 @@ async def api_transfer(payload: dict) -> dict:
 
 @app.post("/api/credit-apply")
 async def credit_apply(payload: dict) -> JSONResponse:
-    """Заглушка для case_01.
-
-    Кладёт заявку в БД (или in-memory) и возвращает 501 — полноценный
-    pipeline (Risk + CIB + LLM) — задача воркшопа.
-    """
     cid = payload.get("client_id")
     pool = _pool()
     if pool is not None:
@@ -377,7 +352,6 @@ async def credit_apply(payload: dict) -> JSONResponse:
             status_code=501,
             content={
                 "detail": "кредитный pipeline ещё не построен",
-                "hint": "задача кейса case_01_credit — поднять полноценную проверку",
                 "received_total": total,
                 "application": record,
             },
@@ -394,7 +368,6 @@ async def credit_apply(payload: dict) -> JSONResponse:
     })
     return JSONResponse(status_code=501, content={
         "detail": "кредитный pipeline ещё не построен",
-        "hint": "задача кейса case_01_credit",
         "received_total": len(_credit_applications),
     })
 
