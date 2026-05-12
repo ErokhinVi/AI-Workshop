@@ -12,9 +12,9 @@
 * text=auto eol=lf
 
 # Файлы, которые ДОЛЖНЫ оставаться CRLF (запускаются только на Windows).
-*.cmd        text eol=crlf
-*.bat        text eol=crlf
-*.ps1        text eol=crlf
+*.cmd        binary
+*.bat        binary
+*.ps1        binary
 *.psm1       text eol=crlf
 
 # Явные binary-метки — git их не трогает.
