@@ -24,7 +24,7 @@ if errorlevel 1 (
 set "TMPPS=%TEMP%\raif-workshop-setup-%RANDOM%%RANDOM%.ps1"
 echo Extracting PowerShell payload to "%TMPPS%"...
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=[IO.File]::ReadAllText('%~f0',[Text.UTF8Encoding]::new($false)); $m=[char]35+'__PS'+'_BEGIN__'; $i=$src.LastIndexOf($m); if($i -lt 0){ Write-Host 'marker not found'; exit 2 }; [IO.File]::WriteAllText('%TMPPS%', $src.Substring($i+$m.Length), [Text.UTF8Encoding]::new($false))"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=[IO.File]::ReadAllText('%~f0',[Text.UTF8Encoding]::new($false)); $m=[char]35+'__PS'+'_BEGIN__'; $i=$src.LastIndexOf($m); if($i -lt 0){ Write-Host 'marker not found'; exit 2 }; [IO.File]::WriteAllText('%TMPPS%', $src.Substring($i+$m.Length), [Text.UTF8Encoding]::new($true))"
 
 if errorlevel 1 (
   echo.
@@ -217,7 +217,17 @@ Ok ("Подпись для коммитов: " + $cfg.Name + ' <' + $cfg.Email +
 Say 'Стучусь к GitHub этим ключом'
 $env:GIT_SSH_COMMAND = "ssh -o IdentitiesOnly=yes -o IdentityFile=`"$SshKeyPath`" -o StrictHostKeyChecking=accept-new"
 
-$sshOut = & ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -o IdentityFile="$SshKeyPath" git@github.com 2>&1
+# ssh -T пишет полезную диагностику ("Permanently added github.com to known_hosts")
+# в stderr. С $ErrorActionPreference='Stop' и 2>&1 PowerShell 5.1 это
+# интерпретирует как terminating NativeCommandError. Изолируем вызов.
+$sshOut = $null
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+  $sshOut = & ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -o IdentityFile="$SshKeyPath" git@github.com 2>&1
+} finally {
+  $ErrorActionPreference = $prevEAP
+}
 $sshText = ($sshOut | Out-String)
 if ($sshText -match 'successfully authenticated') {
   Ok 'GitHub нас узнал'
