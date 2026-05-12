@@ -70,7 +70,25 @@ python3 tools/cowork-onboard.py
 WORKSHOP_BLOCK=ceo
 WORKSHOP_PARTICIPANT=sergey-monin
 WORKSHOP_GIT_NAME=Sergey Monin
+GIT_SHIM=/tmp/bin/git
 ```
+
+**ВАЖНО: дальше все git-команды гоняй через шим.** Скрипт поднимает Linux-side git-dir в `/tmp/raif-git` (ext4, unlink работает всегда) и кладёт шим `/tmp/bin/git`, который автоматически подставляет `--git-dir=/tmp/raif-git --work-tree=<windows-mount>`. Это убирает залипания `.git/*.lock` на virtiofs-mount-е (Defender/индексатор/OneDrive держат файлы — Linux unlink не проходит, git ломается).
+
+Любую команду `git ...` в `mcp__workspace__bash` вызывай одним из двух способов:
+
+```bash
+# вариант А — абсолютный путь к шиму
+/tmp/bin/git pull --rebase --autostash
+/tmp/bin/git push origin main
+
+# вариант Б — поднять шим в PATH
+export PATH=/tmp/bin:$PATH
+git pull --rebase --autostash
+git push origin main
+```
+
+Никогда не вызывай `git` без шима — это `/usr/bin/git`, который пойдёт в Windows-mount-овский `.git` и может зависнуть на лок-файлах, которые ты не сможешь снести из sandbox-а.
 
 **Если скрипт вернул код 0 и ты увидел `WORKSHOP_BLOCK=<блок>`** — пропусти шаги 2–3 ниже (приветствие и вопрос «как тебя зовут»). Ты уже знаешь, кто перед тобой и какой у него блок. Дальше переходи сразу к Шагу 4 (защита папок) с известным блоком, и в Шаге 7 поздоровайся по имени из info-файла.
 
