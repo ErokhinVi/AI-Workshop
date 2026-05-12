@@ -90,9 +90,138 @@ function Lock-FileToCurrentUser($path) {
   & icacls $path /remove "NT AUTHORITY\Authenticated Users" 2>&1 | Out-Null
 }
 
+function Test-PathInsideSync($p) {
+  # true если путь оказался внутри облачной синхронизации.
+  # OneDrive/iCloud/Dropbox/Google Drive держат файлы открытыми и ломают
+  # virtiofs-mount у Claude в Cowork (sandbox не может unlink .git/*.lock).
+  $candidates = @()
+  foreach ($n in @('OneDrive','OneDriveCommercial','OneDriveConsumer')) {
+    $v = [Environment]::GetEnvironmentVariable($n)
+    if ($v) { $candidates += $v }
+  }
+  $home = $env:USERPROFILE
+  foreach ($d in @('OneDrive','OneDrive - Raiffeisenbank','iCloudDrive','Dropbox','Google Drive','GoogleDrive','Yandex.Disk','Яндекс.Диск')) {
+    $candidates += (Join-Path $home $d)
+  }
+  $pAbs = [IO.Path]::GetFullPath($p).TrimEnd('\').ToLowerInvariant()
+  foreach ($c in $candidates) {
+    if (-not $c) { continue }
+    $cAbs = [IO.Path]::GetFullPath($c).TrimEnd('\').ToLowerInvariant()
+    if ($pAbs -eq $cAbs -or $pAbs.StartsWith($cAbs + '\')) { return $true }
+  }
+  return $false
+}
+
+function Remove-StaleGitLocks($repoDir) {
+  # Сносим всё, что осталось от прерванных git-операций. Запускаем ИЗ Windows,
+  # поэтому unlink проходит даже на тех файлах, которые залипают для sandbox.
+  $gitDir = Join-Path $repoDir '.git'
+  if (-not (Test-Path $gitDir)) { return }
+  $locks = @(
+    'HEAD.lock','index.lock','packed-refs.lock','config.lock','REBASE_HEAD.lock',
+    'MERGE_HEAD.lock','FETCH_HEAD.lock','ORIG_HEAD.lock','objects\maintenance.lock',
+    'shallow.lock','gc.pid.lock'
+  )
+  foreach ($l in $locks) {
+    $f = Join-Path $gitDir $l
+    if (Test-Path $f) {
+      try { Remove-Item -LiteralPath $f -Force -ErrorAction Stop; Ok ("Снёс стейл-лок: " + $l) }
+      catch { Warn ("Не смог снести " + $l + ' (' + $_.Exception.Message + ')') }
+    }
+  }
+  # locks глубже — ref-локи под refs/heads/
+  $refLocks = Get-ChildItem -LiteralPath (Join-Path $gitDir 'refs') -Filter '*.lock' -Recurse -ErrorAction SilentlyContinue
+  foreach ($f in $refLocks) {
+    try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop; Ok ("Снёс ref-лок: " + $f.Name) }
+    catch { Warn ("Не смог снести " + $f.Name) }
+  }
+}
+
+function Harden-GitConfig($repoDir) {
+  # Делаем git максимально дружелюбным к Linux-sandbox-у Claude.
+  # Все настройки ставим repo-local, чтобы не ломать другие проекты участника.
+  $kv = @{
+    'core.autocrlf'      = 'false'   # никаких CRLF-штормов на первый коммит
+    'core.eol'           = 'lf'
+    'core.fileMode'      = 'false'   # 0755 vs 0644 между Win и Linux не считаем
+    'core.fsmonitor'     = 'false'   # fsmonitor-daemon держит handle на .git
+    'core.untrackedCache'= 'false'
+    'core.longPaths'     = 'true'
+    'gc.auto'            = '0'       # никаких неожиданных gc посреди работы
+    'maintenance.auto'   = 'false'
+    'feature.manyFiles'  = 'false'
+    'pull.rebase'        = 'true'    # default-ный pull = rebase, как в правилах
+    'push.autoSetupRemote' = 'true'
+  }
+  foreach ($k in $kv.Keys) {
+    & git -C $repoDir config $k $kv[$k] | Out-Null
+  }
+  # Отрегистрировать git maintenance scheduler для этого репо
+  & git -C $repoDir maintenance unregister 2>$null | Out-Null
+  Ok 'git config: autocrlf=false, eol=lf, fsmonitor=off, gc.auto=0, maintenance off'
+}
+
+function Add-DefenderExclusion($path) {
+  # Defender жрёт .git/objects при каждом git-write — это вторая частая причина
+  # залипания .lock. Если PowerShell запущен не под админом, Add-MpPreference
+  # упадёт — пробуем тихо, на провал не ругаемся.
+  try {
+    Add-MpPreference -ExclusionPath $path -ErrorAction Stop
+    Ok ("Defender больше не сканирует " + $path)
+  } catch {
+    Warn 'Не смог добавить Defender-исключение (нет админ-прав). Если git в sandbox начнёт залипать — запусти cmd "От имени администратора" и проведи setup ещё раз.'
+  }
+}
+
+function Install-UnstickShortcut($repoDir) {
+  # Кладём на рабочий стол shortcut на tools/unstick-locks.cmd —
+  # участник сможет двойным кликом починить себя, если что-то залипнет.
+  $unstickCmd = Join-Path $repoDir 'tools\unstick-locks.cmd'
+  if (-not (Test-Path $unstickCmd)) { Warn 'tools/unstick-locks.cmd отсутствует — shortcut не делаю'; return }
+  $desktop = [Environment]::GetFolderPath('Desktop')
+  $linkPath = Join-Path $desktop 'Раиф-Воркшоп — починить git.lnk'
+  try {
+    $sh = New-Object -ComObject WScript.Shell
+    $sc = $sh.CreateShortcut($linkPath)
+    $sc.TargetPath = $unstickCmd
+    $sc.WorkingDirectory = $repoDir
+    $sc.IconLocation = 'shell32.dll,238'   # «инструменты»
+    $sc.Description = 'Сносит .git/*.lock — если Claude говорит «не могу сохранить»'
+    $sc.Save()
+    Ok ("Shortcut на аварийку: " + $linkPath)
+  } catch {
+    Warn 'Не смог создать ярлык аварийки на рабочем столе — не критично.'
+  }
+}
+
 # ── 0. sanity ────────────────────────────────────────────────────────────────
 Require-Command git 'Установи Git for Windows: https://git-scm.com/download/win'
 Require-Command ssh 'OpenSSH Client отсутствует. Settings → Apps → Optional Features → Add → OpenSSH Client.'
+
+# Проверяем, что папка проекта НЕ в облачной синхронизации.
+# OneDrive/iCloud/Dropbox/Yandex.Disk держат файлы открытыми и virtiofs-mount
+# Claude в Cowork не сможет удалять .git/*.lock. Это первая причина, по которой
+# участник может застрять и не суметь сохранить работу.
+if (Test-PathInsideSync $RepoDir) {
+  Write-Host ''
+  Write-Host '✗ Папка для воркшопа оказалась внутри облачной синхронизации:' -ForegroundColor Red
+  Write-Host ("   " + $RepoDir) -ForegroundColor Red
+  Write-Host ''
+  Write-Host 'OneDrive/iCloud/Dropbox держат файлы открытыми и Claude в Cowork mode'
+  Write-Host 'не сможет нормально работать с git внутри этой папки.'
+  Write-Host ''
+  Write-Host 'Что сделать:' -ForegroundColor Yellow
+  Write-Host '  1. Закрой это окно.'
+  Write-Host '  2. В переменных окружения смени USERPROFILE на не-OneDrive путь,'
+  Write-Host '     ИЛИ сделай сейчас разово:'
+  Write-Host ''
+  Write-Host ('     set "USERPROFILE=C:\Users\' + $env:USERNAME + '"') -ForegroundColor Cyan
+  Write-Host '     raif-workshop-setup.cmd'
+  Write-Host ''
+  Write-Host '  Если в C:\Users\<ты> тоже OneDrive (корпоративная политика) —'
+  Write-Host '  позови ведущего: подберём папку вручную (например C:\raif-workshop).'
+  Die 'Прерываюсь, чтобы не превратить воркшоп в боль.'
+}
 
 # ── 1. меню выбора участника (WinForms) ──────────────────────────────────────
 Add-Type -AssemblyName System.Windows.Forms
@@ -165,132 +294,4 @@ $Members = @{
   7 = @{ Name='Vitaly Erokhin';     Email='vitaly@raif-workshop.local';  Block='host';    Participant='vitaly-erokhin'     }
 }
 $cfg = $Members[$WhoNum]
-if (-not $cfg) { Die 'Не удалось определить участника.' }
-
-# ── 3. SSH key (embedded, base64 — чтобы не палиться перед secret-scanner-ом) ─
-Say 'Кладу рабочий ключ воркшопа'
-if (-not (Test-Path $SshDir)) { New-Item -ItemType Directory -Path $SshDir | Out-Null }
-
-$PrivateKeyB64 = 'LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaV1EKeU5UVXhPUUFBQUNDYTluUFJ4TkJMYUhYTWFKU3didXdlelRjb1FLTS90NStHMGRvR09kQzJHQUFBQUtBNzZsam5PK3BZCjV3QUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQ2E5blBSeE5CTGFIWE1hSlN3YnV3ZXpUY29RS00vdDUrRzBkb0dPZEMyR0EKQUFBRUNLMFJqU0IvbEhjWmdwejZPcldUSVZ1SVNDc2xoTFAzeWhFeUN1UWRLWS81cjJjOUhFMEV0b2RjeG9sTEJ1N0I3TgpOeWhBb3orM240YlIyZ1k1MExZWUFBQUFHMk5zWVhWa1pTMWpiM2R2Y21zdGNtRnBaaTEzYjNKcmMyaHZjQUVDCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo='
-$PrivateKey = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PrivateKeyB64))
-
-# OpenSSH ждёт LF-окончания строк, без BOM
-$keyText = ($PrivateKey -replace "`r`n", "`n")
-if (-not $keyText.EndsWith("`n")) { $keyText = $keyText + "`n" }
-Write-FileNoBom -path $SshKeyPath -text $keyText
-Lock-FileToCurrentUser -path $SshKeyPath
-Ok ("Ключ на месте: " + $SshKeyPath)
-
-# ── 4. SSH config ────────────────────────────────────────────────────────────
-Say 'Настраиваю ssh так, чтобы GitHub использовал этот ключ'
-if (-not (Test-Path $SshConfig)) {
-  Write-FileNoBom -path $SshConfig -text ''
-}
-
-$configText = Get-Content -LiteralPath $SshConfig -Raw -ErrorAction SilentlyContinue
-if ($null -eq $configText) { $configText = '' }
-
-if ($configText -match [Regex]::Escape($SshConfigMarker)) {
-  Ok ("Запись для GitHub уже есть в " + $SshConfig)
-} else {
-  $block = @"
-
-$SshConfigMarker
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile $SshKeyPath
-  IdentitiesOnly yes
-"@
-  # Append без BOM, с LF
-  $newText = ($configText -replace "`r`n", "`n").TrimEnd("`n") + "`n" + ($block -replace "`r`n","`n") + "`n"
-  Write-FileNoBom -path $SshConfig -text $newText
-  Ok ("Дописал " + $SshConfig)
-}
-
-# ── 5. git identity ──────────────────────────────────────────────────────────
-& git config --global user.name  $cfg.Name  | Out-Null
-& git config --global user.email $cfg.Email | Out-Null
-Ok ("Подпись для коммитов: " + $cfg.Name + ' <' + $cfg.Email + '>')
-
-# ── 6. verify GitHub auth ────────────────────────────────────────────────────
-Say 'Стучусь к GitHub этим ключом'
-$env:GIT_SSH_COMMAND = "ssh -o IdentitiesOnly=yes -o IdentityFile=`"$SshKeyPath`" -o StrictHostKeyChecking=accept-new"
-
-# ssh -T пишет полезную диагностику ("Permanently added github.com to known_hosts")
-# в stderr. С $ErrorActionPreference='Stop' и 2>&1 PowerShell 5.1 это
-# интерпретирует как terminating NativeCommandError. Изолируем вызов.
-$sshOut = $null
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-try {
-  $sshOut = & ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -o IdentityFile="$SshKeyPath" git@github.com 2>&1
-} finally {
-  $ErrorActionPreference = $prevEAP
-}
-$sshText = ($sshOut | Out-String)
-if ($sshText -match 'successfully authenticated') {
-  Ok 'GitHub нас узнал'
-} else {
-  Write-Host $sshText
-  Die 'GitHub не принял ключ. Покажи ведущему вывод выше.'
-}
-
-# ── 7. clone or update ───────────────────────────────────────────────────────
-if (Test-Path (Join-Path $RepoDir '.git')) {
-  Say ("Папка " + $RepoDir + " уже существует — подтягиваю свежие изменения")
-  & git -C $RepoDir remote set-url origin $RepoUrl       | Out-Null
-  & git -C $RepoDir fetch origin --prune                 | Out-Null
-  & git -C $RepoDir checkout main 2>$null                | Out-Null
-  & git -C $RepoDir reset --hard origin/main             | Out-Null
-  Ok 'Подтянул и выровнял main'
-} else {
-  Say ("Клонирую проект в " + $RepoDir)
-  & git clone $RepoUrl $RepoDir
-  if ($LASTEXITCODE -ne 0) { Die 'git clone упал. Сообщи ведущему.' }
-  Ok 'Клонировано'
-}
-
-# ── 8. inject key + info в .git/ для Claude в Cowork ─────────────────────────
-Say 'Готовлю sandbox-onboarding для Claude (.git/raif-workshop-*)'
-$gitDir = Join-Path $RepoDir '.git'
-$keyInGit  = Join-Path $gitDir 'raif-workshop-key'
-$infoInGit = Join-Path $gitDir 'raif-workshop-info'
-
-# .git/ git'ом не отслеживается, поэтому ключ тут никогда не попадёт в коммит.
-Copy-Item -LiteralPath $SshKeyPath -Destination $keyInGit -Force
-Lock-FileToCurrentUser -path $keyInGit
-Ok ("Ключ для sandbox: " + $keyInGit)
-
-$infoText = @"
-# raif-workshop-2026 — мета-инфо участника для Claude в Cowork.
-# Этот файл читает tools/cowork-onboard.py при первом запуске Claude.
-WORKSHOP_PARTICIPANT=$($cfg.Participant)
-WORKSHOP_BLOCK=$($cfg.Block)
-WORKSHOP_GIT_NAME=$($cfg.Name)
-WORKSHOP_GIT_EMAIL=$($cfg.Email)
-"@
-$infoText = ($infoText -replace "`r`n","`n") + "`n"
-Write-FileNoBom -path $infoInGit -text $infoText
-Ok ("Info-файл: " + $infoInGit)
-
-# ── 9. done ──────────────────────────────────────────────────────────────────
-Write-Host ''
-Write-Host '=========================================================='
-Write-Host ' Всё готово. Твой ноутбук настроен на воркшоп.'
-Write-Host ''
-Write-Host ("   Папка проекта:    " + $RepoDir)
-Write-Host ("   Подпись коммитов: " + $cfg.Name + ' <' + $cfg.Email + '>')
-Write-Host ("   Блок:             " + $cfg.Block)
-Write-Host ''
-Write-Host ' Дальше:'
-Write-Host ("   1. Открой Claude в Cowork mode.")
-Write-Host ("   2. Подключи папку " + $RepoDir + " как working folder.")
-Write-Host ('   3. Напиши Claude любое первое сообщение — он сам')
-Write-Host ('      подцепит ключ и узнает, кто ты, по info-файлу.')
-Write-Host ''
-Write-Host ' (Стартовый flow с командой "claude" в терминале тоже работает —'
-Write-Host '  если предпочитаешь его, открой папку в терминале и скажи "claude".)'
-Write-Host '=========================================================='
-Write-Host ''
-exit 0
+if (-not $cfg) { 
