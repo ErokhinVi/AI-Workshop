@@ -193,6 +193,22 @@ def setup_linux_gitdir() -> None:
     ok(f"Linux-side git-dir: {LINUX_GIT_DIR} ({sum(1 for _ in LINUX_GIT_DIR.rglob('*'))} файлов)")
     ok(f"git-шим: {SHIM_PATH}  (PATH=/tmp/bin:$PATH чтобы перехватить, либо вызывай напрямую)")
 
+    # Синхронизируемся с origin/main: Windows-mount .git мог отстать (там
+    # стейл-HEAD после прошлой неудачной операции). Origin — единый источник
+    # правды для всех блоков, оттуда и берём актуальное состояние.
+    fetch = subprocess.run(
+        [str(SHIM_PATH), "fetch", "origin", "main"],
+        check=False, capture_output=True, text=True, timeout=30,
+    )
+    if fetch.returncode == 0:
+        subprocess.run(
+            [str(SHIM_PATH), "update-ref", "refs/heads/main", "origin/main"],
+            check=False, capture_output=True,
+        )
+        ok("Linux-side git-dir синхронизирован с origin/main")
+    else:
+        warn(f"Не смог fetch origin: {fetch.stderr.strip()[:200]}")
+
 
 def harden_git_config() -> None:
     """Repo-local hardening — дублирует Windows-side bootstrap на всякий случай."""
@@ -257,28 +273,4 @@ def main() -> int:
         warn("info-файла нет — Claude должен будет спросить имя")
 
     step("Прописываю git identity")
-    setup_git_identity(info)
-
-    step("Поднимаю Linux-side git-dir + шим (защита от virtiofs lock-болезни)")
-    setup_linux_gitdir()
-
-    step("Закрепляю repo-local git config")
-    harden_git_config()
-
-    step("Best-effort: чищу залипшие локи на Windows-mount")
-    cleanup_stale_locks_on_mount()
-
-    step("Стучусь к GitHub")
-    test_github()
-
-    print("\n=== READY ===")
-    print(f"WORKSHOP_BLOCK={info.get('WORKSHOP_BLOCK', '')}")
-    print(f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '')}")
-    print(f"WORKSHOP_GIT_NAME={info.get('WORKSHOP_GIT_NAME', '')}")
-    print(f"GIT_SHIM={SHIM_PATH}")
-    print("GIT_USAGE=PATH=/tmp/bin:$PATH перед git-командой, или вызывай /tmp/bin/git напрямую.")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    setup_git_ident
