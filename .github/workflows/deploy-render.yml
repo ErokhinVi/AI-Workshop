@@ -1,33 +1,8 @@
 name: Deploy services via Render Deploy Hooks
 
-# Зачем эта штука:
-#  Встроенный Render auto-deploy у нас не догоняет push-ы (webhook между
-#  GitHub и Render почему-то теряется). Это запасной канал — Render
-#  даёт каждому сервису личный URL-хук, который при POST триггерит
-#  пересборку. Мы дёргаем только тот хук, чья папка реально менялась.
-#
-# Что нужно один раз настроить:
-#  В Render UI у каждого из 6 сервисов:
-#    Settings → Build & Deploy → Deploy Hook → копируем URL.
-#  В GitHub репо → Settings → Secrets and variables → Actions:
-#    New repository secret. Имена строго такие:
-#      RENDER_HOOK_CEO
-#      RENDER_HOOK_CIB
-#      RENDER_HOOK_RETAIL
-#      RENDER_HOOK_IT
-#      RENDER_HOOK_FINANCE
-#      RENDER_HOOK_RISK
-#
-# Что фильтрует push:
-#  - изменения в <блок>/         → деплой только этого блока
-#  - изменения в contracts/      → деплой всех блоков (общая зона)
-#  - изменения в render.yaml     → деплой всех (на случай env-изменений)
-#  - всё остальное (dashboard/, cases/, INBOX/, .github/) — не деплоит,
-#    т.к. на сервисы не влияет; cases/_seed/jsonl грузится через
-#    отдельный POST /_seed/load из cases/_seed/load_into_blocks.py.
-#
-# Можно вручную запустить через Actions → "Deploy services via Render
-# Deploy Hooks" → Run workflow → выбрать какие сервисы (или 'all').
+# Дёргаем Deploy Hook только того сервиса, чья папка реально менялась.
+# Секреты в GitHub → Settings → Secrets and variables → Actions:
+#   RENDER_HOOK_TEAM_A, RENDER_HOOK_TEAM_B, RENDER_HOOK_SIMULATOR
 
 on:
   push:
@@ -35,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Какие сервисы передеплоить (comma-separated или 'all')"
+        description: "Что передеплоить (team_a,team_b,simulator или 'all')"
         required: false
         default: "all"
 
@@ -50,18 +25,14 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      ceo:     ${{ steps.detect.outputs.ceo }}
-      cib:     ${{ steps.detect.outputs.cib }}
-      retail:  ${{ steps.detect.outputs.retail }}
-      it:      ${{ steps.detect.outputs.it }}
-      finance: ${{ steps.detect.outputs.finance }}
-      risk:    ${{ steps.detect.outputs.risk }}
+      team_a:    ${{ steps.detect.outputs.team_a }}
+      team_b:    ${{ steps.detect.outputs.team_b }}
+      simulator: ${{ steps.detect.outputs.simulator }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-
-      - name: Detect changed blocks
+      - name: Detect changed services
         id: detect
         env:
           MANUAL_SERVICES: ${{ inputs.services }}
@@ -69,98 +40,57 @@ jobs:
           AFTER:  ${{ github.sha }}
         run: |
           set -e
-          BLOCKS="ceo cib retail it finance risk"
-
-          # workflow_dispatch — деплоим то что попросили
+          SERVICES="team_a team_b simulator"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             REQ="${MANUAL_SERVICES:-all}"
-            for B in $BLOCKS; do
-              if [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$B,"; then
-                echo "$B=true"  >> "$GITHUB_OUTPUT"
-                echo "  $B → MANUAL"
+            for S in $SERVICES; do
+              if [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$S,"; then
+                echo "$S=true"  >> "$GITHUB_OUTPUT"
               else
-                echo "$B=false" >> "$GITHUB_OUTPUT"
+                echo "$S=false" >> "$GITHUB_OUTPUT"
               fi
             done
             exit 0
           fi
-
-          # push — diff между прошлой и текущей версией
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # первый push в ветку — нет parent, считаем «всё изменилось»
             CHANGED=$(git ls-files)
           else
             CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" || true)
           fi
-
-          echo "===== changed files ====="
-          echo "$CHANGED" | sed 's/^/  /' | head -80
-          echo "========================="
-
-          # contracts/ или render.yaml меняют всё — деплой всех 6
-          if echo "$CHANGED" | grep -qE "^(contracts/|render\.yaml$)"; then
-            for B in $BLOCKS; do
-              echo "$B=true" >> "$GITHUB_OUTPUT"
-              echo "  $B → triggered (contracts/render.yaml changed)"
-            done
+          echo "===== changed ====="; echo "$CHANGED" | head -60; echo "==================="
+          # render.yaml меняет всё; seed/ — оба банка
+          if echo "$CHANGED" | grep -qE "^render\.yaml$"; then
+            for S in $SERVICES; do echo "$S=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
-
-          # иначе — индивидуально по папкам
-          for B in $BLOCKS; do
-            if echo "$CHANGED" | grep -qE "^${B}/"; then
-              echo "$B=true"  >> "$GITHUB_OUTPUT"
-              echo "  $B → triggered"
-            else
-              echo "$B=false" >> "$GITHUB_OUTPUT"
-              echo "  $B → skip"
-            fi
+          SEED=$(echo "$CHANGED" | grep -qE "^seed/" && echo yes || echo no)
+          for S in $SERVICES; do
+            HIT=false
+            echo "$CHANGED" | grep -qE "^${S}/" && HIT=true
+            if [ "$S" != "simulator" ] && [ "$SEED" = "yes" ]; then HIT=true; fi
+            echo "$S=$HIT" >> "$GITHUB_OUTPUT"
+            echo "  $S → $HIT"
           done
 
   deploy:
     runs-on: ubuntu-latest
     needs: detect
     steps:
-      - name: Deploy raif-ceo
-        if: needs.detect.outputs.ceo == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_CEO }}" }
+      - name: Deploy raif-team-a
+        if: needs.detect.outputs.team_a == 'true'
+        env: { HOOK: "${{ secrets.RENDER_HOOK_TEAM_A }}" }
         run: |
-          if [ -z "$HOOK" ]; then
-            echo "::warning::RENDER_HOOK_CEO secret not set — skip"; exit 0
-          fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-ceo"
-
-      - name: Deploy raif-cib
-        if: needs.detect.outputs.cib == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_CIB }}" }
+          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_TEAM_A not set"; exit 0; fi
+          curl -fsS -X POST "$HOOK" && echo " → triggered raif-team-a"
+      - name: Deploy raif-team-b
+        if: needs.detect.outputs.team_b == 'true'
+        env: { HOOK: "${{ secrets.RENDER_HOOK_TEAM_B }}" }
         run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_CIB not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-cib"
-
-      - name: Deploy raif-retail
-        if: needs.detect.outputs.retail == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_RETAIL }}" }
+          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_TEAM_B not set"; exit 0; fi
+          curl -fsS -X POST "$HOOK" && echo " → triggered raif-team-b"
+      - name: Deploy raif-simulator
+        if: needs.detect.outputs.simulator == 'true'
+        env: { HOOK: "${{ secrets.RENDER_HOOK_SIMULATOR }}" }
         run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_RETAIL not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-retail"
-
-      - name: Deploy raif-it
-        if: needs.detect.outputs.it == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_IT }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_IT not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-it"
-
-      - name: Deploy raif-finance
-        if: needs.detect.outputs.finance == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_FINANCE }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_FINANCE not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-finance"
-
-      - name: Deploy raif-risk
-        if: needs.detect.outputs.risk == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_RISK }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_RISK not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-risk"
+          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_SIMULATOR not set"; exit 0; fi
+          curl -fsS -X POST "$HOOK" && echo " → triggered raif-simulator"
