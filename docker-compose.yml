@@ -1,76 +1,49 @@
-version: "3.9"
-
-# Райффайзен Sandbox — выездной AI-воркшоп правления, 3 мая 2026.
-# Запуск: docker-compose up
-# Проверка: python infra/test_client.py
+# AI-воркшоп — локальный запуск: docker-compose up --build
+# Банки: http://localhost:8001 (A), http://localhost:8002 (B)
+# Табло: http://localhost:8000
 
 services:
+  team_a:
+    build: { context: ., dockerfile: team_a/Dockerfile }
+    image: raif-team-a
+    container_name: raif-team-a
+    environment:
+      TEAM_NAME: team_a
+    ports: ["8001:8020"]
+    networks: [raif]
 
-  ceo:
-    build:
-      context: .
-      dockerfile: ceo/Dockerfile
-    image: raif-ceo
-    container_name: raif-ceo
-    ports:
-      - "8000:8000"
-    networks:
-      - raif
+  team_b:
+    build: { context: ., dockerfile: team_b/Dockerfile }
+    image: raif-team-b
+    container_name: raif-team-b
+    environment:
+      TEAM_NAME: team_b
+    ports: ["8002:8020"]
+    networks: [raif]
 
-  cib:
-    build:
-      context: .
-      dockerfile: cib/Dockerfile
-    image: raif-cib
-    container_name: raif-cib
-    ports:
-      - "8010:8010"
-    networks:
-      - raif
+  postgres:
+    image: postgres:16-alpine
+    container_name: raif-postgres
+    environment:
+      POSTGRES_USER: sim
+      POSTGRES_PASSWORD: sim
+      POSTGRES_DB: simulator
+    ports: ["5432:5432"]
+    networks: [raif]
 
-  retail:
-    build:
-      context: .
-      dockerfile: retail/Dockerfile
-    image: raif-retail
-    container_name: raif-retail
-    ports:
-      - "8020:8020"
-    networks:
-      - raif
-
-  it:
-    build:
-      context: .
-      dockerfile: it/Dockerfile
-    image: raif-it
-    container_name: raif-it
-    ports:
-      - "8030:8030"
-    networks:
-      - raif
-
-  finance:
-    build:
-      context: .
-      dockerfile: finance/Dockerfile
-    image: raif-finance
-    container_name: raif-finance
-    ports:
-      - "8040:8040"
-    networks:
-      - raif
-
-  risk:
-    build:
-      context: .
-      dockerfile: risk/Dockerfile
-    image: raif-risk
-    container_name: raif-risk
-    ports:
-      - "8050:8050"
-    networks:
-      - raif
+  simulator:
+    build: { context: ., dockerfile: simulator/Dockerfile }
+    image: raif-simulator
+    container_name: raif-simulator
+    environment:
+      BANK_A_URL: http://team_a:8020
+      BANK_B_URL: http://team_b:8020
+      DATABASE_URL: postgres://sim:sim@postgres:5432/simulator
+      ADMIN_TOKEN: localdev
+      POLL_INTERVAL_S: "30"
+    depends_on: [team_a, team_b, postgres]
+    ports: ["8000:8000"]
+    networks: [raif]
 
 networks:
   raif:
