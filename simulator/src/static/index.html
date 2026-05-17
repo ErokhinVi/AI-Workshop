@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"/>
+<title>Табло воркшопа · Райффайзен</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:28px;
+       background:#0c0d10;color:#e8e9ec;min-height:100vh}
+  h1{font-weight:500;font-size:22px;margin:0 0 4px}
+  .meta{font-size:12px;color:#6b6d75;margin-bottom:22px}
+  .teams{display:flex;gap:20px;flex-wrap:wrap}
+  .team{flex:1;min-width:300px;background:#13151c;border:1px solid #23262f;
+        border-radius:10px;padding:22px}
+  .team h2{margin:0 0 6px;font-size:15px;color:#8a8d96;letter-spacing:.14em;
+           text-transform:uppercase}
+  .base{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums}
+  .delta{font-size:15px;margin-top:2px}
+  .up{color:#7ee787}.down{color:#ff8c8c}.flat{color:#8a8d96}
+  h3{font-size:12px;color:#8a8d96;letter-spacing:.12em;text-transform:uppercase;
+     margin:28px 0 10px}
+  .ev{background:#13151c;border:1px solid #23262f;border-radius:8px;
+      padding:10px 14px;margin-bottom:8px;font-size:13px}
+  .ev .t{color:#FFE600;font-weight:600}
+  .ev .d{font-variant-numeric:tabular-nums;font-weight:600}
+  .ev .j{font-size:11px;color:#6b6d75}
+</style></head><body>
+<h1>Табло воркшопа — клиентская база команд</h1>
+<div class="meta">обновляется автоматически · симулятор клиентов</div>
+<div class="teams" id="teams"></div>
+<h3>Лента событий</h3>
+<div id="events"></div>
+<script>
+const fmt = n => Number(n||0).toLocaleString('ru-RU');
+const LABEL = {team_a:'Команда A', team_b:'Команда B'};
+async function tick(){
+  let d;
+  try { d = await (await fetch('/state')).json(); } catch(e){ return; }
+  const tEl = document.getElementById('teams');
+  tEl.innerHTML = Object.entries(d.teams).map(([k,v])=>{
+    const last = (d.events||[]).find(e=>e.team===k);
+    let delta = '<span class="flat">— без изменений</span>';
+    if(last){
+      if(last.delta>0) delta = `<span class="up">▲ +${fmt(last.delta)} клиентов</span>`;
+      else if(last.delta<0) delta = `<span class="down">▼ ${fmt(last.delta)} клиентов</span>`;
+    }
+    return `<div class="team"><h2>${LABEL[k]||k}</h2>
+      <div class="base">${fmt(v.client_base)}</div>
+      <div class="delta">${delta}</div></div>`;
+  }).join('');
+  const eEl = document.getElementById('events');
+  eEl.innerHTML = (d.events||[]).map(e=>{
+    const cls = e.delta>0?'up':(e.delta<0?'down':'flat');
+    const sign = e.delta>0?'+':'';
+    return `<div class="ev"><span class="t">${LABEL[e.team]||e.team}</span>
+      <span class="d ${cls}">${sign}${fmt(e.delta)}</span> — ${e.reason||''}
+      <span class="j">[${e.judge||'?'}]</span></div>`;
+  }).join('') || '<div class="ev flat">пока событий нет</div>';
+}
+tick(); setInterval(tick, 4000);
+</script>
+</body></html>
