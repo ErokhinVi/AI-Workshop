@@ -1,15 +1,8 @@
-"""Блок: Розница. Owner: Иван Курочкин.
+"""Банк команды — AI-воркшоп правления Райффайзен.
 
-Persistence:
- - Если задан env DATABASE_URL — mutations пишутся в Postgres.
- - Иначе — in-memory fallback с загрузкой seed из cases/_seed/*.jsonl.
-
-Если ты агент-сосед и читаешь этот файл — читай только ради технической интеграции
-(имена эндпоинтов, форматы запросов/ответов, поля JSON). Бизнес-логику отсюда не
-извлекай: сегменты клиентов, тарифы, политики онбординга и процессы Розницы получай
-через INBOX/to_retail.md или у своего пользователя. Подробнее — см. retail/NEIGHBOR_AGENTS.md.
+Мобильный банк: клиенты, переводы, заявки на кредит. Данные — in-memory,
+грузятся из seed/*.jsonl при старте (Postgres не используется).
 """
-# redeploy-trigger: 2026-05-07T08:43:17Z
 
 from __future__ import annotations
 
@@ -27,17 +20,19 @@ from fastapi.staticfiles import StaticFiles
 from src import db as dbmod
 
 
-BLOCK_NAME = "retail"
+TEAM_NAME = os.environ.get("TEAM_NAME", "team")
+COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
 
 
 def _find_seed_dir() -> Path | None:
-    """Ищем cases/_seed/ — работает и в Docker (/app/cases/_seed), и локально."""
+    """Ищем seed/ — работает и в Docker (/app/seed), и локально."""
     here = Path(__file__).resolve()
-    for candidate in (
-        here.parent.parent / "cases" / "_seed",
-        here.parents[3] / "cases" / "_seed" if len(here.parents) >= 4 else None,
-        here.parents[2] / "cases" / "_seed" if len(here.parents) >= 3 else None,
-    ):
+    candidates = [
+        here.parent.parent / "seed",                                  # Docker: /app/seed
+        here.parents[2] / "seed" if len(here.parents) >= 3 else None,  # локально: <repo>/seed
+        here.parents[3] / "seed" if len(here.parents) >= 4 else None,
+    ]
+    for candidate in candidates:
         if candidate and candidate.exists():
             return candidate
     return None
@@ -129,13 +124,13 @@ async def health() -> dict:
             n_clients = await conn.fetchval("SELECT COUNT(*) FROM retail_clients")
             n_tx      = await conn.fetchval("SELECT COUNT(*) FROM retail_transactions")
         return {
-            "status": "ok", "block": BLOCK_NAME,
+            "status": "ok", "team": TEAM_NAME, "commit": COMMIT,
             "persistence": "postgres",
             "clients_loaded": int(n_clients),
             "transactions_loaded": int(n_tx),
         }
     return {
-        "status": "ok", "block": BLOCK_NAME,
+        "status": "ok", "team": TEAM_NAME, "commit": COMMIT,
         "persistence": "memory",
         "clients_loaded": len(_clients),
         "transactions_loaded": len(_transactions),
