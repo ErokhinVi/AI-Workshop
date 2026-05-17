@@ -1,103 +1,91 @@
-# Деплой блоков на Render
+# Деплой на Render
 
-Этот документ нужен и людям (Виталий, Нерсес, команда поддержки), и агентам топов. Объясняет **как блок попадает в продакшен** после `git push`. Каждый агент должен это понимать чтобы не паниковать когда видит в `dashboard/events.jsonl` запись «deploy started».
+Как код попадает в продакшен после `git push`. Документ для организаторов
+и для агентов команд.
 
-## Где живёт каждый блок
+## Три сервиса
 
-| Блок | Владелец | URL Render | Папка в репо |
-|---|---|---|---|
-| CEO Office | Сергей Монин | `https://raif-ceo.onrender.com` | `/ceo/` |
-| CIB | Никита Патрахин | `https://raif-cib.onrender.com` | `/cib/` |
-| Розница | Иван Курочкин | `https://raif-retail.onrender.com` | `/retail/` |
-| IT / Платформа | Александр Ложечкин | `https://raif-it.onrender.com` | `/it/` |
-| Финансы и Опс | Герт Хебенштрайт | `https://raif-finance.onrender.com` | `/finance/` |
-| Риски | Роланд Васс | `https://raif-risk.onrender.com` | `/risk/` |
+| Сервис | Папка в репо | URL |
+|---|---|---|
+| `raif-team-a` | `team_a/` | `https://raif-team-a.onrender.com` |
+| `raif-team-b` | `team_b/` | `https://raif-team-b.onrender.com` |
+| `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` |
 
-Соседи общаются между собой через `httpx.get(NEIGHBOR_<BLOCK>/...)` — Render инжектит `NEIGHBOR_*` env-переменные в каждый блок (см. `render.yaml`).
+Плюс Postgres `raif-workshop-db` (free) — им пользуется только симулятор:
+хранит клиентскую базу команд и журнал событий.
 
 ## Как работает деплой
-
-Деплой автоматический. Никто ничего не нажимает руками.
 
 ```
 git push origin main
         ↓
-GitHub Action 'Deploy services via Render Deploy Hooks'
+GitHub Action "Deploy services via Render Deploy Hooks"
         ↓
-        смотрит git diff → определяет какие папки тронуты
+        git diff → какие папки тронуты
         ↓
-        дёргает curl POST на Render Deploy Hook каждого тронутого сервиса
+        curl POST на Render Deploy Hook тронутого сервиса
         ↓
-Render собирает Docker-образ из изменённой папки
-        ↓
-        Через 2-4 минуты сервис обновлён, /openapi.json показывает новые ручки
+Render собирает Docker-образ из изменённой папки (~2-4 минуты)
 ```
 
-### Что триггерит деплой какого блока
-
-| Изменения в | Деплоятся блоки |
+| Изменения в | Деплоится |
 |---|---|
-| `ceo/**` | только CEO |
-| `cib/**` | только CIB |
-| `retail/**` | только Retail |
-| `it/**` | только IT |
-| `finance/**` | только Finance |
-| `risk/**` | только Risk |
-| `contracts/**` | **все 6** (общая зона) |
-| `render.yaml` | **все 6** (env-переменные могли поменяться) |
-| `dashboard/`, `cases/`, `INBOX/`, `.github/` | **никто** (на сервисы не влияют) |
+| `team_a/**` | `raif-team-a` |
+| `team_b/**` | `raif-team-b` |
+| `simulator/**` | `raif-simulator` |
+| `seed/**` | оба банка |
+| `render.yaml` | все три |
+| `tasks/`, `docs/`, `.github/` | ничего |
 
-То есть когда CIB-агент пишет код — пересобирается только `raif-cib`, остальные пять продолжают работать без задержек.
+## Деплой-хуки
 
-## Action и его настройка
+Action — `.github/workflows/deploy-render.yml`. Триггеры: `push` в `main`
+и ручной `workflow_dispatch` (выбор сервисов). В GitHub нужны три секрета
+(Settings → Secrets and variables → Actions):
 
-Action лежит в `.github/workflows/deploy-render.yml`. Триггеры:
+- `RENDER_HOOK_TEAM_A`
+- `RENDER_HOOK_TEAM_B`
+- `RENDER_HOOK_SIMULATOR`
 
-- `push: branches: [main]` — основной канал.
-- `workflow_dispatch` с input `services` — ручной запуск через Actions UI: можно выбрать конкретные блоки (`cib,risk`) или `all`.
+URL хука каждого сервиса: Render → сервис → Settings → Deploy Hook.
+Если секрет не задан — Action печатает warning и пропускает сервис, не падая.
 
-В репо настроены 6 секретов с URL-ами Deploy Hook-ов, по одному на блок:
-- `RENDER_HOOK_CEO`
-- `RENDER_HOOK_CIB`
-- `RENDER_HOOK_RETAIL`
-- `RENDER_HOOK_IT`
-- `RENDER_HOOK_FINANCE`
-- `RENDER_HOOK_RISK`
+## Переменные окружения
 
-Если кто-то из секретов не задан — Action печатает warning и пропускает этот блок, но не падает целиком.
+Env-группа `ai-workshop-shared` (задаётся один раз в Render UI):
 
-## Что делает агент топа после push
+- `OPENAI_API_KEY` — ключ для LLM (банкам — объяснение отказа по кредиту,
+  симулятору — судья). `OPENAI_BASE_URL`, `OPENAI_MODEL` — со значениями
+  по умолчанию в `render.yaml`.
+- `ADMIN_TOKEN` — токен для `/admin/*` симулятора.
 
-Технически агенту не надо делать **ничего** — деплой автоматический. Но для хорошего UX полезно:
+Пер-сервис (в `render.yaml`):
 
-1. После `git push` сказать пользователю: «Сделал коммит, твой блок сейчас передеплоивается, 2-3 минуты».
-2. Запустить `python dashboard/wait_deploy.py raif-<твой-блок>` — это пингует `/health` блока пока не получит 200 OK или таймаут. Когда получил — означает что свежая версия уже отвечает.
-3. Сказать пользователю: «Готово, твой блок обновился. Открой `https://raif-<блок>.onrender.com/docs` — там новые ручки».
-4. Допиши одну строчку в `dashboard/events.jsonl` (если хочется чтобы pulse мелькнул на воркшоп-табло):
-   ```bash
-   echo '{"block":"<блок>","kind":"deploy","text":"раскатил <что>","ts":'$(date +%s)'}' >> dashboard/events.jsonl
-   ```
+- банки — `TEAM_NAME` (`team_a` / `team_b`);
+- симулятор — `BANK_A_URL`, `BANK_B_URL`, `ACTIVE_TASK`, `DATABASE_URL`
+  (из БД `raif-workshop-db`).
 
-## Что делать если деплой не подхватился
+`RENDER_GIT_COMMIT` Render подставляет сам — банк отдаёт его в `/health`,
+по нему симулятор ловит факт деплоя.
 
-Большая редкость, но бывает. Признаки: после push прошло 5+ минут, `/openapi.json` показывает старые ручки. Действия:
+## Переоценка после деплоя
 
-1. Открыть Actions → последний прогон `Deploy services via Render Deploy Hooks` → есть ли warning о незаданном секрете? Если да — добавить.
-2. Открыть `dashboard.render.com` → сервис → вкладка **Events** → проверить что Render зафиксировал новый build. Если нет — webhook не дошёл, нажать **Manual Deploy → Deploy latest commit**.
-3. Если упала **сборка** на Render — Events покажет stack trace. Пара частых причин: синтаксическая ошибка в `main.py`, пакет в `pyproject.toml` не нашёлся в индексе.
+Симулятор **не дёргается** из GitHub Action. Он сам, pull-моделью, раз в
+~30 секунд опрашивает `/health` банков; увидел новый git-коммит → снимает
+probe и пересчитывает клиентскую базу. Так надёжнее: free-инстансы Render
+просыпаются с холодного старта 20-30 секунд, и push-триггер ловил бы старую
+версию.
 
-## OpenAI API key для IT
+## Если деплой не подхватился
 
-Для работы `/llm/ask` IT-сервису нужен `OPENAI_API_KEY`. Ставится один раз вручную:
+1. GitHub → Actions → последний прогон → нет ли warning о незаданном секрете.
+2. Render → сервис → Events → зафиксирован ли новый build; если нет —
+   Manual Deploy → Deploy latest commit.
+3. Упала сборка — Events покажет stack trace (частые причины: синтаксис
+   в `main.py`, пакет не нашёлся).
 
-`dashboard.render.com` → `raif-it` → Settings → **Environment** → найти переменную `OPENAI_API_KEY` (есть, пустая) → Edit → вставить `sk-...` → Save.
+## Free-план
 
-Render автоматически перезапустит контейнер за ~30 секунд. После этого `curl https://raif-it.onrender.com/llm/status` должен вернуть `configured: true`.
-
-## Почему именно Deploy Hooks, а не встроенный auto-deploy
-
-У нас оба канала включены:
-- Render Blueprint в `render.yaml` имеет `autoDeploy: true` — основной канал.
-- Action `deploy-render.yml` через хуки — запасной канал.
-
-Опытным путём встроенный auto-deploy у Render иногда теряет webhook от GitHub — после применения Blueprint webhook рассыпается. Хуки — direct call от GitHub Action, мимо webhook-инфраструктуры. Это надёжнее. Один лишний запрос Action в секунду не страшен.
+Все сервисы и Postgres — free. Инстансы засыпают после 15 минут простоя
+(первый запрос +20-30 секунд). Free Postgres живёт 90 дней — создавать
+свежим перед воркшопом.
