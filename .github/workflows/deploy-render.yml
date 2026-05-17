@@ -1,8 +1,10 @@
 name: Deploy services via Render Deploy Hooks
 
-# Дёргаем Deploy Hook только того сервиса, чья папка реально менялась.
-# Секреты в GitHub → Settings → Secrets and variables → Actions:
-#   RENDER_HOOK_TEAM_A, RENDER_HOOK_TEAM_B, RENDER_HOOK_SIMULATOR
+# Дёргаем Deploy Hook сервиса, чья папка менялась. Секреты в GitHub →
+# Settings → Secrets and variables → Actions:
+#   RENDER_HOOK_A_BACKEND, RENDER_HOOK_A_CIB, RENDER_HOOK_A_RETAIL,
+#   RENDER_HOOK_B_BACKEND, RENDER_HOOK_B_CIB, RENDER_HOOK_B_RETAIL,
+#   RENDER_HOOK_SIMULATOR
 
 on:
   push:
@@ -10,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Что передеплоить (team_a,team_b,simulator или 'all')"
+        description: "Что передеплоить (через запятую или 'all')"
         required: false
         default: "all"
 
@@ -22,75 +24,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  detect:
+  deploy:
     runs-on: ubuntu-latest
-    outputs:
-      team_a:    ${{ steps.detect.outputs.team_a }}
-      team_b:    ${{ steps.detect.outputs.team_b }}
-      simulator: ${{ steps.detect.outputs.simulator }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Detect changed services
-        id: detect
+      - name: Detect and deploy
         env:
-          MANUAL_SERVICES: ${{ inputs.services }}
+          MANUAL: ${{ inputs.services }}
+          EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
-          AFTER:  ${{ github.sha }}
+          AFTER: ${{ github.sha }}
+          HOOK_A_BACKEND: ${{ secrets.RENDER_HOOK_A_BACKEND }}
+          HOOK_A_CIB: ${{ secrets.RENDER_HOOK_A_CIB }}
+          HOOK_A_RETAIL: ${{ secrets.RENDER_HOOK_A_RETAIL }}
+          HOOK_B_BACKEND: ${{ secrets.RENDER_HOOK_B_BACKEND }}
+          HOOK_B_CIB: ${{ secrets.RENDER_HOOK_B_CIB }}
+          HOOK_B_RETAIL: ${{ secrets.RENDER_HOOK_B_RETAIL }}
+          HOOK_SIMULATOR: ${{ secrets.RENDER_HOOK_SIMULATOR }}
         run: |
           set -e
-          SERVICES="team_a team_b simulator"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            REQ="${MANUAL_SERVICES:-all}"
-            for S in $SERVICES; do
-              if [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$S,"; then
-                echo "$S=true"  >> "$GITHUB_OUTPUT"
-              else
-                echo "$S=false" >> "$GITHUB_OUTPUT"
-              fi
-            done
-            exit 0
-          fi
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+          # имя → "путь-папки:переменная-хука"
+          MAP="a-backend:team_a/backend:HOOK_A_BACKEND
+          a-cib:team_a/cib:HOOK_A_CIB
+          a-retail:team_a/retail:HOOK_A_RETAIL
+          b-backend:team_b/backend:HOOK_B_BACKEND
+          b-cib:team_b/cib:HOOK_B_CIB
+          b-retail:team_b/retail:HOOK_B_RETAIL
+          simulator:simulator:HOOK_SIMULATOR"
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            CHANGED="__manual__"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             CHANGED=$(git ls-files)
           else
             CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" || true)
           fi
-          echo "===== changed ====="; echo "$CHANGED" | head -60; echo "==================="
-          # render.yaml меняет всё; seed/ — оба банка
-          if echo "$CHANGED" | grep -qE "^render\.yaml$"; then
-            for S in $SERVICES; do echo "$S=true" >> "$GITHUB_OUTPUT"; done
-            exit 0
-          fi
-          SEED=$(echo "$CHANGED" | grep -qE "^seed/" && echo yes || echo no)
-          for S in $SERVICES; do
-            HIT=false
-            echo "$CHANGED" | grep -qE "^${S}/" && HIT=true
-            if [ "$S" != "simulator" ] && [ "$SEED" = "yes" ]; then HIT=true; fi
-            echo "$S=$HIT" >> "$GITHUB_OUTPUT"
-            echo "  $S → $HIT"
-          done
+          RENDER_ALL=no
+          echo "$CHANGED" | grep -qE "^(render\.yaml|seed/)" && RENDER_ALL=yes
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: detect
-    steps:
-      - name: Deploy raif-team-a
-        if: needs.detect.outputs.team_a == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_TEAM_A }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_TEAM_A not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-team-a"
-      - name: Deploy raif-team-b
-        if: needs.detect.outputs.team_b == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_TEAM_B }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_TEAM_B not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-team-b"
-      - name: Deploy raif-simulator
-        if: needs.detect.outputs.simulator == 'true'
-        env: { HOOK: "${{ secrets.RENDER_HOOK_SIMULATOR }}" }
-        run: |
-          if [ -z "$HOOK" ]; then echo "::warning::RENDER_HOOK_SIMULATOR not set"; exit 0; fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-simulator"
+          echo "$MAP" | while IFS=: read -r NAME PATHPREFIX HOOKVAR; do
+            [ -z "$NAME" ] && continue
+            HIT=no
+            if [ "$EVENT" = "workflow_dispatch" ]; then
+              REQ="${MANUAL:-all}"
+              { [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$NAME,"; } && HIT=yes
+            else
+              echo "$CHANGED" | grep -qE "^${PATHPREFIX}/" && HIT=yes
+              [ "$RENDER_ALL" = "yes" ] && HIT=yes
+            fi
+            [ "$HIT" != "yes" ] && { echo "skip $NAME"; continue; }
+            HOOK=$(eval echo "\$$HOOKVAR")
+            if [ -z "$HOOK" ]; then
+              echo "::warning::секрет для $NAME не задан — пропуск"
+            else
+              curl -fsS -X POST "$HOOK" && echo " → triggered raif-$NAME"
+            fi
+          done
