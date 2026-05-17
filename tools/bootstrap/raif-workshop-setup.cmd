@@ -119,13 +119,13 @@ function Show-MemberPicker {
   $listBox.Size     = New-Object Drawing.Size(470, 240)
   $listBox.Font     = New-Object Drawing.Font('Consolas', 10)
   [void]$listBox.Items.AddRange(@(
-    '1) Сергей Монин          (CEO Office)',
-    '2) Никита Патрахин       (CIB)',
-    '3) Иван Курочкин         (Розница)',
-    '4) Александр Ложечкин    (IT / Платформа)',
-    '5) Герт Хебенштрайт      (Финансы и Опс)',
-    '6) Роланд Васс           (Управление рисками)',
-    '7) Виталий Ерохин        (ведущий)'
+    '1) Сергей Монин — Команда A · Розница',
+    '2) Никита Патрахин — Команда A · Корпоратив',
+    '3) Иван Курочкин — Команда A · Бэкенд',
+    '4) Александр Ложечкин — Команда B · Розница',
+    '5) Герт Хебенштрайт — Команда B · Корпоратив',
+    '6) Роланд Васс — Команда B · Бэкенд',
+    '7) Виталий Ерохин — Организатор'
   ))
   $listBox.SelectedIndex = 0
   $form.Controls.Add($listBox)
@@ -252,6 +252,19 @@ if (Test-Path (Join-Path $RepoDir '.git')) {
   Ok 'Клонировано'
 }
 
+# ── 7b. защита команды: settings.local.json под (команда, блок) ──────────────
+Say 'Ставлю защиту команды — правки только в своём блоке'
+$claudeDir = Join-Path $RepoDir '.claude'
+$tpl = Join-Path $claudeDir ('templates\settings-' + $cfg.Team + '-' + $cfg.Block + '.json')
+if ($cfg.Team -eq 'host') {
+  Ok 'Организатору защита не ставится — полный доступ'
+} elseif (Test-Path $tpl) {
+  Copy-Item -LiteralPath $tpl -Destination (Join-Path $claudeDir 'settings.local.json') -Force
+  Ok 'Защита активна: правишь только свой блок, чужую команду не видно'
+} else {
+  Warn ('шаблон ' + $tpl + ' не найден — Claude поставит защиту сам на онбординге')
+}
+
 # ── 8. inject key + info в .git/ для Claude в Cowork ─────────────────────────
 Say 'Готовлю sandbox-onboarding для Claude (.git/raif-workshop-*)'
 $gitDir = Join-Path $RepoDir '.git'
@@ -295,6 +308,15 @@ Write-Host ''
 Write-Host ("   Папка проекта:    " + $RepoDir)
 Write-Host ("   Подпись коммитов: " + $cfg.Name + ' <' + $cfg.Email + '>')
 Write-Host ("   Команда:          " + $cfg.Team)
+Write-Host ("   Твой блок:        " + $cfg.Block)
+Write-Host ''
+Write-Host ' Защита команды:'
+if ($cfg.Team -eq 'host') {
+  Write-Host '   Ты организатор — доступ полный, защита не ставится.'
+} else {
+  Write-Host '   Ты видишь и правишь только свой блок. Другую команду'
+  Write-Host '   не видно — к ней можно только зайти на сайт по ссылке.'
+}
 Write-Host ''
 Write-Host ' Дальше:'
 Write-Host ("   1. Открой Claude в Cowork mode.")
