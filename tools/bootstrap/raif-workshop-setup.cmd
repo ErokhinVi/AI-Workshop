@@ -67,10 +67,42 @@ $SshConfig        = Join-Path $SshDir   'config'
 $SshConfigMarker  = '# raif-workshop-2026'
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-function Say($m) { Write-Host ''; Write-Host ("→ " + $m) -ForegroundColor Cyan }
-function Ok ($m) { Write-Host ("  ✓ " + $m) -ForegroundColor Green }
-function Warn($m){ Write-Host ("  ! " + $m) -ForegroundColor Yellow }
-function Die ($m){ Write-Host ''; Write-Host ("✗ " + $m) -ForegroundColor Red; exit 1 }
+$StartedAt         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+$script:TotalSteps = 8
+$script:CurStep    = 0
+
+function Banner {
+  Write-Host ''
+  Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor Cyan
+  Write-Host '║  Райф AI-воркшоп · настройка ноутбука                        ║' -ForegroundColor Cyan
+  Write-Host '║  raif-workshop-setup.cmd                                     ║' -ForegroundColor Cyan
+  Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor Cyan
+  Write-Host ('  запуск:  ' + $StartedAt)        -ForegroundColor DarkGray
+  Write-Host ('  ПК:      ' + $env:COMPUTERNAME) -ForegroundColor DarkGray
+  Write-Host ('  юзер:    ' + $env:USERNAME)     -ForegroundColor DarkGray
+  Write-Host ('  HOME:    ' + $env:USERPROFILE)  -ForegroundColor DarkGray
+  Write-Host ''
+}
+
+function Step($title) {
+  $script:CurStep++
+  Write-Host ''
+  Write-Host ('━━━━━━[ ' + $script:CurStep + '/' + $script:TotalSteps + ' ]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━') -ForegroundColor Blue
+  Write-Host ('  ' + $title) -ForegroundColor Blue
+  Write-Host ''
+}
+
+function Ok  ($m) { Write-Host ('  ✓ ' + $m) -ForegroundColor Green }
+function Info($m) { Write-Host ('  · ' + $m) -ForegroundColor DarkGray }
+function Note($m) { Write-Host ('      ' + $m) -ForegroundColor DarkGray }
+function Warn($m) { Write-Host ('  ! ' + $m) -ForegroundColor Red }
+function Die ($m) {
+  Write-Host ''
+  Write-Host ('  ✗ ' + $m) -ForegroundColor Red
+  Write-Host ''
+  Write-Host 'Настройка прервана. Покажи ведущему сообщение выше.' -ForegroundColor Red
+  exit 1
+}
 
 function Require-Command($name, $hint) {
   $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -91,10 +123,20 @@ function Lock-FileToCurrentUser($path) {
 }
 
 # ── 0. sanity ────────────────────────────────────────────────────────────────
+Banner
+Step 'Проверяю окружение'
+Info ('OS:  ' + [System.Environment]::OSVersion.VersionString)
 Require-Command git 'Установи Git for Windows: https://git-scm.com/download/win'
+Info ('git: ' + ((& git --version) | Out-String).Trim())
 Require-Command ssh 'OpenSSH Client отсутствует. Settings → Apps → Optional Features → Add → OpenSSH Client.'
+$prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
+$ErrorActionPreference = $prevEAP
+Info ('ssh: ' + $sshVer)
+Ok 'Окружение в порядке'
 
 # ── 1. меню выбора участника (WinForms) ──────────────────────────────────────
+Info 'Открываю окно выбора участника...'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -167,10 +209,14 @@ $Members = @{
 }
 $cfg = $Members[$WhoNum]
 if (-not $cfg) { Die 'Не удалось определить участника.' }
+$teamHuman  = @{ 'team_a' = 'Команда A'; 'team_b' = 'Команда B'; 'host' = 'Организатор' }[$cfg.Team]
+$blockHuman = @{ 'retail' = 'Розница — мобильный банк клиента'; 'cib' = 'Корпоратив — бизнес-логика'; 'backend' = 'Бэкенд — ядро данных банка'; 'host' = '—' }[$cfg.Block]
+Ok ('Участник выбран: ' + $cfg.Name)
 
 # ── 3. SSH key (embedded, base64 — чтобы не палиться перед secret-scanner-ом) ─
-Say 'Кладу рабочий ключ воркшопа'
+Step 'Кладу рабочий ключ воркшопа'
 if (-not (Test-Path $SshDir)) { New-Item -ItemType Directory -Path $SshDir | Out-Null }
+Info ('Каталог: ' + $SshDir)
 
 $PrivateKeyB64 = 'LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaV1EKeU5UVXhPUUFBQUNDYTluUFJ4TkJMYUhYTWFKU3didXdlelRjb1FLTS90NStHMGRvR09kQzJHQUFBQUtBNzZsam5PK3BZCjV3QUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQ2E5blBSeE5CTGFIWE1hSlN3YnV3ZXpUY29RS00vdDUrRzBkb0dPZEMyR0EKQUFBRUNLMFJqU0IvbEhjWmdwejZPcldUSVZ1SVNDc2xoTFAzeWhFeUN1UWRLWS81cjJjOUhFMEV0b2RjeG9sTEJ1N0I3TgpOeWhBb3orM240YlIyZ1k1MExZWUFBQUFHMk5zWVhWa1pTMWpiM2R2Y21zdGNtRnBaaTEzYjNKcmMyaHZjQUVDCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo='
 $PrivateKey = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PrivateKeyB64))
@@ -180,10 +226,16 @@ $keyText = ($PrivateKey -replace "`r`n", "`n")
 if (-not $keyText.EndsWith("`n")) { $keyText = $keyText + "`n" }
 Write-FileNoBom -path $SshKeyPath -text $keyText
 Lock-FileToCurrentUser -path $SshKeyPath
-Ok ("Ключ на месте: " + $SshKeyPath)
+$fp = '?'
+$prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+try { $fpLine = ((& ssh-keygen -lf $SshKeyPath 2>&1) | Out-String).Trim(); if ($fpLine) { $fp = $fpLine } } catch {}
+$ErrorActionPreference = $prevEAP
+Ok ('Файл: ' + $SshKeyPath + '  (доступ только тебе)')
+Note ('fingerprint: ' + $fp)
 
 # ── 4. SSH config ────────────────────────────────────────────────────────────
-Say 'Настраиваю ssh так, чтобы GitHub использовал этот ключ'
+Step 'Настраиваю ssh так, чтобы для GitHub использовался именно этот ключ'
+Info ('Файл: ' + $SshConfig)
 if (-not (Test-Path $SshConfig)) {
   Write-FileNoBom -path $SshConfig -text ''
 }
@@ -210,12 +262,20 @@ Host github.com
 }
 
 # ── 5. git identity ──────────────────────────────────────────────────────────
+Step 'Выбор участника и подпись для коммитов'
+Info ('Участник: ' + $cfg.Name)
+Info ('Email:    ' + $cfg.Email)
+Info ('Команда:  ' + $teamHuman + ' (' + $cfg.Team + ')')
+Info ('Блок:     ' + $blockHuman)
+if ($cfg.Team -ne 'host') { Info ('Папка блока: ' + $cfg.Team + '\' + $cfg.Block + '\') }
 & git config --global user.name  $cfg.Name  | Out-Null
 & git config --global user.email $cfg.Email | Out-Null
-Ok ("Подпись для коммитов: " + $cfg.Name + ' <' + $cfg.Email + '>')
+Ok ('Глобальная git-подпись: ' + $cfg.Name + ' <' + $cfg.Email + '>')
+Note 'файл: ~\.gitconfig'
 
 # ── 6. verify GitHub auth ────────────────────────────────────────────────────
-Say 'Стучусь к GitHub этим ключом'
+Step 'Проверяю доступ к GitHub этим ключом'
+Info 'ssh -T git@github.com  (BatchMode, StrictHostKeyChecking=accept-new)'
 $env:GIT_SSH_COMMAND = "ssh -o IdentitiesOnly=yes -o IdentityFile=`"$SshKeyPath`" -o StrictHostKeyChecking=accept-new"
 
 # ssh -T пишет полезную диагностику ("Permanently added github.com to known_hosts")
@@ -231,42 +291,55 @@ try {
 }
 $sshText = ($sshOut | Out-String)
 if ($sshText -match 'successfully authenticated') {
-  Ok 'GitHub нас узнал'
+  $ghUser = ''
+  $ghMatch = [Regex]::Match($sshText, 'Hi ([^!]+)!')
+  if ($ghMatch.Success) { $ghUser = $ghMatch.Groups[1].Value }
+  if ($ghUser) { Ok ('GitHub нас узнал как ' + $ghUser) } else { Ok 'GitHub нас узнал' }
 } else {
   Write-Host $sshText
   Die 'GitHub не принял ключ. Покажи ведущему вывод выше.'
 }
 
 # ── 7. clone or update ───────────────────────────────────────────────────────
+Step ('Готовлю папку проекта ' + $RepoDir)
 if (Test-Path (Join-Path $RepoDir '.git')) {
-  Say ("Папка " + $RepoDir + " уже существует — подтягиваю свежие изменения")
+  Info 'Папка уже существует — подтягиваю свежие изменения'
   & git -C $RepoDir remote set-url origin $RepoUrl       | Out-Null
   & git -C $RepoDir fetch origin --prune                 | Out-Null
   & git -C $RepoDir checkout main 2>$null                | Out-Null
   & git -C $RepoDir reset --hard origin/main             | Out-Null
   Ok 'Подтянул и выровнял main'
 } else {
-  Say ("Клонирую проект в " + $RepoDir)
+  Info ('Клонирую ' + $RepoUrl)
   & git clone $RepoUrl $RepoDir
   if ($LASTEXITCODE -ne 0) { Die 'git clone упал. Сообщи ведущему.' }
-  Ok 'Клонировано'
+  Ok ('Клонировано в ' + $RepoDir)
 }
+$headLine = '?'; $branchLine = '?'
+try { $headLine   = ((& git -C $RepoDir log -1 --format="%h %s") | Out-String).Trim() } catch {}
+try { $branchLine = ((& git -C $RepoDir rev-parse --abbrev-ref HEAD) | Out-String).Trim() } catch {}
+Note ('ветка: ' + $branchLine)
+Note ('HEAD:  ' + $headLine)
 
 # ── 7b. защита команды: settings.local.json под (команда, блок) ──────────────
-Say 'Ставлю защиту команды — правки только в своём блоке'
+Step 'Ставлю защиту команды — правки только в своём блоке'
 $claudeDir = Join-Path $RepoDir '.claude'
 $tpl = Join-Path $claudeDir ('templates\settings-' + $cfg.Team + '-' + $cfg.Block + '.json')
 if ($cfg.Team -eq 'host') {
-  Ok 'Организатору защита не ставится — полный доступ'
+  Info 'Участник — организатор: защита не ставится'
+  Ok 'Полный доступ ко всему репозиторию'
 } elseif (Test-Path $tpl) {
   Copy-Item -LiteralPath $tpl -Destination (Join-Path $claudeDir 'settings.local.json') -Force
-  Ok 'Защита активна: правишь только свой блок, чужую команду не видно'
+  Ok 'Защита активна: .claude\settings.local.json'
+  Note ('шаблон: settings-' + $cfg.Team + '-' + $cfg.Block + '.json')
+  Note 'правишь только свой блок, чужую команду не видно вовсе'
 } else {
-  Warn ('шаблон ' + $tpl + ' не найден — Claude поставит защиту сам на онбординге')
+  Warn ('шаблон не найден: ' + $tpl)
+  Note 'Claude поставит защиту сам на онбординге'
 }
 
 # ── 8. inject key + info в .git/ для Claude в Cowork ─────────────────────────
-Say 'Готовлю sandbox-onboarding для Claude (.git/raif-workshop-*)'
+Step 'Готовлю sandbox-onboarding для Claude (.git\raif-workshop-*)'
 $gitDir = Join-Path $RepoDir '.git'
 $keyInGit  = Join-Path $gitDir 'raif-workshop-key'
 $infoInGit = Join-Path $gitDir 'raif-workshop-info'
@@ -287,7 +360,10 @@ WORKSHOP_GIT_EMAIL=$($cfg.Email)
 "@
 $infoText = ($infoText -replace "`r`n","`n") + "`n"
 Write-FileNoBom -path $infoInGit -text $infoText
-Ok ("Info-файл: " + $infoInGit)
+Ok ('Info-файл: ' + $infoInGit)
+Note ('WORKSHOP_PARTICIPANT=' + $cfg.Participant)
+Note ('WORKSHOP_TEAM=' + $cfg.Team)
+Note ('WORKSHOP_BLOCK=' + $cfg.Block)
 
 # Post-clone hardening (anti-lock + Defender + shortcut) - in separate ps1
 # file to keep this .cmd byte-perfect with the version known to work.
@@ -302,30 +378,46 @@ if (Test-Path $hardenPs1) {
 
 # ── 9. done ──────────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host '=========================================================='
-Write-Host ' Всё готово. Твой ноутбук настроен на воркшоп.'
 Write-Host ''
-Write-Host ("   Папка проекта:    " + $RepoDir)
-Write-Host ("   Подпись коммитов: " + $cfg.Name + ' <' + $cfg.Email + '>')
-Write-Host ("   Команда:          " + $cfg.Team)
-Write-Host ("   Твой блок:        " + $cfg.Block)
+Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor Cyan
+Write-Host '║  ВСЁ ГОТОВО. Ноутбук настроен на воркшоп.                    ║' -ForegroundColor Cyan
+Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor Cyan
 Write-Host ''
-Write-Host ' Защита команды:'
+Write-Host ('  Папка проекта:    ' + $RepoDir)
+Write-Host ('  Подпись:          ' + $cfg.Name + ' <' + $cfg.Email + '>')
+Write-Host ('  Команда:          ' + $teamHuman + ' (' + $cfg.Team + ')')
+Write-Host ('  Блок:             ' + $blockHuman)
+Write-Host ('  Текущая ветка:    ' + $branchLine)
+Write-Host ('  HEAD проекта:     ' + $headLine)
+Write-Host ('  SSH fingerprint:  ' + $fp)
+Write-Host ''
+Write-Host '  Защита команды:' -ForegroundColor DarkGray
 if ($cfg.Team -eq 'host') {
-  Write-Host '   Ты организатор — доступ полный, защита не ставится.'
+  Write-Host '  Ты организатор — доступ полный, защита команды не ставится.' -ForegroundColor DarkGray
 } else {
-  Write-Host '   Ты видишь и правишь только свой блок. Другую команду'
-  Write-Host '   не видно — к ней можно только зайти на сайт по ссылке.'
+  Write-Host '  Ты видишь и правишь только свой блок. Другую команду не видно' -ForegroundColor DarkGray
+  Write-Host '  вовсе — к ней можно только зайти на сайт по ссылке.' -ForegroundColor DarkGray
 }
 Write-Host ''
-Write-Host ' Дальше:'
-Write-Host ("   1. Открой Claude в Cowork mode.")
-Write-Host ("   2. Подключи папку " + $RepoDir + " как working folder.")
-Write-Host ('   3. Напиши Claude любое первое сообщение — он сам')
-Write-Host ('      подцепит ключ и узнает, кто ты, по info-файлу.')
+Write-Host '  Файлы, которые скрипт создал/обновил:'
+Write-Host ('    ✓ ' + $SshKeyPath + '  (приватный ключ воркшопа)')
+Write-Host ('    ✓ ' + $SshConfig + '  (блок Host github.com)')
+Write-Host ('    ✓ ' + (Join-Path $env:USERPROFILE '.gitconfig') + '  (git --global)')
+Write-Host ('    ✓ ' + $keyInGit + '  (копия ключа для Claude)')
+Write-Host ('    ✓ ' + $infoInGit + '  (мета-инфо для Claude)')
+if ($cfg.Team -eq 'host') {
+  Write-Host '    · защита команды не ставится (организатор)'
+} else {
+  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (защита команды)')
+}
 Write-Host ''
-Write-Host ' (Стартовый flow с командой "claude" в терминале тоже работает —'
-Write-Host '  если предпочитаешь его, открой папку в терминале и скажи "claude".)'
-Write-Host '=========================================================='
+Write-Host '  Что дальше:'
+Write-Host '    1. Открой Claude в Cowork mode.'
+Write-Host ('    2. Подключи папку ' + $RepoDir + ' как working folder.')
+Write-Host '    3. Напиши Claude любое первое сообщение — он сам подцепит'
+Write-Host '       ключ и узнает, кто ты, по info-файлу.'
+Write-Host ''
+Write-Host '  (Старый flow с командой "claude" в терминале тоже работает —'
+Write-Host '   открой папку в терминале и скажи "claude".)'
 Write-Host ''
 exit 0
