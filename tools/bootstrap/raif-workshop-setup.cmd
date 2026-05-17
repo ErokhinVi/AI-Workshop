@@ -157,13 +157,13 @@ if (-not $WhoNum) { Write-Host 'Отменено.'; exit 0 }
 # ── 2. mapping ───────────────────────────────────────────────────────────────
 # Распределение по командам (Team) — поправь под реальные составы перед воркшопом.
 $Members = @{
-  1 = @{ Name='Sergey Monin';       Email='monin@raif-workshop.local';      Team='team_a'; Participant='sergey-monin'       }
-  2 = @{ Name='Nikita Patrahin';    Email='patrahin@raif-workshop.local';   Team='team_a'; Participant='nikita-patrahin'    }
-  3 = @{ Name='Ivan Kurochkin';     Email='kurochkin@raif-workshop.local';  Team='team_a'; Participant='ivan-kurochkin'     }
-  4 = @{ Name='Aleksandr Lozhechkin'; Email='lozhechkin@raif-workshop.local'; Team='team_b'; Participant='aleksandr-lozhechkin' }
-  5 = @{ Name='Gert Hebenstreit';   Email='hebenstreit@raif-workshop.local'; Team='team_b'; Participant='gert-hebenstreit'   }
-  6 = @{ Name='Roland Vass';        Email='vass@raif-workshop.local';       Team='team_b'; Participant='roland-vass'        }
-  7 = @{ Name='Vitaly Erokhin';     Email='erokhin@raif-workshop.local';    Team='host';   Participant='vitaly-erokhin'     }
+  1 = @{ Name='Sergey Monin';       Email='monin@raif-workshop.local';      Team='team_a'; Block='retail';  Participant='sergey-monin'       }
+  2 = @{ Name='Nikita Patrahin';    Email='patrahin@raif-workshop.local';   Team='team_a'; Block='cib';     Participant='nikita-patrahin'    }
+  3 = @{ Name='Ivan Kurochkin';     Email='kurochkin@raif-workshop.local';  Team='team_a'; Block='backend'; Participant='ivan-kurochkin'     }
+  4 = @{ Name='Aleksandr Lozhechkin'; Email='lozhechkin@raif-workshop.local'; Team='team_b'; Block='retail';  Participant='aleksandr-lozhechkin' }
+  5 = @{ Name='Gert Hebenstreit';   Email='hebenstreit@raif-workshop.local'; Team='team_b'; Block='cib';     Participant='gert-hebenstreit'   }
+  6 = @{ Name='Roland Vass';        Email='vass@raif-workshop.local';       Team='team_b'; Block='backend'; Participant='roland-vass'        }
+  7 = @{ Name='Vitaly Erokhin';     Email='erokhin@raif-workshop.local';    Team='host';   Block='host';    Participant='vitaly-erokhin'     }
 }
 $cfg = $Members[$WhoNum]
 if (-not $cfg) { Die 'Не удалось определить участника.' }
@@ -268,6 +268,7 @@ $infoText = @"
 # Этот файл читает tools/cowork-onboard.py при первом запуске Claude.
 WORKSHOP_PARTICIPANT=$($cfg.Participant)
 WORKSHOP_TEAM=$($cfg.Team)
+WORKSHOP_BLOCK=$($cfg.Block)
 WORKSHOP_GIT_NAME=$($cfg.Name)
 WORKSHOP_GIT_EMAIL=$($cfg.Email)
 "@
