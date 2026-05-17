@@ -14,6 +14,10 @@
 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 Работа в worktree-ветке `worktree-three-block`.
 
+**ПРОГРЕСС:** Фаза 0 (коммит `5e0f74e`) и Фаза 1 — блок backend (коммит
+`9efe3e1`) выполнены и закоммичены. Начинать с Фазы 2. Фазу 0 повторно НЕ
+запускать — `git rm -r team_a` снесёт уже собранный `team_a/backend`.
+
 ---
 
 ## Структура файлов
