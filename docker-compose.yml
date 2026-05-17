@@ -1,24 +1,59 @@
 # AI-воркшоп — локальный запуск: docker-compose up --build
-# Банки: http://localhost:8001 (A), http://localhost:8002 (B)
-# Табло: http://localhost:8000
+# Команда A: retail 8001, cib 8002, backend 8003
+# Команда B: retail 8011, cib 8012, backend 8013
+# Табло: 8000
 
 services:
-  team_a:
-    build: { context: ., dockerfile: team_a/Dockerfile }
-    image: raif-team-a
-    container_name: raif-team-a
+  a_backend:
+    build: { context: ., dockerfile: team_a/backend/Dockerfile }
+    container_name: raif-a-backend
+    environment: { TEAM_NAME: team_a }
+    ports: ["8003:8020"]
+    networks: [raif]
+
+  a_cib:
+    build: { context: ., dockerfile: team_a/cib/Dockerfile }
+    container_name: raif-a-cib
     environment:
       TEAM_NAME: team_a
+      BACKEND_URL: http://a_backend:8020
+    ports: ["8002:8020"]
+    networks: [raif]
+
+  a_retail:
+    build: { context: ., dockerfile: team_a/retail/Dockerfile }
+    container_name: raif-a-retail
+    environment:
+      TEAM_NAME: team_a
+      BACKEND_URL: http://a_backend:8020
+      CIB_URL: http://a_cib:8020
     ports: ["8001:8020"]
     networks: [raif]
 
-  team_b:
-    build: { context: ., dockerfile: team_b/Dockerfile }
-    image: raif-team-b
-    container_name: raif-team-b
+  b_backend:
+    build: { context: ., dockerfile: team_b/backend/Dockerfile }
+    container_name: raif-b-backend
+    environment: { TEAM_NAME: team_b }
+    ports: ["8013:8020"]
+    networks: [raif]
+
+  b_cib:
+    build: { context: ., dockerfile: team_b/cib/Dockerfile }
+    container_name: raif-b-cib
     environment:
       TEAM_NAME: team_b
-    ports: ["8002:8020"]
+      BACKEND_URL: http://b_backend:8020
+    ports: ["8012:8020"]
+    networks: [raif]
+
+  b_retail:
+    build: { context: ., dockerfile: team_b/retail/Dockerfile }
+    container_name: raif-b-retail
+    environment:
+      TEAM_NAME: team_b
+      BACKEND_URL: http://b_backend:8020
+      CIB_URL: http://b_cib:8020
+    ports: ["8011:8020"]
     networks: [raif]
 
   postgres:
@@ -33,15 +68,18 @@ services:
 
   simulator:
     build: { context: ., dockerfile: simulator/Dockerfile }
-    image: raif-simulator
     container_name: raif-simulator
     environment:
-      BANK_A_URL: http://team_a:8020
-      BANK_B_URL: http://team_b:8020
+      A_BACKEND_URL: http://a_backend:8020
+      A_CIB_URL: http://a_cib:8020
+      A_RETAIL_URL: http://a_retail:8020
+      B_BACKEND_URL: http://b_backend:8020
+      B_CIB_URL: http://b_cib:8020
+      B_RETAIL_URL: http://b_retail:8020
       DATABASE_URL: postgres://sim:sim@postgres:5432/simulator
       ADMIN_TOKEN: localdev
       POLL_INTERVAL_S: "30"
-    depends_on: [team_a, team_b, postgres]
+    depends_on: [a_backend, a_cib, a_retail, b_backend, b_cib, b_retail, postgres]
     ports: ["8000:8000"]
     networks: [raif]
 
