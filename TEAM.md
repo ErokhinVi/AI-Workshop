@@ -1,24 +1,38 @@
-# TEAM.md — кто в какой команде
+# TEAM.md — кто в какой команде и в каком блоке
 
 > Справочник для агентов. Используется при онбординге, чтобы сопоставить
-> участника с его командой.
+> участника с парой (команда, блок).
 
 ## Состав команд
 
-Воркшоп — две команды по три человека. Обе решают одну и ту же задачу,
-параллельно и независимо друг от друга.
+Воркшоп — две команды по три человека. Каждая команда — это три блока-сервиса
+(`retail`, `cib`, `backend`), по одному участнику на блок. Обе команды решают
+одну и ту же задачу, параллельно и независимо друг от друга.
 
-| Участник | Команда | Папка | Банк |
+| Участник | Команда | Блок | Папка |
 |---|---|---|---|
-| Сергей Монин | A | `team_a/` | `raif-team-a.onrender.com` |
-| Никита Патрахин | A | `team_a/` | `raif-team-a.onrender.com` |
-| Иван Курочкин | A | `team_a/` | `raif-team-a.onrender.com` |
-| Александр Ложечкин | B | `team_b/` | `raif-team-b.onrender.com` |
-| Герт Хебенштрайт | B | `team_b/` | `raif-team-b.onrender.com` |
-| Роланд Васс | B | `team_b/` | `raif-team-b.onrender.com` |
+| Сергей Монин | A | retail | `team_a/retail/` |
+| Никита Патрахин | A | cib | `team_a/cib/` |
+| Иван Курочкин | A | backend | `team_a/backend/` |
+| Александр Ложечкин | B | retail | `team_b/retail/` |
+| Герт Хебенштрайт | B | cib | `team_b/cib/` |
+| Роланд Васс | B | backend | `team_b/backend/` |
 
-> Распределение по командам — предварительное. Организатор поправляет его
-> под реальные составы (здесь и в `tools/bootstrap/raif-workshop-setup.cmd`).
+> Распределение по парам (команда, блок) — предварительное. Организатор
+> поправляет его под реальные составы (здесь и в
+> `tools/bootstrap/raif-workshop-setup.cmd`).
+
+## Что делает каждый блок
+
+- **retail** — клиентский мобильный банк: интерфейс и тонкий слой. За данными
+  ходит в backend, за решением по кредиту — в cib. Своих данных не держит.
+- **cib** — корпоратив и бизнес-логика: каталог продуктов и логика решений.
+  За данными клиента ходит в backend.
+- **backend** — ядро данных: хранит клиентов, транзакции, балансы; отдаёт
+  базовый API. Интерфейса нет.
+
+Связи блоков: retail → backend, retail → cib, cib → backend. Фича готова,
+только когда все три блока команды сделали свою часть и состыковались.
 
 ## Алиасы для распознавания имени
 
@@ -46,6 +60,13 @@
 
 | Что | Локально | На Render |
 |---|---|---|
-| Банк команды A | `http://localhost:8001` | `https://raif-team-a.onrender.com` |
-| Банк команды B | `http://localhost:8002` | `https://raif-team-b.onrender.com` |
+| A · retail | `http://localhost:8001` | `https://raif-a-retail.onrender.com` |
+| A · cib | `http://localhost:8002` | `https://raif-a-cib.onrender.com` |
+| A · backend | `http://localhost:8003` | `https://raif-a-backend.onrender.com` |
+| B · retail | `http://localhost:8011` | `https://raif-b-retail.onrender.com` |
+| B · cib | `http://localhost:8012` | `https://raif-b-cib.onrender.com` |
+| B · backend | `http://localhost:8013` | `https://raif-b-backend.onrender.com` |
 | Табло (симулятор) | `http://localhost:8000` | `https://raif-simulator.onrender.com` |
+
+Клиенту своей команды показывай его блок retail — это банк, который видит
+клиент. Табло показывает счёт двух команд лицом к лицу.
