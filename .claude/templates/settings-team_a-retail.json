@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(team_b/**)",
+      "Edit(team_b/**)",
+      "Write(team_b/**)",
+      "Edit(team_a/cib/**)",
+      "Write(team_a/cib/**)",
+      "Edit(team_a/backend/**)",
+      "Write(team_a/backend/**)",
+      "Edit(simulator/**)",
+      "Write(simulator/**)",
+      "Edit(seed/**)",
+      "Write(seed/**)",
+      "Edit(render.yaml)",
+      "Write(render.yaml)",
+      "Edit(.github/**)",
+      "Write(.github/**)"
+    ],
+    "allow": [
+      "Edit(team_a/retail/**)",
+      "Write(team_a/retail/**)",
+      "Read(team_a/**)",
+      "Read(tasks/**)",
+      "Read(seed/**)",
+      "Bash(docker-compose:*)",
+      "Bash(docker:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)"
+    ]
+  }
+}
