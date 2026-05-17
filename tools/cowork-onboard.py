@@ -268,6 +268,7 @@ def main() -> int:
     info = parse_info()
     if info:
         ok(f"WORKSHOP_TEAM={info.get('WORKSHOP_TEAM', '?')}  "
+           f"WORKSHOP_BLOCK={info.get('WORKSHOP_BLOCK', '?')}  "
            f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '?')}")
     else:
         warn("info-файла нет — Claude должен будет спросить имя и команду")
@@ -289,6 +290,7 @@ def main() -> int:
 
     print("=== READY ===", flush=True)
     print(f"WORKSHOP_TEAM={info.get('WORKSHOP_TEAM', '')}", flush=True)
+    print(f"WORKSHOP_BLOCK={info.get('WORKSHOP_BLOCK', '')}", flush=True)
     print(f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '')}", flush=True)
     print(f"WORKSHOP_GIT_NAME={info.get('WORKSHOP_GIT_NAME', '')}", flush=True)
     print(f"GIT_SHIM={SHIM_PATH}", flush=True)
