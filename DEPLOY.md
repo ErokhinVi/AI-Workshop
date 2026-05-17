@@ -3,12 +3,16 @@
 Как код попадает в продакшен после `git push`. Документ для организаторов
 и для агентов команд.
 
-## Три сервиса
+## Семь сервисов
 
 | Сервис | Папка в репо | URL |
 |---|---|---|
-| `raif-team-a` | `team_a/` | `https://raif-team-a.onrender.com` |
-| `raif-team-b` | `team_b/` | `https://raif-team-b.onrender.com` |
+| `raif-a-backend` | `team_a/backend/` | `https://raif-a-backend.onrender.com` |
+| `raif-a-cib` | `team_a/cib/` | `https://raif-a-cib.onrender.com` |
+| `raif-a-retail` | `team_a/retail/` | `https://raif-a-retail.onrender.com` |
+| `raif-b-backend` | `team_b/backend/` | `https://raif-b-backend.onrender.com` |
+| `raif-b-cib` | `team_b/cib/` | `https://raif-b-cib.onrender.com` |
+| `raif-b-retail` | `team_b/retail/` | `https://raif-b-retail.onrender.com` |
 | `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` |
 
 Плюс Postgres `raif-workshop-db` (free) — им пользуется только симулятор:
@@ -30,21 +34,29 @@ Render собирает Docker-образ из изменённой папки (
 
 | Изменения в | Деплоится |
 |---|---|
-| `team_a/**` | `raif-team-a` |
-| `team_b/**` | `raif-team-b` |
+| `team_a/backend/**` | `raif-a-backend` |
+| `team_a/cib/**` | `raif-a-cib` |
+| `team_a/retail/**` | `raif-a-retail` |
+| `team_b/backend/**` | `raif-b-backend` |
+| `team_b/cib/**` | `raif-b-cib` |
+| `team_b/retail/**` | `raif-b-retail` |
 | `simulator/**` | `raif-simulator` |
-| `seed/**` | оба банка |
-| `render.yaml` | все три |
+| `seed/**` | оба backend-блока |
+| `render.yaml` | все семь |
 | `tasks/`, `docs/`, `.github/` | ничего |
 
 ## Деплой-хуки
 
 Action — `.github/workflows/deploy-render.yml`. Триггеры: `push` в `main`
-и ручной `workflow_dispatch` (выбор сервисов). В GitHub нужны три секрета
-(Settings → Secrets and variables → Actions):
+и ручной `workflow_dispatch` (выбор сервисов через запятую или `all`).
+В GitHub нужны семь секретов (Settings → Secrets and variables → Actions):
 
-- `RENDER_HOOK_TEAM_A`
-- `RENDER_HOOK_TEAM_B`
+- `RENDER_HOOK_A_BACKEND`
+- `RENDER_HOOK_A_CIB`
+- `RENDER_HOOK_A_RETAIL`
+- `RENDER_HOOK_B_BACKEND`
+- `RENDER_HOOK_B_CIB`
+- `RENDER_HOOK_B_RETAIL`
 - `RENDER_HOOK_SIMULATOR`
 
 URL хука каждого сервиса: Render → сервис → Settings → Deploy Hook.
@@ -54,27 +66,30 @@ URL хука каждого сервиса: Render → сервис → Settings
 
 Env-группа `ai-workshop-shared` (задаётся один раз в Render UI):
 
-- `OPENAI_API_KEY` — ключ для LLM (банкам — объяснение отказа по кредиту,
+- `OPENAI_API_KEY` — ключ для LLM (cib — объяснение отказа по кредиту,
   симулятору — судья). `OPENAI_BASE_URL`, `OPENAI_MODEL` — со значениями
   по умолчанию в `render.yaml`.
 - `ADMIN_TOKEN` — токен для `/admin/*` симулятора.
 
 Пер-сервис (в `render.yaml`):
 
-- банки — `TEAM_NAME` (`team_a` / `team_b`);
-- симулятор — `BANK_A_URL`, `BANK_B_URL`, `ACTIVE_TASK`, `DATABASE_URL`
-  (из БД `raif-workshop-db`).
+- `backend`-блоки — `TEAM_NAME` (`team_a` / `team_b`);
+- `cib`-блоки — `TEAM_NAME` и `BACKEND_URL` (адрес backend своей команды);
+- `retail`-блоки — `TEAM_NAME`, `BACKEND_URL` и `CIB_URL`;
+- симулятор — шесть `*_URL` (`A_BACKEND_URL`, `A_CIB_URL`, `A_RETAIL_URL`
+  и три для команды B), `ACTIVE_TASK`, `DATABASE_URL` (из БД
+  `raif-workshop-db`).
 
-`RENDER_GIT_COMMIT` Render подставляет сам — банк отдаёт его в `/health`,
+`RENDER_GIT_COMMIT` Render подставляет сам — блок отдаёт его в `/health`,
 по нему симулятор ловит факт деплоя.
 
 ## Переоценка после деплоя
 
 Симулятор **не дёргается** из GitHub Action. Он сам, pull-моделью, раз в
-~30 секунд опрашивает `/health` банков; увидел новый git-коммит → снимает
-probe и пересчитывает клиентскую базу. Так надёжнее: free-инстансы Render
-просыпаются с холодного старта 20-30 секунд, и push-триггер ловил бы старую
-версию.
+~30 секунд опрашивает `/health` всех шести блоков; увидел новый git-коммит
+любого блока команды → снимает probe трёх блоков и пересчитывает клиентскую
+базу команды. Так надёжнее: free-инстансы Render просыпаются с холодного
+старта 20-30 секунд, и push-триггер ловил бы старую версию.
 
 ## Если деплой не подхватился
 
@@ -88,4 +103,5 @@ probe и пересчитывает клиентскую базу. Так над
 
 Все сервисы и Postgres — free. Инстансы засыпают после 15 минут простоя
 (первый запрос +20-30 секунд). Free Postgres живёт 90 дней — создавать
-свежим перед воркшопом.
+свежим перед воркшопом. Семь web-сервисов могут упереться в лимит free-плана
+по числу одновременных web-сервисов — см. раздел про риск в `ORGANIZER.md`.
