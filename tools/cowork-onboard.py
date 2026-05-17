@@ -267,10 +267,34 @@ def main() -> int:
     step("Читаю мета-инфо участника")
     info = parse_info()
     if info:
-        ok(f"WORKSHOP_BLOCK={info.get('WORKSHOP_BLOCK','?')}  "
-           f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT','?')}")
+        ok(f"WORKSHOP_TEAM={info.get('WORKSHOP_TEAM', '?')}  "
+           f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '?')}")
     else:
-        warn("info-файла нет — Claude должен будет спросить имя")
+        warn("info-файла нет — Claude должен будет спросить имя и команду")
 
     step("Прописываю git identity")
-    setup_git_ident
+    setup_git_identity(info)
+
+    step("Поднимаю Linux-side git-dir и шим")
+    setup_linux_gitdir()
+
+    step("Закаляю git config")
+    harden_git_config()
+
+    step("Чищу залипшие локи на Windows-mount")
+    cleanup_stale_locks_on_mount()
+
+    step("Проверяю доступ к GitHub")
+    github_ok = test_github()
+
+    print("=== READY ===", flush=True)
+    print(f"WORKSHOP_TEAM={info.get('WORKSHOP_TEAM', '')}", flush=True)
+    print(f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '')}", flush=True)
+    print(f"WORKSHOP_GIT_NAME={info.get('WORKSHOP_GIT_NAME', '')}", flush=True)
+    print(f"GIT_SHIM={SHIM_PATH}", flush=True)
+    print(f"GITHUB_OK={'yes' if github_ok else 'no'}", flush=True)
+    return 0 if info else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
