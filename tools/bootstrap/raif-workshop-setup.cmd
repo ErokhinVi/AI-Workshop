@@ -68,7 +68,7 @@ $SshConfigMarker  = '# raif-workshop-2026'
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 $StartedAt         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-$script:TotalSteps = 8
+$script:TotalSteps = 9
 $script:CurStep    = 0
 
 function Banner {
@@ -365,6 +365,21 @@ Note ('WORKSHOP_PARTICIPANT=' + $cfg.Participant)
 Note ('WORKSHOP_TEAM=' + $cfg.Team)
 Note ('WORKSHOP_BLOCK=' + $cfg.Block)
 
+# ── 9. локальный git config репо (страховка для sandbox-сессий Claude) ───────
+# Claude в Cowork стартует в своём sandbox-е со своим $HOME — --global,
+# прописанный на юзере, там не виден. Кладём подпись и ssh-команду в локальный
+# .git/config: он на диске и виден из любой среды, работающей с этим репо.
+Step 'Локальный git config репо — страховка для sandbox-сессий Claude'
+& git -C $RepoDir config user.name  $cfg.Name  | Out-Null
+& git -C $RepoDir config user.email $cfg.Email | Out-Null
+$keyFwd = $keyInGit -replace '\\', '/'
+$sshCmd = "ssh -i '" + $keyFwd + "' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/raif_known_hosts"
+& git -C $RepoDir config core.sshCommand $sshCmd | Out-Null
+Ok ('user.name       = ' + $cfg.Name)
+Ok ('user.email      = ' + $cfg.Email)
+Ok 'core.sshCommand = ssh -i .git/raif-workshop-key (accept-new)'
+Note ('файл: ' + (Join-Path $gitDir 'config'))
+
 # Post-clone hardening (anti-lock + Defender + shortcut) - in separate ps1
 # file to keep this .cmd byte-perfect with the version known to work.
 $hardenPs1 = Join-Path $RepoDir "tools\bootstrap\harden.ps1"
@@ -405,6 +420,7 @@ Write-Host ('    ✓ ' + $SshConfig + '  (блок Host github.com)')
 Write-Host ('    ✓ ' + (Join-Path $env:USERPROFILE '.gitconfig') + '  (git --global)')
 Write-Host ('    ✓ ' + $keyInGit + '  (копия ключа для Claude)')
 Write-Host ('    ✓ ' + $infoInGit + '  (мета-инфо для Claude)')
+Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (локально: подпись + core.sshCommand)')
 if ($cfg.Team -eq 'host') {
   Write-Host '    · защита команды не ставится (организатор)'
 } else {
