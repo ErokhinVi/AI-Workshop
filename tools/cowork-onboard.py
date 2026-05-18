@@ -9,9 +9,10 @@ cowork-onboard.py — sandbox-side onboarding для Claude Code в Cowork mode.
   2. Прописывает его в $HOME/.ssh/ внутри sandbox-а Claude.
   3. Тестирует подключение к GitHub.
   4. Прописывает git config user.name / user.email из .git/raif-workshop-info.
-  5. Поднимает Linux-side git-dir в /tmp/raif-git и git-шим в /tmp/bin/git, чтобы
-     все git-операции писали .lock-и на Linux ext4 (а не на virtiofs-mount, где
-     unlink периодически не проходит и .git залипает).
+  5. Если репо смонтировано через virtiofs (участник на Windows), поднимает
+     копию git-dir на ext4 (/tmp/raif-git) и git-шим в /tmp/bin/git, чтобы
+     .lock-и git-а писались туда, где unlink работает. На macOS и нативном
+     Linux virtiofs нет — шим не ставится, работаем штатным git.
   6. Best-effort чистит .git/*.lock на Windows-mount-е (если осталось от прежних
      запусков под нестабильным git-ом).
   7. Печатает на stdout machine-readable сводку.
@@ -140,57 +141,85 @@ def setup_git_identity(info: dict[str, str]) -> None:
     ok(f"git config global: {name} <{email}>")
 
 
-def setup_linux_gitdir() -> None:
+def _fallback_plain_git(message: str) -> str:
+    """Откат на штатный git.
+
+    Убираем возможный устаревший/битый шим, чтобы он не перехватывал git
+    из PATH, и возвращаем "git". Битый шим хуже отсутствия — он рушит вообще
+    все git-команды, тогда как штатный git работает.
     """
-    Главная защита от virtiofs-induced .lock-болезни.
-
-    Кладёт копию .git/ в /tmp/raif-git (Linux ext4) и ставит git-шим в /tmp/bin,
-    который автоматически перенаправляет любую команду `git ...` на
-    `git --git-dir=/tmp/raif-git --work-tree=<windows-mount> ...`.
-
-    Сторона участника на Windows-mount остаётся как есть (там и так нечего
-    делать — он не запускает git руками). А все локи теперь живут на /tmp,
-    где unlink работает всегда.
-    """
-    if not WIN_GIT_DIR.exists():
-        warn("Windows-mount .git не существует — пропускаю Linux-side git-dir")
-        return
-
-    # Свежий /tmp/raif-git — если /tmp пересоздавался (новая сессия sandbox),
-    # копия нужна заново. Если уже есть — обновим объекты/refs.
-    LINUX_GIT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # rsync был бы идеален, но не везде есть. Используем cp -r с фильтром локов.
-    # Сначала — слить актуальные refs/objects из Windows-mount.
+    warn(message)
     try:
-        subprocess.run(
-            ["cp", "-r", "--update", f"{WIN_GIT_DIR}/.", str(LINUX_GIT_DIR)],
-            check=False, capture_output=True,
-        )
-    except Exception as exc:
-        warn(f"cp .git -> /tmp/raif-git: {exc}")
+        SHIM_PATH.unlink()
+        ok(f"убрал устаревший шим {SHIM_PATH}")
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        warn(f"не смог убрать {SHIM_PATH}: {exc}")
+    return "git"
 
-    # Снести любые .lock в Linux-копии (тут unlink проходит).
-    for rel in GIT_LOCK_FILES:
-        p = LINUX_GIT_DIR / rel
-        if p.exists():
-            try: p.unlink()
-            except OSError: pass
-    for p in (LINUX_GIT_DIR / "refs").rglob("*.lock") if (LINUX_GIT_DIR / "refs").exists() else []:
-        try: p.unlink()
-        except OSError: pass
+
+def _is_valid_git_dir(path: Path) -> bool:
+    """True, если в каталоге настоящий рабочий git-репозиторий."""
+    res = subprocess.run(
+        ["git", "--git-dir", str(path), "rev-parse", "--git-dir"],
+        check=False, capture_output=True,
+    )
+    return res.returncode == 0
+
+
+def setup_linux_gitdir() -> str:
+    """
+    Защита от virtiofs-induced .lock-болезни для участника на Windows: его
+    репо в sandbox-е Claude смонтировано через virtiofs, где unlink .lock-ов
+    периодически не проходит. Кладём копию .git/ на ext4 (/tmp/raif-git) и
+    ставим git-шим /tmp/bin/git, уводящий туда все git-операции.
+
+    На macOS и нативном Linux virtiofs нет — шим не нужен и только вредит
+    (он жёстко прошивает --git-dir/--work-tree). Тогда работаем штатным git.
+
+    Возвращает команду git для дальнейших операций: путь к шиму либо "git".
+    Шим ставится только если копия .git действительно собралась в рабочий
+    репозиторий.
+    """
+    if sys.platform == "darwin":
+        return _fallback_plain_git("macOS — virtiofs-проблемы нет, шим не нужен")
+
+    if not WIN_GIT_DIR.is_dir():
+        return _fallback_plain_git(
+            f"{WIN_GIT_DIR} не каталог — шим не ставлю, используем штатный git")
+
+    # Чистая копия .git на ext4. shutil.copytree портируем — в отличие от
+    # `cp -r --update`: флаг --update есть только в GNU coreutils, в BSD cp
+    # на macOS его нет, и копирование молча падало (cp: illegal option).
+    try:
+        if LINUX_GIT_DIR.exists():
+            shutil.rmtree(LINUX_GIT_DIR, ignore_errors=True)
+        shutil.copytree(
+            WIN_GIT_DIR, LINUX_GIT_DIR, symlinks=True,
+            ignore=shutil.ignore_patterns("*.lock"),
+        )
+    except (OSError, shutil.Error) as exc:
+        return _fallback_plain_git(
+            f"копия .git -> {LINUX_GIT_DIR} не удалась ({exc}); используем штатный git")
+
+    # Не ставить шим на сломанный git-dir.
+    if not _is_valid_git_dir(LINUX_GIT_DIR):
+        shutil.rmtree(LINUX_GIT_DIR, ignore_errors=True)
+        return _fallback_plain_git(
+            f"{LINUX_GIT_DIR} не собрался в рабочий репозиторий; используем штатный git")
 
     # Шим git → реальный git с --git-dir и --work-tree.
     SHIM_DIR.mkdir(parents=True, exist_ok=True)
-    shim = (
+    SHIM_PATH.write_text(
         "#!/bin/bash\n"
         "# Авто-сгенерированный шим: уводит .git-метаданные с virtiofs на ext4.\n"
         f'exec /usr/bin/git --git-dir={LINUX_GIT_DIR} '
         f'--work-tree={REPO_ROOT} "$@"\n'
     )
-    SHIM_PATH.write_text(shim)
     SHIM_PATH.chmod(0o755)
-    ok(f"Linux-side git-dir: {LINUX_GIT_DIR} ({sum(1 for _ in LINUX_GIT_DIR.rglob('*'))} файлов)")
+    n_files = sum(1 for _ in LINUX_GIT_DIR.rglob("*"))
+    ok(f"Linux-side git-dir: {LINUX_GIT_DIR} ({n_files} файлов)")
     ok(f"git-шим: {SHIM_PATH}  (PATH=/tmp/bin:$PATH чтобы перехватить, либо вызывай напрямую)")
 
     # Синхронизируемся с origin/main: Windows-mount .git мог отстать (там
@@ -208,6 +237,7 @@ def setup_linux_gitdir() -> None:
         ok("Linux-side git-dir синхронизирован с origin/main")
     else:
         warn(f"Не смог fetch origin: {fetch.stderr.strip()[:200]}")
+    return str(SHIM_PATH)
 
 
 def harden_git_config() -> None:
@@ -276,8 +306,8 @@ def main() -> int:
     step("Прописываю git identity")
     setup_git_identity(info)
 
-    step("Поднимаю Linux-side git-dir и шим")
-    setup_linux_gitdir()
+    step("Поднимаю git для sandbox-сессии")
+    git_cmd = setup_linux_gitdir()
 
     step("Закаляю git config")
     harden_git_config()
@@ -293,7 +323,7 @@ def main() -> int:
     print(f"WORKSHOP_BLOCK={info.get('WORKSHOP_BLOCK', '')}", flush=True)
     print(f"WORKSHOP_PARTICIPANT={info.get('WORKSHOP_PARTICIPANT', '')}", flush=True)
     print(f"WORKSHOP_GIT_NAME={info.get('WORKSHOP_GIT_NAME', '')}", flush=True)
-    print(f"GIT_SHIM={SHIM_PATH}", flush=True)
+    print(f"GIT_SHIM={git_cmd}", flush=True)
     print(f"GITHUB_OK={'yes' if github_ok else 'no'}", flush=True)
     return 0 if info else 2
 

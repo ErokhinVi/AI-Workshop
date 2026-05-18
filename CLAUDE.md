@@ -54,8 +54,9 @@ git, FastAPI, JSON, ветки, коммиты; не пользуется тер
 Выполни: `python3 tools/cowork-onboard.py`
 
 Скрипт ставит SSH-ключ, git config и печатает `WORKSHOP_TEAM=team_a|team_b`,
-`WORKSHOP_BLOCK=retail|cib|backend` и `WORKSHOP_PARTICIPANT`. Дальше все
-git-команды гоняй через шим `/tmp/bin/git` (скрипт печатает `GIT_SHIM=...`).
+`WORKSHOP_BLOCK=retail|cib|backend` и `WORKSHOP_PARTICIPANT`. Для git-команд
+используй то, что скрипт напечатал в строке `GIT_SHIM=` — это либо путь к
+шиму `/tmp/bin/git`, либо обычный `git` (на macOS шим не нужен).
 Если увидел `WORKSHOP_TEAM` и `WORKSHOP_BLOCK` — ты уже знаешь команду и блок,
 переходи к Шагу 3. Если код возврата 2 (нет ключа) — работай по `TEAM.md`;
 push без ключа не пойдёт, предупреди пользователя.
