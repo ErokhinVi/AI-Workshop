@@ -151,16 +151,23 @@ async def _probe_retail(client: httpx.AsyncClient, url: str) -> dict:
         html = ""
     c["credit_in_ui"] = "кредит" in html
     c["transfer_in_ui"] = "перевод" in html
+    t0 = time.time()
     try:
         r = await client.post(
             f"{url}/api/credit-apply",
             json={"client_id": STRONG_APPLICANT, "amount_rub": 300000, "term_months": 12},
         )
         c["credit_apply_status"] = r.status_code
+        c["credit_apply_latency_ms"] = int((time.time() - t0) * 1000)
         c["credit_apply_decision"] = _decision(_safe_json(r))
+        # сниппет тела при не-200 — судья по нему отличит «не сделано» (404)
+        # от «сделано криво» (500 со стектрейсом)
+        c["credit_apply_error"] = "" if r.status_code == 200 else r.text[:200].strip()
     except httpx.HTTPError:
         c["credit_apply_status"] = 0
+        c["credit_apply_latency_ms"] = -1
         c["credit_apply_decision"] = None
+        c["credit_apply_error"] = "запрос не дошёл"
     try:
         r = await client.post(
             f"{url}/api/credit-apply",
@@ -168,8 +175,12 @@ async def _probe_retail(client: httpx.AsyncClient, url: str) -> dict:
         )
         expl = _explanation(_safe_json(r))
         c["credit_apply_explained"] = bool(expl) and len(expl) > 40
+        # реальный текст объяснения — судья оценит, человеческий он или
+        # роботизированный, и поставит convenience
+        c["credit_apply_explanation"] = expl[:300]
     except httpx.HTTPError:
         c["credit_apply_explained"] = False
+        c["credit_apply_explanation"] = ""
     try:
         cl = await client.get(f"{url}/clients?limit=2")
         ids = [x["id"] for x in _safe_json(cl).get("items", []) if "id" in x]

@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+# CREATE — для свежей БД; ALTER ... IF NOT EXISTS — догоняет БД прошлых
+# прогонов воркшопа новыми колонками модели застоя.
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sim_state (
     team           TEXT PRIMARY KEY,
@@ -18,6 +20,9 @@ CREATE TABLE IF NOT EXISTS sim_state (
     last_commit    TEXT,
     baseline_score INT,
     last_score     INT,
+    last_commit_ts TIMESTAMPTZ,
+    last_eval_ts   TIMESTAMPTZ,
+    last_value     DOUBLE PRECISION,
     updated_at     TIMESTAMPTZ
 );
 CREATE TABLE IF NOT EXISTS sim_events (
@@ -32,6 +37,9 @@ CREATE TABLE IF NOT EXISTS sim_events (
     snapshot          JSONB,
     judge             TEXT
 );
+ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_commit_ts TIMESTAMPTZ;
+ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_eval_ts   TIMESTAMPTZ;
+ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_value     DOUBLE PRECISION;
 """
 
 
@@ -57,38 +65,45 @@ async def get_state(pool: asyncpg.Pool) -> dict[str, dict]:
             "last_commit": r["last_commit"],
             "baseline_score": r["baseline_score"],
             "last_score": r["last_score"],
+            "last_commit_ts": r["last_commit_ts"],
+            "last_eval_ts": r["last_eval_ts"],
+            "last_value": r["last_value"],
         }
         for r in rows
     }
 
 
-async def upsert_state(pool: asyncpg.Pool, team: str, client_base: int,
-                       last_commit: str | None, baseline_score: int,
-                       last_score: int) -> None:
+async def upsert_state(pool: asyncpg.Pool, team: str, client_base: float,
+                       last_commit: str | None, baseline_score: int | None,
+                       last_score: int | None, last_commit_ts: datetime | None,
+                       last_eval_ts: datetime | None, last_value: float) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """INSERT INTO sim_state(team, client_base, last_commit,
-                   baseline_score, last_score, updated_at)
-               VALUES($1, $2, $3, $4, $5, $6)
+                   baseline_score, last_score, last_commit_ts, last_eval_ts,
+                   last_value, updated_at)
+               VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
                ON CONFLICT (team) DO UPDATE SET
                    client_base=$2, last_commit=$3, baseline_score=$4,
-                   last_score=$5, updated_at=$6""",
-            team, client_base, last_commit, baseline_score, last_score,
+                   last_score=$5, last_commit_ts=$6, last_eval_ts=$7,
+                   last_value=$8, updated_at=$9""",
+            team, int(round(client_base)), last_commit, baseline_score,
+            last_score, last_commit_ts, last_eval_ts, float(last_value),
             datetime.now(timezone.utc),
         )
 
 
 async def add_event(pool: asyncpg.Pool, team: str, commit: str | None,
-                    delta: int, client_base_after: int, rubric: list[int],
+                    delta: float, client_base_after: float, rubric: list[int],
                     reason: str, snapshot: dict, judge: str) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """INSERT INTO sim_events(team, ts, commit, delta,
                    client_base_after, rubric, reason, snapshot, judge)
                VALUES($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9)""",
-            team, datetime.now(timezone.utc), commit, delta, client_base_after,
-            json.dumps(rubric), reason, json.dumps(snapshot, ensure_ascii=False),
-            judge,
+            team, datetime.now(timezone.utc), commit, int(round(delta)),
+            int(round(client_base_after)), json.dumps(rubric), reason,
+            json.dumps(snapshot, ensure_ascii=False), judge,
         )
 
 
