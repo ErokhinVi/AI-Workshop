@@ -29,10 +29,38 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _resolve_common_git_dir(repo_root: Path) -> Path:
+    """Общий git-dir основного клона — один на основное дерево и все worktree.
+
+    Claude Code App открывает каждую сессию в отдельном git-worktree
+    (.claude/worktrees/<name>/); тогда repo_root/.git — это файл-указатель, а не
+    каталог, и ключа воркшопа в нём нет. bootstrap кладёт ключ и info-файл в
+    .git/ основного клона. `git rev-parse --git-common-dir` возвращает этот
+    каталог из любого дерева; для основного клона это просто .git.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
+            check=False, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return (repo_root / ".git").resolve()
+    if res.returncode == 0 and res.stdout.strip():
+        common = Path(res.stdout.strip())
+        if not common.is_absolute():
+            common = repo_root / common
+        return common.resolve()
+    return (repo_root / ".git").resolve()
+
+
 REPO_ROOT = Path(os.environ.get("WORKSHOP_REPO_ROOT") or Path(__file__).resolve().parents[1])
+# .git основного клона. В worktree-сессии Claude Code App repo_root/.git —
+# файл-указатель, и ключ/info лежат не в нём, а в общем git-dir.
+COMMON_GIT_DIR = _resolve_common_git_dir(REPO_ROOT)
 WIN_GIT_DIR = REPO_ROOT / ".git"
-KEY_SRC = WIN_GIT_DIR / "raif-workshop-key"
-INFO_SRC = WIN_GIT_DIR / "raif-workshop-info"
+KEY_SRC = COMMON_GIT_DIR / "raif-workshop-key"
+INFO_SRC = COMMON_GIT_DIR / "raif-workshop-info"
 
 HOME = Path(os.environ["HOME"])
 SSH_DIR = HOME / ".ssh"
@@ -72,6 +100,10 @@ GIT_CONFIG_HARDENING = [
     ("gc.auto", "0"),
     ("maintenance.auto", "false"),
     ("pull.rebase", "true"),
+    # Страховка для worktree-сессий Claude Code App: сессия идёт на ветке
+    # claude/<name> с upstream origin/main. При push.default=upstream «голый»
+    # git push уходит в origin/main, а не падает на несовпадении имён веток.
+    ("push.default", "upstream"),
 ]
 
 
@@ -246,7 +278,7 @@ def harden_git_config() -> None:
     for k, v in GIT_CONFIG_HARDENING:
         subprocess.run([git, "config", "--local", k, v], check=False, capture_output=True)
     subprocess.run([git, "maintenance", "unregister"], check=False, capture_output=True)
-    ok("git config: autocrlf=off, fsmonitor=off, gc.auto=0, maintenance=off")
+    ok("git config: autocrlf=off, fsmonitor=off, gc.auto=0, maintenance=off, push.default=upstream")
 
 
 def cleanup_stale_locks_on_mount() -> list[str]:

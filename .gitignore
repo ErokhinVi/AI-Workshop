@@ -14,6 +14,9 @@ venv/
 # Локальные настройки Claude Code — у каждого топа свои
 .claude/settings.local.json
 
+# Worktree-копии сессий Claude Code App — служебные, в общую ветку не идут
+.claude/worktrees/
+
 # SESSION.md в каждой папке — это локальный контекст, не делимый
 */SESSION.md
 PUSH_TO_GITHUB.md
