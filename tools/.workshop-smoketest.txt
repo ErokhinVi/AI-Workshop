@@ -1,1 +1,2 @@
 smoketest 2026-05-06T11:00:52Z — claude push from sandbox OK
+smoketest 2026-05-19T13:00:06Z — push из worktree-ветки claude/* в main OK
