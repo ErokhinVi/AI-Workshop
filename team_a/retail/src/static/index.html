@@ -184,6 +184,7 @@
 
     <div class="tabs">
       <button class="tab active" data-tab="transfers">Переводы</button>
+      <button class="tab" data-tab="credit">Кредиты</button>
     </div>
 
     <div class="tab-pane show" data-pane="transfers">
@@ -203,6 +204,27 @@
 
       <div class="section-title" style="margin-top:24px">Последние операции</div>
       <div id="tx-list" class="tx-list"></div>
+    </div>
+
+    <div class="tab-pane" data-pane="credit">
+      <div class="section-title">Заявка на кредит</div>
+      <form id="credit-form" autocomplete="off">
+        <div class="form-row">
+          <label>Сумма, ₽</label>
+          <input name="amount" type="number" min="1" placeholder="0" />
+        </div>
+        <div class="form-row">
+          <label>Срок</label>
+          <select name="term">
+            <option value="6">6 месяцев</option>
+            <option value="12" selected>1 год</option>
+            <option value="24">2 года</option>
+            <option value="36">3 года</option>
+          </select>
+        </div>
+        <button class="btn primary" type="submit">Оформить заявку</button>
+      </form>
+      <div id="credit-result"></div>
     </div>
   </div>
 
@@ -337,6 +359,65 @@
         }
       } catch(e) {
         transferResult.innerHTML =
+          `<div class="alert error">сервер не ответил</div>`;
+      }
+    });
+
+    // ---- форма заявки на кредит ----
+    const creditForm = document.getElementById("credit-form");
+    const creditResult = document.getElementById("credit-result");
+
+    function creditTermLabel(months) {
+      return ({6: "6 месяцев", 12: "1 год", 24: "2 года", 36: "3 года"})[months]
+        || (months + " мес.");
+    }
+
+    creditForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      creditResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      const data = new FormData(ev.target);
+      const amount = +data.get("amount");
+      const term = +data.get("term");
+      if (amount <= 0) {
+        creditResult.innerHTML = `<div class="alert error">введи сумму кредита</div>`;
+        return;
+      }
+
+      creditResult.innerHTML = `<div class="alert info">Банк рассматривает заявку…</div>`;
+      const payload = {
+        client_id: opt.value,
+        amount_rub: amount,
+        term_months: term,
+      };
+      try {
+        const r = await fetch("/api/credit-apply", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          creditResult.innerHTML =
+            `<div class="alert error">${d.detail || "ошибка"}</div>`;
+          return;
+        }
+        if (d.decision === "approve") {
+          const sumLabel = fmt.format(d.amount_rub);
+          const termLabel = creditTermLabel(d.term_months);
+          creditResult.innerHTML =
+            `<div class="alert ok">Кредит одобрен: ${sumLabel} ₽ ` +
+            `на ${termLabel}.<br/>${d.reason || ""}</div>`;
+        } else if (d.decision === "decline") {
+          creditResult.innerHTML =
+            `<div class="alert info">В кредите отказано.<br/>${d.reason || ""}</div>`;
+        } else {
+          creditResult.innerHTML =
+            `<div class="alert info">${d.reason || "Решение пока недоступно."}</div>`;
+        }
+      } catch(e) {
+        creditResult.innerHTML =
           `<div class="alert error">сервер не ответил</div>`;
       }
     });
