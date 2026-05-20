@@ -70,10 +70,14 @@ const FSTATE = {absent:'фича не начата', frontend_only:'только
 const MSK_TIME = new Intl.DateTimeFormat('ru-RU', {
   timeZone:'Europe/Moscow', hour:'2-digit', minute:'2-digit', second:'2-digit',
 });
-const MSK_FULL = new Intl.DateTimeFormat('ru-RU', {
-  timeZone:'Europe/Moscow', hour:'2-digit', minute:'2-digit', second:'2-digit',
-  day:'2-digit', month:'2-digit',
+const MSK_DATE = new Intl.DateTimeFormat('ru-RU', {
+  timeZone:'Europe/Moscow', weekday:'long', day:'numeric', month:'long',
 });
+function cap(s){ return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function fmtMskFull(date){
+  // «Среда, 20 мая · 18:30:42»
+  return cap(MSK_DATE.format(date)) + ' · ' + MSK_TIME.format(date);
+}
 
 function fmtIdle(seconds){
   if(seconds === null || seconds === undefined) return '—';
@@ -126,7 +130,7 @@ async function tick(){
 
   // часы МСК — берём now сервера если есть, иначе локально
   const nowDate = d.now ? new Date(d.now) : new Date();
-  document.getElementById('now-msk').textContent = MSK_FULL.format(nowDate);
+  document.getElementById('now-msk').textContent = fmtMskFull(nowDate);
 
   // лидер по дельте от старта
   const entries = Object.entries(d.teams||{});
