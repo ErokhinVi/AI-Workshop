@@ -65,3 +65,40 @@ async def api_transfer(payload: dict) -> dict:
     if r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail=r.text[:300])
     return r.json()
+
+
+@app.post("/api/credit-apply")
+async def api_credit_apply(payload: dict) -> dict:
+    client_id = (payload.get("client_id") or "").strip()
+    amount = int(payload.get("amount_rub") or 0)
+    term = int(payload.get("term_months") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="выбери клиента")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="укажи положительную сумму")
+    if term <= 0:
+        raise HTTPException(status_code=400, detail="укажи срок в месяцах")
+
+    decide_body = {"client_id": client_id, "amount_rub": amount, "term_months": term}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(f"{CIB_URL}/credit/decide", json=decide_body)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}") from exc
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:300])
+    verdict = r.json()
+
+    save_body = {
+        "client_id": client_id, "amount_rub": amount, "term_months": term,
+        "decision": verdict.get("decision"), "reason": verdict.get("reason", ""),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r2 = await client.post(f"{BACKEND_URL}/credit-applications", json=save_body)
+            if r2.status_code != 200:
+                return {**verdict, "saved": False, "save_error": r2.text[:200]}
+            saved = r2.json().get("application", {})
+    except httpx.HTTPError as exc:
+        return {**verdict, "saved": False, "save_error": str(exc)}
+    return {**verdict, "saved": True, "application_id": saved.get("id")}
