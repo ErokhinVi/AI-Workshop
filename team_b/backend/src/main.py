@@ -37,6 +37,7 @@ SEED_DIR = _find_seed_dir()
 _clients: list[dict[str, Any]] = []
 _clients_by_id: dict[str, dict[str, Any]] = {}
 _transactions: list[dict[str, Any]] = []
+_credit_applications: list[dict[str, Any]] = []
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -106,6 +107,71 @@ async def get_transactions(
     txs = [t for t in _transactions if t["client_id"] == client_id]
     txs.sort(key=lambda t: t["ts"], reverse=True)
     return {"total": len(txs), "items": txs[:limit]}
+
+
+@app.post("/credit-applications")
+async def save_credit_application(payload: dict) -> dict:
+    client_id = (payload.get("client_id") or "").strip()
+    amount = int(payload.get("amount_rub") or 0)
+    term = int(payload.get("term_months") or 0)
+    product_id = (payload.get("product_id") or "").strip()
+    decision = (payload.get("decision") or "").strip()
+    score = int(payload.get("score") or 0)
+    reason = (payload.get("reason") or "").strip()
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    if amount <= 0 or term <= 0:
+        raise HTTPException(status_code=400, detail="сумма и срок должны быть положительными")
+    if decision not in ("approved", "declined"):
+        raise HTTPException(status_code=400, detail="решение должно быть approved или declined")
+    now_iso = datetime.now().replace(microsecond=0).isoformat()
+    app_id = f"ca-{100000 + len(_credit_applications) + 1:08d}"
+    record = {
+        "id": app_id, "client_id": client_id, "product_id": product_id,
+        "amount_rub": amount, "term_months": term,
+        "decision": decision, "score": score, "reason": reason, "ts": now_iso,
+    }
+    _credit_applications.append(record)
+    return {"status": "ok", "application": record}
+
+
+@app.get("/credit-applications")
+async def list_credit_applications(
+    decision: str | None = Query(default=None),
+    product_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    out = _credit_applications
+    if decision:
+        out = [a for a in out if a["decision"] == decision]
+    if product_id:
+        out = [a for a in out if a.get("product_id") == product_id]
+    out = sorted(out, key=lambda a: a["ts"], reverse=True)
+    return {"total": len(out), "items": out[:limit]}
+
+
+@app.get("/credit-applications/stats")
+async def credit_stats() -> dict:
+    total = len(_credit_applications)
+    approved = [a for a in _credit_applications if a["decision"] == "approved"]
+    declined = [a for a in _credit_applications if a["decision"] == "declined"]
+    by_product: dict[str, dict[str, int]] = {}
+    for a in _credit_applications:
+        bucket = by_product.setdefault(a.get("product_id") or "—",
+                                       {"total": 0, "approved": 0, "declined": 0,
+                                        "sum_approved_rub": 0})
+        bucket["total"] += 1
+        bucket[a["decision"]] += 1
+        if a["decision"] == "approved":
+            bucket["sum_approved_rub"] += int(a.get("amount_rub") or 0)
+    sum_approved = sum(int(a.get("amount_rub") or 0) for a in approved)
+    avg_approved = (sum_approved // len(approved)) if approved else 0
+    return {
+        "total": total, "approved": len(approved), "declined": len(declined),
+        "approval_rate": (len(approved) / total) if total else 0.0,
+        "sum_approved_rub": sum_approved, "avg_approved_rub": avg_approved,
+        "by_product": by_product,
+    }
 
 
 @app.post("/api/transfer")
