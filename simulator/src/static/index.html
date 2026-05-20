@@ -49,7 +49,42 @@
   .ev .body{color:var(--text)}
   .ev .j{font-size:11px;color:var(--dim);margin-left:6px}
   .ev .empty{color:var(--dim)}
+  .gate{position:fixed;inset:0;background:var(--bg);display:flex;
+        align-items:center;justify-content:center;padding:28px;
+        flex-direction:column;gap:24px;z-index:50}
+  .gate-card{background:var(--panel);border:1px solid var(--rule);
+             border-radius:12px;padding:36px 40px;max-width:420px;width:100%}
+  .gate h2{margin:0 0 6px;font-size:20px;font-weight:500}
+  .gate .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .gate label{display:block;font-size:11px;color:var(--muted);
+              letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+  .gate input{width:100%;padding:11px 12px;background:var(--bg);
+              color:var(--text);border:1px solid var(--rule);border-radius:6px;
+              font-family:inherit;font-size:14px;margin-bottom:14px}
+  .gate input:focus{outline:0;border-color:var(--text)}
+  .gate button{width:100%;padding:13px;background:var(--raiff);color:#1f1d18;
+               border:0;border-radius:8px;font-family:inherit;font-weight:600;
+               font-size:14px;letter-spacing:.02em;cursor:pointer;
+               transition:background 160ms}
+  .gate button:hover{background:#fff04a}
+  .gate button:active{transform:translateY(1px)}
+  .gate button[disabled]{opacity:.5;cursor:wait}
+  .gate .err{color:var(--down);font-size:12px;margin-top:8px;min-height:14px}
+  .hidden{display:none !important}
 </style></head><body>
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <h2>Воркшоп ещё не начат</h2>
+    <div class="sub">Симулятор подождёт, пока организатор скажет «поехали». До этого
+      момента табло не обращается к банкам команд и не списывает клиентов за застой.</div>
+    <label for="admin-token">Admin-токен</label>
+    <input id="admin-token" type="password" autocomplete="off" placeholder="введи токен"/>
+    <button id="start-btn">Начать воркшоп</button>
+    <div class="err" id="start-err"></div>
+  </div>
+</div>
+
+<div id="board" class="hidden">
 <h1>Табло воркшопа — клиентская база команд</h1>
 <div class="meta">
   <span>обновляется автоматически · симулятор клиентов</span>
@@ -59,6 +94,7 @@
 <div class="teams" id="teams"></div>
 <h3>Лента событий</h3>
 <div id="events"></div>
+</div>
 <script>
 "use strict";
 const fmt = n => Number(n||0).toLocaleString('ru-RU');
@@ -124,9 +160,38 @@ function eventRow(e){
   </div>`;
 }
 
+let pollTimer = null;
+let started = false;
+const gateEl = document.getElementById('gate');
+const boardEl = document.getElementById('board');
+
+function showGate(){
+  gateEl.classList.remove('hidden');
+  boardEl.classList.add('hidden');
+}
+function showBoard(){
+  gateEl.classList.add('hidden');
+  boardEl.classList.remove('hidden');
+}
+
+async function fetchState(){
+  try { return await (await fetch('/state')).json(); }
+  catch(e){ return null; }
+}
+
 async function tick(){
-  let d;
-  try { d = await (await fetch('/state')).json(); } catch(e){ return; }
+  const d = await fetchState();
+  if(!d) return;
+
+  if(!d.workshop_started){
+    started = false;
+    showGate();
+    return;
+  }
+  if(!started){
+    started = true;
+    showBoard();
+  }
 
   // часы МСК — берём now сервера если есть, иначе локально
   const nowDate = d.now ? new Date(d.now) : new Date();
@@ -157,6 +222,40 @@ async function tick(){
     ? evs.map(eventRow).join('')
     : '<div class="ev"><span class="empty">пока событий нет</span></div>';
 }
-tick(); setInterval(tick, 4000);
+function startPolling(){
+  if(!pollTimer) pollTimer = setInterval(tick, 4000);
+}
+
+// Кнопка «Начать воркшоп» — POST /admin/start с токеном.
+document.getElementById('start-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('start-btn');
+  const errEl = document.getElementById('start-err');
+  const tokenEl = document.getElementById('admin-token');
+  const token = (tokenEl.value || '').trim();
+  errEl.textContent = '';
+  if(!token){ errEl.textContent = 'нужен admin-токен'; return; }
+  btn.disabled = true; btn.textContent = 'Запускаю…';
+  try {
+    const r = await fetch('/admin/start', {
+      method:'POST', headers:{'X-Admin-Token': token},
+    });
+    if(!r.ok){
+      const t = await r.text();
+      errEl.textContent = `ошибка ${r.status}: ${t.slice(0,160)}`;
+      btn.disabled = false; btn.textContent = 'Начать воркшоп';
+      return;
+    }
+    tokenEl.value = '';
+    btn.textContent = 'Начато';
+    await tick();
+    startPolling();
+  } catch(e){
+    errEl.textContent = 'сервер не ответил';
+    btn.disabled = false; btn.textContent = 'Начать воркшоп';
+  }
+});
+
+// первый рендер: дождаться state, дальше polling запустится только если начато.
+tick().then(startPolling);
 </script>
 </body></html>

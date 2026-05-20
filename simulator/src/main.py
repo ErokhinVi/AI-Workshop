@@ -78,6 +78,8 @@ def _fresh_state() -> dict:
 _state: dict[str, dict] = {t: _fresh_state() for t in TEAMS}
 _events: list[dict] = []
 _eval_lock: asyncio.Lock | None = None
+_workshop_started: bool = False
+_workshop_started_at: datetime | None = None
 
 
 def _get_lock() -> asyncio.Lock:
@@ -101,6 +103,7 @@ def _commit_fingerprint(snapshot: dict) -> str:
 
 
 async def _load_state() -> None:
+    global _workshop_started, _workshop_started_at
     pool = _pool()
     if pool is None:
         return
@@ -121,6 +124,15 @@ async def _load_state() -> None:
             _state[team]["last_commit_ts"] = now
     _events.clear()
     _events.extend(await dbmod.recent_events(pool, limit=50))
+    # Флаг «воркшоп начат» сохраняется в БД, чтобы переживать рестарты Render.
+    started_raw = await dbmod.get_meta(pool, "workshop_started")
+    started_at_raw = await dbmod.get_meta(pool, "workshop_started_at")
+    _workshop_started = started_raw == "true"
+    if started_at_raw:
+        try:
+            _workshop_started_at = datetime.fromisoformat(started_at_raw)
+        except ValueError:
+            _workshop_started_at = None
 
 
 async def _save_state(team: str) -> None:
@@ -260,9 +272,17 @@ async def _decay_tick(team: str, now: datetime) -> None:
 
 
 async def _poll_loop() -> None:
-    """Фон: раз в POLL_INTERVAL_S ловить деплой команд и точить застой."""
+    """Фон: раз в POLL_INTERVAL_S ловить деплой команд и точить застой.
+
+    Пока организатор не нажал «Начать воркшоп», цикл крутится вхолостую:
+    ни probe-запросов к банкам, ни обращений к LLM-судье. Это нужно для
+    предстартового состояния, когда участники ещё не на местах, а Render
+    уже поднял симулятор после деплоя.
+    """
     while True:
         await asyncio.sleep(POLL_INTERVAL_S)
+        if not _workshop_started:
+            continue
         try:
             now = _now()
             snaps: dict[str, dict] = {}
@@ -292,7 +312,10 @@ async def lifespan(app: FastAPI):
             await dbmod.ensure_schema(pool)
         app.state.pool = pool
         await _load_state()
-        if _state["team_a"]["baseline_score"] is None:
+        # Baseline-замер делаем только если воркшоп уже шёл и почему-то нет
+        # снимка стартовых баллов. Если организатор ещё не нажал «Начать
+        # воркшоп», ничего не трогаем — фон вхолостую крутится.
+        if _workshop_started and _state["team_a"]["baseline_score"] is None:
             await _baseline()
     except Exception as exc:  # noqa: BLE001
         print(f"[simulator] init error: {exc!r}")
@@ -347,6 +370,9 @@ async def state() -> dict:
         }
     return {
         "now": now.isoformat(),
+        "workshop_started": _workshop_started,
+        "workshop_started_at": (_workshop_started_at.isoformat()
+                                if _workshop_started_at else None),
         "teams": teams_out,
         "events": _events[:30],
     }
@@ -366,6 +392,9 @@ def _check_admin(token: str | None) -> None:
 @app.post("/admin/evaluate")
 async def admin_evaluate(x_admin_token: str | None = Header(default=None)) -> dict:
     _check_admin(x_admin_token)
+    if not _workshop_started:
+        raise HTTPException(status_code=409,
+                            detail="воркшоп ещё не начат — нажми «Начать воркшоп»")
     return await evaluate_round()
 
 
@@ -378,6 +407,47 @@ async def admin_reset(x_admin_token: str | None = Header(default=None)) -> dict:
     _events.clear()
     for team in TEAMS:
         _state[team] = _fresh_state()
-    await _baseline()
+    if _workshop_started:
+        await _baseline()
     return {"status": "reset",
+            "workshop_started": _workshop_started,
             "teams": {t: round(_state[t]["client_base"]) for t in TEAMS}}
+
+
+@app.post("/admin/start")
+async def admin_start(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Начать воркшоп: свежий baseline и опрос банков начинают работать."""
+    _check_admin(x_admin_token)
+    global _workshop_started, _workshop_started_at
+    if _workshop_started:
+        return {"status": "already_running",
+                "started_at": (_workshop_started_at.isoformat()
+                               if _workshop_started_at else None)}
+    pool = _pool()
+    if pool is not None:
+        await dbmod.reset(pool)
+    _events.clear()
+    for team in TEAMS:
+        _state[team] = _fresh_state()
+    _workshop_started = True
+    _workshop_started_at = _now()
+    if pool is not None:
+        await dbmod.set_meta(pool, "workshop_started", "true")
+        await dbmod.set_meta(pool, "workshop_started_at",
+                             _workshop_started_at.isoformat())
+    await _baseline()
+    return {"status": "started",
+            "started_at": _workshop_started_at.isoformat(),
+            "teams": {t: round(_state[t]["client_base"]) for t in TEAMS}}
+
+
+@app.post("/admin/stop")
+async def admin_stop(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Остановить воркшоп: опрос замирает, состояние сохраняется как есть."""
+    _check_admin(x_admin_token)
+    global _workshop_started
+    _workshop_started = False
+    pool = _pool()
+    if pool is not None:
+        await dbmod.set_meta(pool, "workshop_started", "false")
+    return {"status": "stopped"}

@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS sim_events (
     snapshot          JSONB,
     judge             TEXT
 );
+CREATE TABLE IF NOT EXISTS sim_meta (
+    name       TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TIMESTAMPTZ
+);
 ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_commit_ts TIMESTAMPTZ;
 ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_eval_ts   TIMESTAMPTZ;
 ALTER TABLE sim_state ADD COLUMN IF NOT EXISTS last_value     DOUBLE PRECISION;
@@ -133,3 +138,20 @@ async def reset(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE sim_events")
         await conn.execute("TRUNCATE sim_state")
+
+
+async def get_meta(pool: asyncpg.Pool, name: str) -> str | None:
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT value FROM sim_meta WHERE name=$1", name,
+        )
+
+
+async def set_meta(pool: asyncpg.Pool, name: str, value: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO sim_meta(name, value, updated_at) VALUES($1, $2, $3)
+               ON CONFLICT (name) DO UPDATE
+               SET value=$2, updated_at=$3""",
+            name, value, datetime.now(timezone.utc),
+        )
