@@ -144,6 +144,40 @@
     .tx-row .amt.minus { color: var(--text); }
     .tx-row .amt.plus  { color: var(--good); }
 
+    .product-grid {
+      display: grid; grid-template-columns: 1fr; gap: 10px;
+      margin-bottom: 16px;
+    }
+    .product-card {
+      padding: 14px 16px; border: 1px solid var(--rule);
+      border-radius: 10px; cursor: pointer;
+      background: var(--surface);
+      transition: border-color 160ms, background 160ms;
+    }
+    .product-card:hover { border-color: var(--text-2); }
+    .product-card.selected {
+      border-color: var(--text);
+      background: var(--raiff-soft);
+    }
+    .product-card .pname { font-weight: 500; font-size: 14px; }
+    .product-card .pmeta {
+      font-size: 11px; color: var(--muted); margin-top: 4px;
+      letter-spacing: 0.04em;
+    }
+
+    .step-head {
+      display: flex; gap: 12px; align-items: center;
+      margin-bottom: 14px; font-size: 12px; color: var(--muted);
+    }
+    .step-head .dot {
+      width: 18px; height: 18px; border-radius: 9px;
+      background: var(--rule); color: var(--text);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600;
+    }
+    .step-head .dot.active { background: var(--text); color: var(--bg); }
+    .step-head .sep { flex: 1; height: 1px; background: var(--rule); }
+
     .empty {
       text-align: center; padding: 60px 0;
       color: var(--muted); font-size: 13px;
@@ -184,6 +218,7 @@
 
     <div class="tabs">
       <button class="tab active" data-tab="transfers">Переводы</button>
+      <button class="tab" data-tab="credits">Кредиты</button>
     </div>
 
     <div class="tab-pane show" data-pane="transfers">
@@ -203,6 +238,41 @@
 
       <div class="section-title" style="margin-top:24px">Последние операции</div>
       <div id="tx-list" class="tx-list"></div>
+    </div>
+
+    <div class="tab-pane" data-pane="credits">
+      <div class="step-head" id="credit-step-head">
+        <span class="dot active" id="credit-dot-1">1</span>
+        <span>Выбрать продукт</span>
+        <span class="sep"></span>
+        <span class="dot" id="credit-dot-2">2</span>
+        <span>Указать сумму и срок</span>
+      </div>
+
+      <div id="credit-step-1">
+        <div class="section-title">Кредитные продукты</div>
+        <div id="product-grid" class="product-grid"></div>
+        <button class="btn primary" id="credit-next-btn" disabled>Продолжить</button>
+      </div>
+
+      <div id="credit-step-2" style="display:none">
+        <div class="section-title" id="credit-step2-title">Параметры</div>
+        <form id="credit-form" autocomplete="off">
+          <div class="form-row">
+            <label>Сумма, ₽</label>
+            <input name="amount" type="number" min="1" placeholder="например, 300000" />
+          </div>
+          <div class="form-row">
+            <label>Срок, месяцев</label>
+            <input name="term" type="number" min="1" max="360" placeholder="например, 24" />
+          </div>
+          <button class="btn primary" type="submit">Узнать решение</button>
+          <button class="btn" type="button" id="credit-back-btn"
+                  style="margin-top:8px;background:transparent;color:var(--text-2);
+                         border:1px solid var(--rule)">Назад к выбору</button>
+        </form>
+        <div id="credit-result"></div>
+      </div>
     </div>
   </div>
 
@@ -341,7 +411,106 @@
       }
     });
 
+    // ---- кредиты: двухшаговый мастер ----
+    const productGrid = document.getElementById("product-grid");
+    const creditNextBtn = document.getElementById("credit-next-btn");
+    const creditBackBtn = document.getElementById("credit-back-btn");
+    const creditStep1 = document.getElementById("credit-step-1");
+    const creditStep2 = document.getElementById("credit-step-2");
+    const creditDot1 = document.getElementById("credit-dot-1");
+    const creditDot2 = document.getElementById("credit-dot-2");
+    const creditForm = document.getElementById("credit-form");
+    const creditResult = document.getElementById("credit-result");
+    const creditStep2Title = document.getElementById("credit-step2-title");
+    let selectedProduct = null;
+
+    async function loadCreditProducts() {
+      try {
+        const r = await fetch("/api/credit-products");
+        const d = await r.json();
+        const items = d.items || [];
+        if (!items.length) {
+          productGrid.innerHTML = `<div class="empty">Каталог пока пуст</div>`;
+          return;
+        }
+        productGrid.innerHTML = items.map(p => {
+          const maxA = (p.max_amount_rub || 0).toLocaleString("ru-RU");
+          const maxT = p.max_term_months || "—";
+          const rate = (typeof p.rate_pct === "number") ? `${p.rate_pct}%` : "—";
+          return `<div class="product-card" data-id="${p.id}" data-name="${p.name}">
+            <div class="pname">${p.name}</div>
+            <div class="pmeta">до ${maxA} ₽ · до ${maxT} мес · ставка ${rate}</div>
+          </div>`;
+        }).join("");
+        productGrid.querySelectorAll(".product-card").forEach(card => {
+          card.addEventListener("click", () => {
+            productGrid.querySelectorAll(".product-card").forEach(c => c.classList.remove("selected"));
+            card.classList.add("selected");
+            selectedProduct = {id: card.dataset.id, name: card.dataset.name};
+            creditNextBtn.disabled = false;
+          });
+        });
+      } catch(e) {
+        productGrid.innerHTML = `<div class="empty">Не удалось загрузить продукты</div>`;
+      }
+    }
+
+    creditNextBtn.addEventListener("click", () => {
+      if (!selectedProduct) return;
+      creditStep1.style.display = "none";
+      creditStep2.style.display = "block";
+      creditDot1.classList.remove("active");
+      creditDot2.classList.add("active");
+      creditStep2Title.textContent = `Параметры — ${selectedProduct.name}`;
+      creditResult.innerHTML = "";
+    });
+    creditBackBtn.addEventListener("click", () => {
+      creditStep2.style.display = "none";
+      creditStep1.style.display = "block";
+      creditDot2.classList.remove("active");
+      creditDot1.classList.add("active");
+    });
+
+    creditForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      creditResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt || !selectedProduct) return;
+      const data = new FormData(ev.target);
+      const amount = +data.get("amount");
+      const term = +data.get("term");
+      if (amount <= 0 || term <= 0) {
+        creditResult.innerHTML = `<div class="alert error">укажи сумму и срок</div>`;
+        return;
+      }
+      creditResult.innerHTML = `<div class="alert info">Скоринг занимает несколько секунд…</div>`;
+      try {
+        const r = await fetch("/api/credit-apply", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            client_id: opt.value, product_id: selectedProduct.id,
+            amount_rub: amount, term_months: term,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          creditResult.innerHTML = `<div class="alert error">${d.detail || "ошибка"}</div>`;
+          return;
+        }
+        const cls = d.decision === "approved" ? "ok" : "error";
+        const title = d.decision === "approved" ? "Кредит одобрен" : "В кредите отказано";
+        const scoreHint = (typeof d.score === "number") ? ` · балл ${d.score}/100` : "";
+        creditResult.innerHTML =
+          `<div class="alert ${cls}"><b>${title}</b>${scoreHint}<br/>${d.reason || ""}</div>`;
+        if (d.decision === "approved") creditForm.reset();
+      } catch(e) {
+        creditResult.innerHTML = `<div class="alert error">сервер не ответил</div>`;
+      }
+    });
+
     loadClients();
+    loadCreditProducts();
   })();
   </script>
 </body>
