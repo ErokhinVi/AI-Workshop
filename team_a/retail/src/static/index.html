@@ -68,19 +68,6 @@
       letter-spacing: -0.01em;
     }
     .balance .v .cur { font-size: 18px; opacity: 0.7; margin-left: 4px; }
-    .balance .bal-row {
-      display: flex; align-items: flex-end; justify-content: space-between;
-      gap: 12px;
-    }
-    .balance .eye {
-      background: transparent; border: 0;
-      padding: 6px 8px; margin-bottom: 2px;
-      color: var(--bg); cursor: pointer;
-      font-size: 22px; line-height: 1;
-      opacity: 0.55; transition: opacity 160ms, transform 120ms;
-    }
-    .balance .eye:hover { opacity: 1; }
-    .balance .eye:active { transform: scale(0.92); }
 
     .tabs {
       display: flex; gap: 0;
@@ -187,12 +174,7 @@
 
     <div class="balance">
       <div class="l">остаток на счёте</div>
-      <div class="bal-row">
-        <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
-        <button id="balance-toggle" class="eye" type="button" aria-label="Скрыть или показать баланс" title="Скрыть баланс">
-          <span id="eye-icon">👁</span>
-        </button>
-      </div>
+      <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
     </div>
 
     <div class="client-picker">
@@ -262,37 +244,11 @@
     function onPickClient() {
       const opt = sel.selectedOptions[0];
       if (!opt) return;
-      renderBalance();
+      balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       topbarWho.textContent = opt.dataset.name;
       loadTx(opt.value);
     }
     sel.addEventListener("change", onPickClient);
-
-    // ---- скрыть/показать баланс ----
-    let balanceHidden = localStorage.getItem("raif-balance-hidden") === "1";
-    const eyeBtn = document.getElementById("balance-toggle");
-    const eyeIcon = document.getElementById("eye-icon");
-
-    function renderBalance() {
-      const opt = sel.selectedOptions[0];
-      const real = opt ? +opt.dataset.balance || 0 : 0;
-      if (balanceHidden) {
-        balanceV.textContent = "•••••";
-        eyeIcon.textContent = "🙈";
-        eyeBtn.title = "Показать баланс";
-      } else {
-        balanceV.textContent = opt ? fmt.format(real) : "—";
-        eyeIcon.textContent = "👁";
-        eyeBtn.title = "Скрыть баланс";
-      }
-    }
-
-    eyeBtn.addEventListener("click", () => {
-      balanceHidden = !balanceHidden;
-      localStorage.setItem("raif-balance-hidden", balanceHidden ? "1" : "0");
-      renderBalance();
-    });
-    renderBalance();
 
     // ---- последние операции ----
     async function loadTx(clientId) {
@@ -333,9 +289,9 @@
     }
 
     function setBalance(newAmount) {
+      balanceV.textContent = fmt.format(newAmount);
       const opt = sel.selectedOptions[0];
       if (opt) opt.dataset.balance = newAmount;
-      renderBalance();
     }
 
     // ---- форма перевода ----
