@@ -66,14 +66,26 @@ def test_regression_costs_clients_regardless_of_feature():
 
 # --- compute_commit_round ----------------------------------------------------
 
-def test_commit_delta_is_value_change():
-    r = compute_commit_round(value_now=200.0, value_prev=0.0, client_base=500.0)
-    assert r["delta"] == 200.0
-    assert r["client_base"] == 700.0
+def test_commit_delta_is_value_change_plus_flow():
+    # телескоп: (200-0) = 200, плюс стационарная доля 0.15*200 = 30 → 230
+    r = compute_commit_round(value_now=200.0, value_prev=0.0,
+                             client_base=500.0, stationary_flow=0.15)
+    assert r["delta"] == 230.0
+    assert r["client_base"] == 730.0
 
 
-def test_commit_no_value_change_zero_delta():
-    r = compute_commit_round(value_now=120.0, value_prev=120.0, client_base=640.0)
+def test_commit_stationary_flow_keeps_moving_steady_value():
+    # ценность не изменилась, но качество остаётся: стационар двигает базу
+    r = compute_commit_round(value_now=120.0, value_prev=120.0,
+                             client_base=640.0, stationary_flow=0.15)
+    assert r["delta"] == 18.0          # 0.15 * 120
+    assert r["client_base"] == 658.0
+
+
+def test_commit_stationary_flow_disabled_means_pure_telescope():
+    # с flow=0 поведение прежнее — дельта строго от изменения ценности
+    r = compute_commit_round(value_now=120.0, value_prev=120.0,
+                             client_base=640.0, stationary_flow=0.0)
     assert r["delta"] == 0.0
     assert r["client_base"] == 640.0
 

@@ -36,8 +36,15 @@ CREDIT_CRITERIA = 9
 CLIENTS_PER_POINT = 16.0
 REGRESSION_COST = 120.0
 
+# Стационарный поток: на каждый коммит-раунд база сдвигается ещё и на долю
+# текущей ценности банка. Это значит «качество фичи продолжает работать»:
+# даже если score не изменился, удобная работающая фича медленно приводит
+# новых клиентов, а неудобная или плохая — медленно их отпугивает. Без него
+# дельта на стационаре всегда 0 и LLM-оценка не отражается на табло.
+STATIONARY_FLOW = float(os.environ.get("STATIONARY_FLOW", "0.15"))
+
 # Застой: сколько секунд прощаем простой и как быстро потом утекают клиенты.
-STAGNATION_GRACE_S = float(os.environ.get("STAGNATION_GRACE_S", "1800"))  # 30 мин
+STAGNATION_GRACE_S = float(os.environ.get("STAGNATION_GRACE_S", "3600"))  # 60 мин
 STAGNATION_RATE_PER_MIN = float(os.environ.get("STAGNATION_RATE_PER_MIN", "1.5"))
 
 UNREACHABLE_FACTOR = 0.8  # множитель базы, когда весь банк недоступен
@@ -82,9 +89,18 @@ def perceived_value(scores: list[int], feature_state: str,
 
 
 def compute_commit_round(value_now: float, value_prev: float,
-                         client_base: float) -> dict:
-    """Коммит-раунд: дельта = изменение ценности банка с прошлого раунда."""
-    target = max(FLOOR, min(CEIL, client_base + (value_now - value_prev)))
+                         client_base: float, *,
+                         stationary_flow: float = STATIONARY_FLOW) -> dict:
+    """Коммит-раунд: дельта = изменение ценности + доля её текущего уровня.
+
+    Телескопическая часть быстро реагирует на улучшение/ухудшение фичи. Доля
+    `stationary_flow * value_now` — медленный поток, продолжающий двигать базу
+    даже когда оценка не изменилась: рабочая удобная фича постепенно приводит
+    клиентов, плохая или сломанная — постепенно отпугивает.
+    """
+    telescoping = value_now - value_prev
+    flow = stationary_flow * value_now
+    target = max(FLOOR, min(CEIL, client_base + telescoping + flow))
     return {"delta": target - client_base, "client_base": target,
             "value": value_now}
 

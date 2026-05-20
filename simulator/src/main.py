@@ -50,7 +50,7 @@ BANK_URLS = {
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 POLL_INTERVAL_S = float(os.environ.get("POLL_INTERVAL_S", "30"))
 # Событие застоя в ленту — не на каждый тик, а когда накопилось столько утечки.
-DECAY_EVENT_THRESHOLD = float(os.environ.get("DECAY_EVENT_THRESHOLD", "10"))
+DECAY_EVENT_THRESHOLD = float(os.environ.get("DECAY_EVENT_THRESHOLD", "25"))
 
 TEAMS = ("team_a", "team_b")
 
