@@ -2,65 +2,156 @@
 <html lang="ru"><head><meta charset="utf-8"/>
 <title>Табло воркшопа · Райффайзен</title>
 <style>
-  body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:28px;
-       background:#0c0d10;color:#e8e9ec;min-height:100vh}
+  :root{
+    --bg:#0c0d10;--panel:#13151c;--rule:#23262f;--text:#e8e9ec;
+    --muted:#8a8d96;--dim:#6b6d75;--raiff:#FFE600;
+    --up:#7ee787;--down:#ff8c8c;--flat:#8a8d96;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;
+       background:var(--bg);color:var(--text);min-height:100vh}
   h1{font-weight:500;font-size:22px;margin:0 0 4px}
-  .meta{font-size:12px;color:#6b6d75;margin-bottom:22px}
+  .meta{font-size:12px;color:var(--dim);margin-bottom:22px;
+        display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+  .meta .now{color:var(--text);font-variant-numeric:tabular-nums}
   .teams{display:flex;gap:20px;flex-wrap:wrap}
-  .team{flex:1;min-width:300px;background:#13151c;border:1px solid #23262f;
-        border-radius:10px;padding:22px}
-  .team h2{margin:0 0 6px;font-size:15px;color:#8a8d96;letter-spacing:.14em;
+  .team{flex:1;min-width:300px;background:var(--panel);
+        border:1px solid var(--rule);border-radius:10px;padding:22px;
+        position:relative}
+  .team.leader{border-color:#5a5314;box-shadow:0 0 0 1px #5a5314 inset}
+  .team .crown{position:absolute;top:14px;right:16px;font-size:11px;
+               color:var(--raiff);letter-spacing:.12em;text-transform:uppercase}
+  .team h2{margin:0 0 6px;font-size:15px;color:var(--muted);letter-spacing:.14em;
            text-transform:uppercase}
-  .base{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums}
-  .delta{font-size:15px;margin-top:2px}
-  .up{color:#7ee787}.down{color:#ff8c8c}.flat{color:#8a8d96}
-  .fs{font-size:11px;margin-top:12px;display:inline-block;padding:3px 9px;
-      border-radius:5px;background:#23262f;color:#8a8d96}
-  .fs.working{background:#16321f;color:#7ee787}
-  h3{font-size:12px;color:#8a8d96;letter-spacing:.12em;text-transform:uppercase;
-     margin:28px 0 10px}
-  .ev{background:#13151c;border:1px solid #23262f;border-radius:8px;
-      padding:10px 14px;margin-bottom:8px;font-size:13px}
-  .ev .t{color:#FFE600;font-weight:600}
-  .ev .d{font-variant-numeric:tabular-nums;font-weight:600}
-  .ev .j{font-size:11px;color:#6b6d75}
+  .base{font-size:52px;font-weight:700;font-variant-numeric:tabular-nums;
+        line-height:1}
+  .from-start{font-size:13px;margin-top:6px;font-variant-numeric:tabular-nums}
+  .delta{font-size:14px;margin-top:8px}
+  .up{color:var(--up)}.down{color:var(--down)}.flat{color:var(--flat)}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+  .badge{font-size:11px;padding:4px 9px;border-radius:5px;
+         background:var(--rule);color:var(--muted)}
+  .badge .v{color:var(--text);font-weight:600}
+  .badge.working{background:#16321f;color:#7ee787}
+  .badge.working .v{color:#7ee787}
+  .badge.warn{background:#2f1f12;color:#d8a36a}
+  .badge.warn .v{color:#d8a36a}
+  h3{font-size:12px;color:var(--muted);letter-spacing:.12em;
+     text-transform:uppercase;margin:28px 0 10px}
+  .ev{background:var(--panel);border:1px solid var(--rule);border-radius:8px;
+      padding:10px 14px;margin-bottom:8px;font-size:13px;
+      display:grid;grid-template-columns:60px 110px auto;gap:10px;
+      align-items:baseline}
+  .ev .time{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12px}
+  .ev .t{color:var(--raiff);font-weight:600;white-space:nowrap}
+  .ev .d{font-variant-numeric:tabular-nums;font-weight:600;
+         display:inline-block;margin-right:6px}
+  .ev .body{color:var(--text)}
+  .ev .j{font-size:11px;color:var(--dim);margin-left:6px}
+  .ev .empty{color:var(--dim)}
 </style></head><body>
 <h1>Табло воркшопа — клиентская база команд</h1>
-<div class="meta">обновляется автоматически · симулятор клиентов</div>
+<div class="meta">
+  <span>обновляется автоматически · симулятор клиентов</span>
+  <span>Москва: <span class="now" id="now-msk">—</span></span>
+  <span id="leader-line"></span>
+</div>
 <div class="teams" id="teams"></div>
 <h3>Лента событий</h3>
 <div id="events"></div>
 <script>
+"use strict";
 const fmt = n => Number(n||0).toLocaleString('ru-RU');
+const signed = n => (n > 0 ? '+' : (n < 0 ? '−' : '±')) + fmt(Math.abs(n));
 const LABEL = {team_a:'Команда A', team_b:'Команда B'};
 const FSTATE = {absent:'фича не начата', frontend_only:'только витрина',
   partial:'фича в сборке', working:'фича работает'};
+
+const MSK_TIME = new Intl.DateTimeFormat('ru-RU', {
+  timeZone:'Europe/Moscow', hour:'2-digit', minute:'2-digit', second:'2-digit',
+});
+const MSK_FULL = new Intl.DateTimeFormat('ru-RU', {
+  timeZone:'Europe/Moscow', hour:'2-digit', minute:'2-digit', second:'2-digit',
+  day:'2-digit', month:'2-digit',
+});
+
+function fmtIdle(seconds){
+  if(seconds === null || seconds === undefined) return '—';
+  if(seconds < 60) return seconds + ' с';
+  const m = Math.floor(seconds/60);
+  if(m < 60) return m + ' мин';
+  const h = Math.floor(m/60), mm = m%60;
+  return h + ' ч ' + mm + ' мин';
+}
+
+function teamCard(name, v, isLeader){
+  const fs = v.feature_state
+    ? `<span class="badge ${v.feature_state==='working'?'working':''}">${FSTATE[v.feature_state]||v.feature_state}</span>`
+    : '';
+  const score = (v.last_score !== null && v.last_score !== undefined)
+    ? `<span class="badge">балл <span class="v">${v.last_score}/${v.rubric_max||20}</span></span>`
+    : '';
+  const rels = `<span class="badge">релизов <span class="v">${v.releases||0}</span></span>`;
+  const stags = v.stagnations
+    ? `<span class="badge warn">застоя <span class="v">${v.stagnations}</span></span>`
+    : '';
+  const idle = (v.idle_seconds !== null)
+    ? `<span class="badge">с последнего релиза <span class="v">${fmtIdle(v.idle_seconds)}</span></span>`
+    : '';
+  const dfs = v.delta_from_start;
+  const dfsCls = dfs > 0 ? 'up' : (dfs < 0 ? 'down' : 'flat');
+  const fromStart = `<div class="from-start ${dfsCls}">${signed(dfs)} от старта (${fmt(v.client_base_start)})</div>`;
+  const crown = isLeader ? '<div class="crown">★ лидер</div>' : '';
+  return `<div class="team${isLeader?' leader':''}">${crown}
+    <h2>${LABEL[name]||name}</h2>
+    <div class="base">${fmt(v.client_base)}</div>
+    ${fromStart}
+    <div class="badges">${fs}${score}${rels}${stags}${idle}</div>
+  </div>`;
+}
+
+function eventRow(e){
+  const cls = e.delta>0?'up':(e.delta<0?'down':'flat');
+  const time = e.ts ? MSK_TIME.format(new Date(e.ts)) : '—';
+  return `<div class="ev">
+    <span class="time">${time}</span>
+    <span class="t">${LABEL[e.team]||e.team}</span>
+    <span class="body"><span class="d ${cls}">${signed(e.delta)}</span>${e.reason||''}<span class="j">[${e.judge||'?'}]</span></span>
+  </div>`;
+}
+
 async function tick(){
   let d;
   try { d = await (await fetch('/state')).json(); } catch(e){ return; }
-  const tEl = document.getElementById('teams');
-  tEl.innerHTML = Object.entries(d.teams).map(([k,v])=>{
-    const last = (d.events||[]).find(e=>e.team===k);
-    let delta = '<span class="flat">— без изменений</span>';
-    if(last){
-      if(last.delta>0) delta = `<span class="up">▲ +${fmt(last.delta)} клиентов</span>`;
-      else if(last.delta<0) delta = `<span class="down">▼ ${fmt(last.delta)} клиентов</span>`;
+
+  // часы МСК — берём now сервера если есть, иначе локально
+  const nowDate = d.now ? new Date(d.now) : new Date();
+  document.getElementById('now-msk').textContent = MSK_FULL.format(nowDate);
+
+  // лидер по дельте от старта
+  const entries = Object.entries(d.teams||{});
+  let leader = null, leadDfs = -Infinity;
+  for(const [k,v] of entries){
+    if(typeof v.delta_from_start === 'number' && v.delta_from_start > leadDfs){
+      leadDfs = v.delta_from_start; leader = k;
     }
-    const fs = v.feature_state
-      ? `<div class="fs ${v.feature_state==='working'?'working':''}">${FSTATE[v.feature_state]||v.feature_state}</div>`
-      : '';
-    return `<div class="team"><h2>${LABEL[k]||k}</h2>
-      <div class="base">${fmt(v.client_base)}</div>
-      <div class="delta">${delta}</div>${fs}</div>`;
-  }).join('');
+  }
+  // если все на одинаковой дельте — лидера нет
+  const allSame = entries.every(([_,v]) => v.delta_from_start === leadDfs);
+  if(allSame) leader = null;
+
+  document.getElementById('leader-line').innerHTML = leader
+    ? `<span>лидирует <b style="color:var(--raiff)">${LABEL[leader]}</b> (${signed(leadDfs)} клиентов)</span>`
+    : '<span>пока ничья</span>';
+
+  document.getElementById('teams').innerHTML =
+    entries.map(([k,v]) => teamCard(k, v, k===leader)).join('');
+
   const eEl = document.getElementById('events');
-  eEl.innerHTML = (d.events||[]).map(e=>{
-    const cls = e.delta>0?'up':(e.delta<0?'down':'flat');
-    const sign = e.delta>0?'+':'';
-    return `<div class="ev"><span class="t">${LABEL[e.team]||e.team}</span>
-      <span class="d ${cls}">${sign}${fmt(e.delta)}</span> — ${e.reason||''}
-      <span class="j">[${e.judge||'?'}]</span></div>`;
-  }).join('') || '<div class="ev flat">пока событий нет</div>';
+  const evs = d.events||[];
+  eEl.innerHTML = evs.length
+    ? evs.map(eventRow).join('')
+    : '<div class="ev"><span class="empty">пока событий нет</span></div>';
 }
 tick(); setInterval(tick, 4000);
 </script>

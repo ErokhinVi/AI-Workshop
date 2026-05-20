@@ -28,6 +28,7 @@ from src.judge import judge_round
 from src.probe import probe_team
 from src.scoring import (
     B0,
+    RUBRIC_MAX,
     compute_commit_round,
     compute_decay,
     compute_unreachable,
@@ -145,7 +146,7 @@ async def _emit_event(team: str, commit: str, delta: float, scores: list[int],
         await dbmod.add_event(pool, team, commit, delta_i, base_after,
                               scores, reason, snapshot or {}, judge)
     _events.insert(0, {
-        "team": team, "ts": None, "commit": commit, "delta": delta_i,
+        "team": team, "ts": _now().isoformat(), "commit": commit, "delta": delta_i,
         "client_base_after": base_after, "rubric": scores,
         "reason": reason, "judge": judge,
     })
@@ -320,12 +321,33 @@ async def health() -> dict:
 
 @app.get("/state")
 async def state() -> dict:
+    now = _now()
+    teams_out: dict[str, dict] = {}
+    for t, s in _state.items():
+        team_events = [e for e in _events if e["team"] == t]
+        releases = [e for e in team_events
+                    if e["judge"] not in ("stagnation", "unreachable")]
+        stagnations = [e for e in team_events if e["judge"] == "stagnation"]
+        last_commit_ts = s["last_commit_ts"]
+        idle_s = ((now - last_commit_ts).total_seconds()
+                  if last_commit_ts else None)
+        teams_out[t] = {
+            "client_base": round(s["client_base"]),
+            "client_base_start": B0,
+            "delta_from_start": round(s["client_base"]) - B0,
+            "last_score": s["last_score"],
+            "baseline_score": s["baseline_score"],
+            "rubric_max": RUBRIC_MAX,
+            "feature_state": s["feature_state"],
+            "releases": len(releases),
+            "stagnations": len(stagnations),
+            "idle_seconds": int(idle_s) if idle_s is not None else None,
+            "last_commit_ts": (last_commit_ts.isoformat()
+                               if last_commit_ts else None),
+        }
     return {
-        "teams": {t: {"client_base": round(s["client_base"]),
-                      "last_score": s["last_score"],
-                      "baseline_score": s["baseline_score"],
-                      "feature_state": s["feature_state"]}
-                  for t, s in _state.items()},
+        "now": now.isoformat(),
+        "teams": teams_out,
         "events": _events[:30],
     }
 
