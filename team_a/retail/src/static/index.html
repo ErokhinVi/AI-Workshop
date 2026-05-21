@@ -163,6 +163,37 @@
     .client-picker select { width: 100%; margin-top: 4px; padding: 8px 10px;
       border: 1px solid var(--rule); background: var(--surface); border-radius: 6px;
       font-family: inherit; font-size: 13px; }
+
+    .sum-cards { display: flex; gap: 12px; margin-bottom: 22px; }
+    .sum-card {
+      flex: 1; padding: 14px;
+      background: var(--bg); border: 1px solid var(--rule);
+      border-radius: 8px;
+    }
+    .sum-card .l {
+      font-size: 11px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.1em;
+    }
+    .sum-card .v {
+      font-size: 20px; font-weight: 500; margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .sum-card .v.in { color: var(--good); }
+
+    .cat-row { margin-bottom: 14px; }
+    .cat-head {
+      display: flex; justify-content: space-between;
+      font-size: 13px; margin-bottom: 6px;
+    }
+    .cat-head .amt { font-variant-numeric: tabular-nums; }
+    .cat-bar {
+      height: 8px; background: var(--rule);
+      border-radius: 4px; overflow: hidden;
+    }
+    .cat-bar > span {
+      display: block; height: 100%;
+      background: var(--text); border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -184,6 +215,7 @@
 
     <div class="tabs">
       <button class="tab active" data-tab="transfers">Переводы</button>
+      <button class="tab" data-tab="spending">Траты</button>
     </div>
 
     <div class="tab-pane show" data-pane="transfers">
@@ -204,6 +236,22 @@
       <div class="section-title" style="margin-top:24px">Последние операции</div>
       <div id="tx-list" class="tx-list"></div>
     </div>
+
+    <div class="tab-pane" data-pane="spending">
+      <div class="section-title">За последнее время</div>
+      <div class="sum-cards">
+        <div class="sum-card">
+          <div class="l">Поступления</div>
+          <div class="v in" id="sum-in">—</div>
+        </div>
+        <div class="sum-card">
+          <div class="l">Расходы</div>
+          <div class="v" id="sum-out">—</div>
+        </div>
+      </div>
+      <div class="section-title">Куда уходят деньги</div>
+      <div id="cat-list"></div>
+    </div>
   </div>
 
   <script>
@@ -215,6 +263,9 @@
     const topbarWho = document.getElementById("topbar-who");
     const txList = document.getElementById("tx-list");
     const transferResult = document.getElementById("transfer-result");
+    const sumIn = document.getElementById("sum-in");
+    const sumOut = document.getElementById("sum-out");
+    const catList = document.getElementById("cat-list");
 
     // ---- табы ----
     document.querySelectorAll(".tab").forEach(btn => {
@@ -223,6 +274,7 @@
         document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("show"));
         btn.classList.add("active");
         document.querySelector(`[data-pane="${btn.dataset.tab}"]`).classList.add("show");
+        if (btn.dataset.tab === "spending") loadAnalysis(sel.value);
       });
     });
 
@@ -247,6 +299,8 @@
       balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       topbarWho.textContent = opt.dataset.name;
       loadTx(opt.value);
+      const spendingPane = document.querySelector('[data-pane="spending"]');
+      if (spendingPane && spendingPane.classList.contains("show")) loadAnalysis(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
@@ -286,6 +340,43 @@
         salary:         "Зарплата",
         utility_payment:"Коммунальные",
       })[t] || t;
+    }
+
+    // ---- анализ трат ----
+    async function loadAnalysis(clientId) {
+      if (!clientId) return;
+      try {
+        const r = await fetch(`/transactions/${clientId}?limit=100`);
+        const d = await r.json();
+        const items = d.items || [];
+        let totalIn = 0, totalOut = 0;
+        const byCat = {};
+        items.forEach(t => {
+          const a = t.amount_rub;
+          if (a >= 0) { totalIn += a; }
+          else { totalOut += -a; byCat[t.type] = (byCat[t.type] || 0) + (-a); }
+        });
+        sumIn.textContent  = "+" + fmt.format(totalIn) + " ₽";
+        sumOut.textContent = "−" + fmt.format(totalOut) + " ₽";
+        const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+        if (!cats.length) {
+          catList.innerHTML = `<div class="empty">Трат пока нет</div>`;
+          return;
+        }
+        const max = cats[0][1];
+        catList.innerHTML = cats.map(([type, amt]) => {
+          const pct = Math.max(4, Math.round(amt / max * 100));
+          return `<div class="cat-row">
+            <div class="cat-head">
+              <span>${typeLabel(type)}</span>
+              <span class="amt">${fmt.format(amt)} ₽</span>
+            </div>
+            <div class="cat-bar"><span style="width:${pct}%"></span></div>
+          </div>`;
+        }).join("");
+      } catch(e) {
+        catList.innerHTML = `<div class="empty">Не удалось загрузить</div>`;
+      }
     }
 
     function setBalance(newAmount) {
