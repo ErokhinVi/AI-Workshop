@@ -6,8 +6,9 @@
 
 | Файл | Платформа | Как запускается |
 |---|---|---|
-| `raif-workshop-setup.applescript` | macOS | Дабл-клик → Script Editor → Run (Cmd+R) → выбор участника → автоматически открывается Terminal с bootstrap-скриптом. |
-| `raif-workshop-setup.cmd` | Windows 10/11 | Дабл-клик → SmartScreen «Подробнее → Выполнить в любом случае» → выбор участника в WinForms-меню → всё крутится в одном консольном окне. |
+| `raif-workshop-setup.applescript` | macOS | Дабл-клик → Script Editor → Run (Cmd+R) → выбор команды и блока, ввод имени → автоматически открывается Terminal с bootstrap-скриптом. |
+| `raif-workshop-setup.cmd` | Windows 10/11 | Дабл-клик → SmartScreen «Подробнее → Выполнить в любом случае» → выбор команды и блока и ввод имени в WinForms-окне → всё крутится в одном консольном окне. |
+| `raif-workshop-setup-board.*` | macOS / Windows | То же самое, но с заранее зашитым составом правления (выбор из списка из 7 человек). Раздаётся только членам правления. |
 
 Скрипт делает:
 
@@ -16,21 +17,20 @@
 3. Прописывает `git config --global user.name` и `user.email` под выбранного участника.
 4. Стучится `ssh -T git@github.com` и ждёт `successfully authenticated`.
 5. Клонирует или ребейзит `~/AI-Workshop` (или `%USERPROFILE%\AI-Workshop`).
-6. Копирует ключ в `.git/raif-workshop-key` и пишет `.git/raif-workshop-info` с `WORKSHOP_PARTICIPANT/TEAM/GIT_NAME/GIT_EMAIL` — это то, что подцепит Claude в Cowork при первом сообщении.
+6. Копирует ключ в `.git/raif-workshop-key` и пишет `.git/raif-workshop-info` с `WORKSHOP_PARTICIPANT/TEAM/BLOCK/GIT_NAME/GIT_EMAIL` — это то, что подцепит Claude в Cowork при первом сообщении.
 
-## Список участников
+## Кто в какой команде
 
-Воркшоп — две команды по три человека. Поле `WORKSHOP_TEAM` в info-файле — `team_a` или `team_b`. Распределение ниже предварительное, поправь под реальные составы перед воркшопом (правится в `$Members` внутри `raif-workshop-setup.cmd`).
+Привязки людей к командам и блокам в основных скриптах нет: участник сам
+выбирает команду (`team_a` или `team_b`) и блок (`retail` / `cib` / `backend`)
+и вводит имя. Скрипт пишет выбор в `.git/raif-workshop-info`
+(`WORKSHOP_TEAM`, `WORKSHOP_BLOCK`, `WORKSHOP_PARTICIPANT`), а email и slug
+участника выводит из имени (транслитерация кириллицы).
 
-| № | ФИО | Команда |
-|---|---|---|
-| 1 | Сергей Монин | `team_a` |
-| 2 | Никита Патрахин | `team_a` |
-| 3 | Иван Курочкин | `team_a` |
-| 4 | Александр Ложечкин | `team_b` |
-| 5 | Герт Хебенштрайт | `team_b` |
-| 6 | Роланд Васс | `team_b` |
-| 7 | Виталий Ерохин | host (ведущий) |
+Версия с заранее зашитым составом правления — отдельные файлы
+`raif-workshop-setup-board.applescript` и `raif-workshop-setup-board.cmd`
+(там список из 7 человек в `$Members` / меню). Их раздают членам правления,
+а generic-версию выше — на тест-прогонах.
 
 ## Зависимости на ноутбуке участника
 

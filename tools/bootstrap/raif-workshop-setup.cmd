@@ -136,45 +136,91 @@ Info ('ssh: ' + $sshVer)
 Ok 'Окружение в порядке'
 
 # ── 1. меню выбора участника (WinForms) ──────────────────────────────────────
-Info 'Открываю окно выбора участника...'
+Info 'Открываю окно настройки участника...'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-function Show-MemberPicker {
+# Транслит кириллицы → slug для email и WORKSHOP_PARTICIPANT.
+function ConvertTo-Slug([string]$text) {
+  $map = @{
+    'а'='a';'б'='b';'в'='v';'г'='g';'д'='d';'е'='e';'ё'='yo';'ж'='zh';'з'='z';
+    'и'='i';'й'='y';'к'='k';'л'='l';'м'='m';'н'='n';'о'='o';'п'='p';'р'='r';
+    'с'='s';'т'='t';'у'='u';'ф'='f';'х'='kh';'ц'='ts';'ч'='ch';'ш'='sh';
+    'щ'='shch';'ъ'='';'ы'='y';'ь'='';'э'='e';'ю'='yu';'я'='ya'
+  }
+  $sb = ''
+  foreach ($ch in $text.ToLower().ToCharArray()) {
+    $s = [string]$ch
+    if ($map.ContainsKey($s)) { $sb += $map[$s] } else { $sb += $s }
+  }
+  return (($sb -replace '[^a-z0-9]+', '-').Trim('-'))
+}
+
+# Форма: команда + блок + имя. Привязки людей к блокам тут НЕТ — участник
+# выбирает сам. Версия с зашитым составом правления — raif-workshop-setup-board.cmd.
+function Show-SetupForm {
   $form = New-Object Windows.Forms.Form
   $form.Text            = 'Райф AI-воркшоп — настройка ноутбука'
-  $form.Size            = New-Object Drawing.Size(520, 400)
+  $form.Size            = New-Object Drawing.Size(520, 320)
   $form.StartPosition   = 'CenterScreen'
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox     = $false
   $form.MinimizeBox     = $false
   $form.Font            = New-Object Drawing.Font('Segoe UI', 10)
 
-  $label = New-Object Windows.Forms.Label
-  $label.Text     = 'Кто ты? Это нужно чтобы коммиты были подписаны твоим именем.'
-  $label.Location = New-Object Drawing.Point(18, 15)
-  $label.Size    = New-Object Drawing.Size(470, 35)
-  $form.Controls.Add($label)
+  $lblTeam = New-Object Windows.Forms.Label
+  $lblTeam.Text     = 'Команда:'
+  $lblTeam.Location = New-Object Drawing.Point(18, 22)
+  $lblTeam.Size     = New-Object Drawing.Size(120, 24)
+  $form.Controls.Add($lblTeam)
 
-  $listBox = New-Object Windows.Forms.ListBox
-  $listBox.Location = New-Object Drawing.Point(18, 55)
-  $listBox.Size     = New-Object Drawing.Size(470, 240)
-  $listBox.Font     = New-Object Drawing.Font('Consolas', 10)
-  [void]$listBox.Items.AddRange(@(
-    '1) Сергей Монин — Команда A · Розница',
-    '2) Никита Патрахин — Команда A · Корпоратив',
-    '3) Иван Курочкин — Команда A · Бэкенд',
-    '4) Александр Ложечкин — Команда B · Розница',
-    '5) Герт Хебенштрайт — Команда B · Корпоратив',
-    '6) Роланд Васс — Команда B · Бэкенд',
-    '7) Виталий Ерохин — Организатор'
+  $cbTeam = New-Object Windows.Forms.ComboBox
+  $cbTeam.Location      = New-Object Drawing.Point(150, 18)
+  $cbTeam.Size          = New-Object Drawing.Size(338, 28)
+  $cbTeam.DropDownStyle = 'DropDownList'
+  [void]$cbTeam.Items.AddRange(@('Команда А', 'Команда Б'))
+  $cbTeam.SelectedIndex = 0
+  $form.Controls.Add($cbTeam)
+
+  $lblBlock = New-Object Windows.Forms.Label
+  $lblBlock.Text     = 'Блок:'
+  $lblBlock.Location = New-Object Drawing.Point(18, 62)
+  $lblBlock.Size     = New-Object Drawing.Size(120, 24)
+  $form.Controls.Add($lblBlock)
+
+  $cbBlock = New-Object Windows.Forms.ComboBox
+  $cbBlock.Location      = New-Object Drawing.Point(150, 58)
+  $cbBlock.Size          = New-Object Drawing.Size(338, 28)
+  $cbBlock.DropDownStyle = 'DropDownList'
+  [void]$cbBlock.Items.AddRange(@(
+    'Розница — мобильный банк клиента',
+    'Корпоратив — бизнес-логика',
+    'Бэкенд — ядро данных банка'
   ))
-  $listBox.SelectedIndex = 0
-  $form.Controls.Add($listBox)
+  $cbBlock.SelectedIndex = 0
+  $form.Controls.Add($cbBlock)
+
+  $lblName = New-Object Windows.Forms.Label
+  $lblName.Text     = 'Имя и фамилия:'
+  $lblName.Location = New-Object Drawing.Point(18, 102)
+  $lblName.Size     = New-Object Drawing.Size(130, 24)
+  $form.Controls.Add($lblName)
+
+  $tbName = New-Object Windows.Forms.TextBox
+  $tbName.Location = New-Object Drawing.Point(150, 98)
+  $tbName.Size     = New-Object Drawing.Size(338, 28)
+  $form.Controls.Add($tbName)
+
+  $hint = New-Object Windows.Forms.Label
+  $hint.Text      = 'Именем и фамилией будут подписаны коммиты.'
+  $hint.Location  = New-Object Drawing.Point(18, 138)
+  $hint.Size      = New-Object Drawing.Size(470, 24)
+  $hint.ForeColor = [System.Drawing.Color]::Gray
+  $form.Controls.Add($hint)
 
   $ok = New-Object Windows.Forms.Button
   $ok.Text         = 'Поехали'
-  $ok.Location     = New-Object Drawing.Point(280, 310)
+  $ok.Location     = New-Object Drawing.Point(280, 235)
   $ok.Size         = New-Object Drawing.Size(95, 32)
   $ok.DialogResult = [Windows.Forms.DialogResult]::OK
   $form.Controls.Add($ok)
@@ -182,36 +228,44 @@ function Show-MemberPicker {
 
   $cancel = New-Object Windows.Forms.Button
   $cancel.Text         = 'Отмена'
-  $cancel.Location     = New-Object Drawing.Point(390, 310)
+  $cancel.Location     = New-Object Drawing.Point(390, 235)
   $cancel.Size         = New-Object Drawing.Size(95, 32)
   $cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
   $form.Controls.Add($cancel)
   $form.CancelButton = $cancel
 
-  $result = $form.ShowDialog()
-  if ($result -ne [Windows.Forms.DialogResult]::OK) { return $null }
-  return ($listBox.SelectedIndex + 1)
+  while ($true) {
+    $result = $form.ShowDialog()
+    if ($result -ne [Windows.Forms.DialogResult]::OK) { return $null }
+    $nm = $tbName.Text.Trim()
+    if ($nm) {
+      return @{
+        Team  = @('team_a', 'team_b')[$cbTeam.SelectedIndex]
+        Block = @('retail', 'cib', 'backend')[$cbBlock.SelectedIndex]
+        Name  = $nm
+      }
+    }
+    [void][Windows.Forms.MessageBox]::Show('Впиши имя и фамилию.', 'Нужно имя')
+  }
 }
 
-$WhoNum = Show-MemberPicker
-if (-not $WhoNum) { Write-Host 'Отменено.'; exit 0 }
+$pick = Show-SetupForm
+if (-not $pick) { Write-Host 'Отменено.'; exit 0 }
 
 # ── 2. mapping ───────────────────────────────────────────────────────────────
-# Распределение по командам (Team) — поправь под реальные составы перед воркшопом.
-$Members = @{
-  1 = @{ Name='Sergey Monin';       Email='monin@raif-workshop.local';      Team='team_a'; Block='retail';  Participant='sergey-monin'       }
-  2 = @{ Name='Nikita Patrahin';    Email='patrahin@raif-workshop.local';   Team='team_a'; Block='cib';     Participant='nikita-patrahin'    }
-  3 = @{ Name='Ivan Kurochkin';     Email='kurochkin@raif-workshop.local';  Team='team_a'; Block='backend'; Participant='ivan-kurochkin'     }
-  4 = @{ Name='Aleksandr Lozhechkin'; Email='lozhechkin@raif-workshop.local'; Team='team_b'; Block='retail';  Participant='aleksandr-lozhechkin' }
-  5 = @{ Name='Gert Hebenstreit';   Email='hebenstreit@raif-workshop.local'; Team='team_b'; Block='cib';     Participant='gert-hebenstreit'   }
-  6 = @{ Name='Roland Vass';        Email='vass@raif-workshop.local';       Team='team_b'; Block='backend'; Participant='roland-vass'        }
-  7 = @{ Name='Vitaly Erokhin';     Email='erokhin@raif-workshop.local';    Team='host';   Block='host';    Participant='vitaly-erokhin'     }
+# Профиль участника собираем из выбора в форме (команда, блок) и имени.
+$slug = ConvertTo-Slug $pick.Name
+if (-not $slug) { $slug = $pick.Team + '-' + $pick.Block }
+$cfg = @{
+  Name        = $pick.Name
+  Email       = $slug + '@raif-workshop.local'
+  Team        = $pick.Team
+  Block       = $pick.Block
+  Participant = $slug
 }
-$cfg = $Members[$WhoNum]
-if (-not $cfg) { Die 'Не удалось определить участника.' }
-$teamHuman  = @{ 'team_a' = 'Команда A'; 'team_b' = 'Команда B'; 'host' = 'Организатор' }[$cfg.Team]
-$blockHuman = @{ 'retail' = 'Розница — мобильный банк клиента'; 'cib' = 'Корпоратив — бизнес-логика'; 'backend' = 'Бэкенд — ядро данных банка'; 'host' = '—' }[$cfg.Block]
-Ok ('Участник выбран: ' + $cfg.Name)
+$teamHuman  = @{ 'team_a' = 'Команда A'; 'team_b' = 'Команда B' }[$cfg.Team]
+$blockHuman = @{ 'retail' = 'Розница — мобильный банк клиента'; 'cib' = 'Корпоратив — бизнес-логика'; 'backend' = 'Бэкенд — ядро данных банка' }[$cfg.Block]
+Ok ('Участник: ' + $cfg.Name + ' · ' + $teamHuman + ' · ' + $blockHuman)
 
 # ── 3. SSH key (embedded, base64 — чтобы не палиться перед secret-scanner-ом) ─
 Step 'Кладу рабочий ключ воркшопа'
