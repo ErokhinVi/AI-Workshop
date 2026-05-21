@@ -18,7 +18,7 @@ COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8003").rstrip("/")
 CIB_URL = os.environ.get("CIB_URL", "http://localhost:8002").rstrip("/")
 
-app = FastAPI(title="retail — мобильный банк", version="1.1.0")
+app = FastAPI(title="retail — мобильный банк", version="1.0.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
