@@ -1,6 +1,6 @@
 # tools/bootstrap — стартовые скрипты для ноутбуков участников
 
-Эти файлы раздаются членам правления перед воркшопом, чтобы их ноутбуки за пару минут оказались настроены: SSH-ключ воркшопа, git identity, склонированный репо и `.git/raif-workshop-info`, который читает `tools/cowork-onboard.py` при первом запуске Claude в Cowork.
+Эти файлы раздаются членам правления перед воркшопом, чтобы их ноутбуки за пару минут оказались настроены: SSH-ключ воркшопа, git identity, склонированный репо и `.git/raif-workshop-info`, который читает `tools/cowork-onboard.py` при первом запуске агента. Работать можно в Claude Code (читает `CLAUDE.md`) или в Codex (читает `AGENTS.md`) — защиту блока скрипт ставит для обоих.
 
 ## Что внутри
 
@@ -18,6 +18,7 @@
 4. Стучится `ssh -T git@github.com` и ждёт `successfully authenticated`.
 5. Клонирует или ребейзит `~/AI-Workshop` (или `%USERPROFILE%\AI-Workshop`).
 6. Копирует ключ в `.git/raif-workshop-key` и пишет `.git/raif-workshop-info` с `WORKSHOP_PARTICIPANT/TEAM/BLOCK/GIT_NAME/GIT_EMAIL` — это то, что подцепит Claude в Cowork при первом сообщении.
+7. Ставит защиту блока для обоих агентов: копирует `.claude/templates/settings-<команда>-<блок>.json` → `.claude/settings.local.json` (Claude) и `.codex/templates/config-<команда>-<блок>.toml` → `.codex/config.toml` (Codex), а также отмечает папку репозитория доверенной в `~/.codex/config.toml` — иначе Codex не читает проектный конфиг. Организатору (`host`) защита не ставится.
 
 ## Кто в какой команде
 

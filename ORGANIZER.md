@@ -32,8 +32,10 @@ AI-воркшоп правления Райффайзен банка. Шесть
 | `simulator/` | Симулятор клиентов + табло (FastAPI, Postgres) |
 | `seed/` | 500 клиентов, транзакции, кредитная история |
 | `tasks/` | Брифы задач для команд (нетехнический язык) |
-| `.claude/templates/settings-team_*-*.json` | Permissions: участник правит свой блок, читает свою команду, чужую не видит |
-| `tools/cowork-onboard.py` | Sandbox-onboarding агента: SSH-ключ, git, `WORKSHOP_TEAM`, `WORKSHOP_BLOCK` |
+| `.claude/templates/settings-team_*-*.json` | Permissions Claude: участник правит свой блок, читает свою команду, чужую не видит |
+| `.codex/templates/config-team_*-*.toml` | То же для Codex: permission-профиль на (команда, блок). Bootstrap копирует в `.codex/config.toml` |
+| `AGENTS.md` | Онбординг для Codex (аналог `CLAUDE.md`): тонкая обёртка, отсылает к `CLAUDE.md` + Codex-специфика |
+| `tools/cowork-onboard.py` | Sandbox-onboarding агента: SSH-ключ, git, `WORKSHOP_TEAM`, `WORKSHOP_BLOCK` (агенто-нейтрален) |
 | `docs/superpowers/specs/` , `docs/superpowers/plans/` | Спека дизайна и план реализации редизайна |
 
 ## Как работает симулятор клиентов
@@ -71,6 +73,59 @@ AI-воркшоп правления Райффайзен банка. Шесть
 | `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` (табло) |
 
 Подробности деплоя — `DEPLOY.md`.
+
+## Два агента: Claude Code и Codex
+
+Участник может работать либо в Claude Code, либо в Codex — на выбор. Защита
+блока одинакова по сути в обоих, но реализована разными механизмами:
+
+- **Claude** читает `CLAUDE.md`, защита — `.claude/settings.local.json`
+  (deny/allow по путям). Bootstrap копирует её из `.claude/templates/`.
+- **Codex** читает `AGENTS.md` (тонкая обёртка, отсылает к `CLAUDE.md`),
+  защита — permission-профиль в `.codex/config.toml` (`default_permissions` +
+  `[permissions.*]`). Bootstrap копирует её из `.codex/templates/` и отмечает
+  папку репозитория доверенной в `~/.codex/config.toml` (иначе Codex не читает
+  проектный конфиг). Enforcement — ОС-песочница Codex (Seatbelt/ACL), как у
+  Claude: запись вне своего блока не проходит, чужая команда закрыта на чтение
+  через `deny`.
+
+Шаблоны Claude и Codex — близнецы; правишь доступ для блока — меняй оба.
+
+Нюанс Codex про «копилку»: внутри песочницы Codex папка `.git` только на
+чтение, а сеть закрыта по умолчанию — поэтому git push/pull у Codex идут с
+подтверждениями (шаблоны включают сеть профилю, но подтверждения на git-команды
+остаются). Это нормально, участнику Codex покажет запрос — соглашаться.
+
+**Важно: вся Codex-часть собрана по документации и не прогонялась вживую**
+(Codex не был установлен на машине сборки). Перед воркшопом обязательно прогнать
+один сквозной тест на машине с установленным Codex (≈10 минут):
+
+1. Запустить установщик, выбрать блок (например, `team_a` · Розница).
+2. `cat .codex/config.toml` — первая строка должна быть
+   `default_permissions = "raif-team_a-retail"`.
+3. В `~/.codex/config.toml` должен появиться блок
+   `[projects."/Users/.../AI-Workshop"]` с `trust_level = "trusted"`.
+4. Открыть Codex в репозитории, попросить дописать строку-комментарий в
+   `team_a/retail/` → должно **получиться**.
+5. Попросить записать в `team_a/cib/` → должен быть **отказ** (только чтение).
+6. Попросить прочитать файл из `team_b/` → должен быть **отказ** (`deny`).
+7. Сделать реальную правку в своём блоке и попросить «сохранить в общую
+   копилку» — посмотреть, какие подтверждения Codex запрашивает (это и есть
+   UX, который надо объяснить участникам).
+
+Если шаг 4 проходит, но 5/6 ведут себя не так (например, 5 проходит или 6
+зависает) — значит форма правил через заголовок таблицы
+`[permissions.<имя>.filesystem.":workspace_roots"]` сработала иначе, чем
+обещает документация. Запасной вариант — переписать правила инлайн-таблицей в
+шаблонах `.codex/templates/`:
+
+```toml
+[permissions.raif-team_a-retail.filesystem]
+":minimal" = "read"
+":workspace_roots" = { "." = "read", "team_a/retail" = "write", "team_b" = "deny" }
+```
+
+Обе формы есть в документации Codex; если одна не работает — поменять на другую.
 
 ## Ручные шаги организатора
 

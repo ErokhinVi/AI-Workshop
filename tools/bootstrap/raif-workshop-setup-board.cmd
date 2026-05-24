@@ -68,7 +68,7 @@ $SshConfigMarker  = '# raif-workshop-2026'
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 $StartedAt         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-$script:TotalSteps = 9
+$script:TotalSteps = 10
 $script:CurStep    = 0
 
 function Banner {
@@ -120,6 +120,32 @@ function Lock-FileToCurrentUser($path) {
   & icacls $path /grant:r "$($env:USERNAME):F" | Out-Null
   & icacls $path /remove "BUILTIN\Users"      2>&1 | Out-Null
   & icacls $path /remove "NT AUTHORITY\Authenticated Users" 2>&1 | Out-Null
+}
+
+# Отмечаем папку репозитория доверенной в ~/.codex/config.toml — иначе Codex
+# не читает проектный .codex/config.toml. Дописываем блок, не перетирая то,
+# что у пользователя уже есть. Если формат пути вдруг не совпадёт — не беда:
+# Codex просто спросит про доверие к папке при первом запуске.
+function Add-CodexTrust($RepoDir) {
+  $codexHome = Join-Path $env:USERPROFILE '.codex'
+  $codexCfg  = Join-Path $codexHome 'config.toml'
+  if (-not (Test-Path $codexHome)) { New-Item -ItemType Directory -Path $codexHome | Out-Null }
+  $existing = ''
+  if (Test-Path $codexCfg) { $existing = Get-Content -LiteralPath $codexCfg -Raw -ErrorAction SilentlyContinue }
+  if ($null -eq $existing) { $existing = '' }
+  # путь Windows в TOML-строке: backslash удваиваем
+  $repoForToml = $RepoDir -replace '\\','\\'
+  $marker = '[projects."' + $repoForToml + '"]'
+  if ($existing -match [Regex]::Escape($marker)) {
+    Note 'Папка уже доверена Codex'
+    return
+  }
+  $block   = "`n$marker`ntrust_level = `"trusted`"`n"
+  $newText = ($existing -replace "`r`n","`n").TrimEnd("`n")
+  if ($newText) { $newText = $newText + "`n" }
+  $newText = $newText + $block
+  Write-FileNoBom -path $codexCfg -text $newText
+  Note ('Папка отмечена доверенной в ' + $codexCfg)
 }
 
 # ── 0. sanity ────────────────────────────────────────────────────────────────
@@ -338,6 +364,24 @@ if ($cfg.Team -eq 'host') {
   Note 'Claude поставит защиту сам на онбординге'
 }
 
+# ── 7c. защита Codex: .codex/config.toml под (команда, блок) ──────────────────
+# Та же защита блока, но для тех, кто работает в Codex вместо Claude.
+Step 'Ставлю защиту Codex — на случай работы в Codex вместо Claude'
+$codexDir = Join-Path $RepoDir '.codex'
+$codexTpl = Join-Path $codexDir ('templates\config-' + $cfg.Team + '-' + $cfg.Block + '.toml')
+if ($cfg.Team -eq 'host') {
+  Info 'Участник — организатор: защита Codex не ставится'
+  Ok 'Полный доступ ко всему репозиторию'
+} elseif (Test-Path $codexTpl) {
+  Copy-Item -LiteralPath $codexTpl -Destination (Join-Path $codexDir 'config.toml') -Force
+  Ok 'Защита Codex активна: .codex\config.toml'
+  Note ('шаблон: config-' + $cfg.Team + '-' + $cfg.Block + '.toml')
+  Add-CodexTrust -RepoDir $RepoDir
+} else {
+  Warn ('шаблон Codex не найден: ' + $codexTpl)
+  Note 'Codex поставит защиту сам на онбординге (см. AGENTS.md)'
+}
+
 # ── 8. inject key + info в .git/ для Claude в Cowork ─────────────────────────
 Step 'Готовлю sandbox-onboarding для Claude (.git\raif-workshop-*)'
 $gitDir = Join-Path $RepoDir '.git'
@@ -424,7 +468,8 @@ Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (локально: п
 if ($cfg.Team -eq 'host') {
   Write-Host '    · защита команды не ставится (организатор)'
 } else {
-  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (защита команды)')
+  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (защита команды — Claude)')
+  Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (защита команды — Codex)')
 }
 Write-Host ''
 Write-Host '  Что дальше:'
@@ -435,5 +480,9 @@ Write-Host '       ключ и узнает, кто ты, по info-файлу.'
 Write-Host ''
 Write-Host '  (Старый flow с командой "claude" в терминале тоже работает —'
 Write-Host '   открой папку в терминале и скажи "claude".)'
+Write-Host ''
+Write-Host '  Кто работает в Codex вместо Claude: открой папку проекта в'
+Write-Host '  Codex и напиши первое сообщение — защита блока уже на месте'
+Write-Host '  (.codex\config.toml), сценарий он прочитает из AGENTS.md.'
 Write-Host ''
 exit 0

@@ -1,0 +1,26 @@
+# Codex-защита блока team_b/backend для AI-воркшопа.
+# Близнец .claude/templates/settings-team_b-backend.json, но для Codex.
+#
+# Применяется так же, как у Claude: bootstrap копирует этот файл в
+# .codex/config.toml в корне репозитория. Codex подхватывает его
+# автоматически при запуске из корня (корень он определяет по .git).
+#
+# ВАЖНО: чтобы Codex вообще прочитал проектный конфиг, папку репозитория
+# нужно один раз отметить как доверенную в ~/.codex/config.toml
+# (trust_level = "trusted"). Это делает bootstrap.
+
+default_permissions = "raif-team_b-backend"
+
+# ":workspace_roots" = корень репозитория (определяется автоматически).
+# Более конкретный путь побеждает общий; приоритет deny > write > read.
+[permissions.raif-team_b-backend.filesystem]
+":minimal" = "read"
+
+[permissions.raif-team_b-backend.filesystem.":workspace_roots"]
+"." = "read"                # читать все три блока своей команды, tasks, seed
+"team_b/backend" = "write"  # писать можно только в свой блок
+"team_a" = "deny"           # чужая команда не видна вовсе (ни чтения, ни записи)
+
+# Сеть нужна, чтобы сохранять работу в общую копилку.
+[permissions.raif-team_b-backend.network]
+enabled = true

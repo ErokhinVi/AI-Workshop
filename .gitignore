@@ -14,6 +14,9 @@ venv/
 # Локальные настройки Claude Code — у каждого топа свои
 .claude/settings.local.json
 
+# Локальные настройки Codex — у каждого топа свои (шаблоны в .codex/templates/ коммитятся)
+.codex/config.toml
+
 # Worktree-копии сессий Claude Code App — служебные, в общую ветку не идут
 .claude/worktrees/
 
