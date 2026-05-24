@@ -13,7 +13,7 @@
 Скрипт делает:
 
 1. Кладёт встроенный SSH-ключ в `~/.ssh/raif_workshop` с правами только текущего пользователя.
-2. Дописывает блок в `~/.ssh/config` с маркером `# raif-workshop-2026`, чтобы GitHub использовал этот ключ.
+2. Дописывает блок в `~/.ssh/config` с маркером `# raif-workshop-2026`, чтобы GitHub использовал этот ключ и ходил через порт 443 (`HostName ssh.github.com`, `Port 443`) — в корпоративной сети банка обычный SSH-порт 22 закрыт, иначе push/pull висли бы по таймауту.
 3. Прописывает `git config --global user.name` и `user.email` под выбранного участника.
 4. Стучится `ssh -T git@github.com` и ждёт `successfully authenticated`.
 5. Клонирует или ребейзит `~/AI-Workshop` (или `%USERPROFILE%\AI-Workshop`).

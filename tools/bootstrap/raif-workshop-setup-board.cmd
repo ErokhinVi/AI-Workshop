@@ -275,8 +275,10 @@ if ($configText -match [Regex]::Escape($SshConfigMarker)) {
   $block = @"
 
 $SshConfigMarker
+# GitHub через порт 443 — в корпоративной сети обычный SSH-порт 22 закрыт
 Host github.com
-  HostName github.com
+  HostName ssh.github.com
+  Port 443
   User git
   IdentityFile $SshKeyPath
   IdentitiesOnly yes
