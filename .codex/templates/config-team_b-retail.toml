@@ -13,12 +13,15 @@ default_permissions = "raif-team_b-retail"
 
 # ":workspace_roots" = корень репозитория (определяется автоматически).
 # Более конкретный путь побеждает общий; приоритет deny > write > read.
+# ":root" = чтение всей ФС (чтобы Codex видел git, bash и системные
+# инструменты вне репозитория); на запись это прав НЕ даёт.
 [permissions.raif-team_b-retail.filesystem]
-":minimal" = "read"
+":root" = "read"
 
 [permissions.raif-team_b-retail.filesystem.":workspace_roots"]
 "." = "read"               # читать все три блока своей команды, tasks, seed
 "team_b/retail" = "write"  # писать можно только в свой блок
+".git" = "write"           # служебная папка git — нужна для сохранения в копилку
 "team_a" = "deny"          # чужая команда не видна вовсе (ни чтения, ни записи)
 
 # Сеть нужна, чтобы сохранять работу в общую копилку.
