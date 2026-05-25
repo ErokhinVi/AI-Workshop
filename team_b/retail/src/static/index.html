@@ -215,6 +215,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="transfers">Переводы</button>
       <button class="tab" data-tab="credits">Кредиты</button>
+      <button class="tab" data-tab="myloans">Мои кредиты</button>
     </div>
 
     <div class="tab-pane show" data-pane="transfers">
@@ -241,8 +242,8 @@
         <div id="credit-products"></div>
       </div>
 
-      <div id="credit-applications-wrap" style="margin-top:8px">
-        <div class="section-title" id="applications-title" style="display:none">Мои заявки</div>
+      <div id="credit-applications-wrap" style="margin-top:8px;display:none">
+        <div class="section-title">Мои заявки</div>
         <div id="applications-list" class="applications-list"></div>
       </div>
 
@@ -269,6 +270,11 @@
         </form>
         <div id="credit-result"></div>
       </div>
+    </div>
+
+    <div class="tab-pane" data-pane="myloans">
+      <div class="section-title">Мои кредиты</div>
+      <div id="myloans-list" class="applications-list"></div>
     </div>
   </div>
 
@@ -424,14 +430,10 @@
       localStorage.setItem(appsKey(clientId), JSON.stringify(apps.slice(0, 20)));
     }
 
-    function renderApps(clientId) {
-      const apps = loadApps(clientId);
-      const title = document.getElementById("applications-title");
-      const list = document.getElementById("applications-list");
-      if (!apps.length) { title.style.display = "none"; list.innerHTML = ""; return; }
-      title.style.display = "";
+    function renderAppsHTML(apps) {
       const statusText = { approved: "Одобрено", rejected: "Отказ", pending: "На рассмотрении" };
-      list.innerHTML = apps.map(a => `
+      if (!apps.length) return `<div class="empty">Заявок пока нет</div>`;
+      return apps.map(a => `
         <div class="app-row">
           <div>
             <div class="a-name">${a.product_name}</div>
@@ -439,6 +441,16 @@
           </div>
           <div class="a-status ${a.status}">${statusText[a.status] || a.status}</div>
         </div>`).join("");
+    }
+
+    function renderApps(clientId) {
+      const apps = loadApps(clientId);
+      const wrap = document.getElementById("credit-applications-wrap");
+      const list = document.getElementById("applications-list");
+      if (!apps.length) { wrap.style.display = "none"; list.innerHTML = ""; }
+      else { wrap.style.display = ""; list.innerHTML = renderAppsHTML(apps); }
+      const myloans = document.getElementById("myloans-list");
+      if (myloans) myloans.innerHTML = renderAppsHTML(apps);
     }
 
     sel.addEventListener("change", () => {
@@ -521,6 +533,12 @@
       if (btn.dataset.tab === "credits") {
         btn.addEventListener("click", () => {
           loadCreditProducts();
+          const opt = sel.selectedOptions[0];
+          if (opt) renderApps(opt.value);
+        });
+      }
+      if (btn.dataset.tab === "myloans") {
+        btn.addEventListener("click", () => {
           const opt = sel.selectedOptions[0];
           if (opt) renderApps(opt.value);
         });
