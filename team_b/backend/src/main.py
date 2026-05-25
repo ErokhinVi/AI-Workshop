@@ -13,8 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import logging
 import httpx
 from fastapi import FastAPI, HTTPException, Query
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("backend")
 
 TEAM_NAME = os.environ.get("TEAM_NAME", "team")
 COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
@@ -160,7 +164,10 @@ async def create_credit_application(payload: dict) -> dict:
     client_id = payload.get("client_id")
     amount_rub = payload.get("amount_rub")
     product = payload.get("product_id") or payload.get("product")
+    log.info("ЗАЯВКА от retail: client_id=%s amount_rub=%s product_id=%s term_months=%s",
+             client_id, amount_rub, product, payload.get("term_months"))
     if not client_id or not amount_rub or not product:
+        log.warning("ЗАЯВКА отклонена: не хватает полей client_id/amount_rub/product_id")
         raise HTTPException(status_code=400, detail="укажи client_id, amount_rub и product_id")
     c = _clients_by_id.get(client_id)
     if not c:
@@ -206,6 +213,8 @@ async def create_credit_application(payload: dict) -> dict:
         "credit_history": client_history_raw,
     }
 
+    log.info("ЗАЯВКА сохранена: app_id=%s, отправляю в CIB на скоринг", app_id)
+    log.info("СКОРИНГ-запрос в CIB: %s", scoring_payload)
     asyncio.create_task(_send_to_scoring(app_id, scoring_payload))
 
     return {
@@ -222,11 +231,16 @@ async def _send_to_scoring(app_id: str, payload: dict) -> None:
             resp = await client.post(f"{CIB_URL}/credit/decide", json=payload)
             if resp.status_code == 200:
                 result = resp.json()
+                log.info("ОТВЕТ от CIB для app_id=%s: decision=%s score=%s",
+                         app_id, result.get("decision"), result.get("score_total"))
                 if app_id in _applications_by_id:
                     _applications_by_id[app_id]["scoring_result"] = result
                     _applications_by_id[app_id]["status"] = result.get("decision", "reviewed")
-    except Exception:
-        pass
+            else:
+                log.warning("CIB вернул ошибку для app_id=%s: status=%s body=%s",
+                            app_id, resp.status_code, resp.text[:200])
+    except Exception as e:
+        log.error("Ошибка при отправке в CIB для app_id=%s: %s", app_id, e)
 
 
 @app.get("/credit-applications")
