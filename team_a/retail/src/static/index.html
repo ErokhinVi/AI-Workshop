@@ -986,8 +986,10 @@
       investmentTicker.textContent = d.ticker;
       investmentAmount.textContent = `${fmt.format(d.amount_rub || 0)} ₽`;
       investmentCommission.textContent = `${fmt.format(d.commission_rub || 0)} ₽`;
+      const quoteClass = d.enough_cash === false ? "error" : "info";
+      const quoteTitle = d.enough_cash === false ? "Не хватает денег" : "Расчёт готов";
       investmentResult.innerHTML =
-        `<div class="alert info"><strong>Расчёт готов</strong>${d.explanation}<br/>Итого: ${fmt.format(d.total_rub || 0)} ₽</div>`;
+        `<div class="alert ${quoteClass}"><strong>${quoteTitle}</strong>${d.explanation}<br/>Итого: ${fmt.format(d.total_rub || 0)} ₽</div>`;
       return d;
     }
 

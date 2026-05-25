@@ -602,6 +602,11 @@ async def api_investment_buy(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="клиент не выбран")
     await _backend_get(f"/clients/{client_id}")
     quote = await _investment_quote(client_id, ticker, quantity)
+    if quote.get("enough_cash") is False or quote.get("decision") in {"insufficient_funds", "rejected"}:
+        raise HTTPException(
+            status_code=400,
+            detail=quote.get("explanation") or "Покупку нельзя исполнить на текущих условиях.",
+        )
     order = {
         "client_id": client_id,
         "ticker": quote["ticker"],
