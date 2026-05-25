@@ -24,6 +24,13 @@ APPLICATIONS_PATH = Path(
         Path(__file__).resolve().parents[1] / "data" / "credit_applications.jsonl",
     )
 )
+INVESTMENT_ORDERS_PATH = Path(
+    os.environ.get(
+        "INVESTMENT_ORDERS_PATH",
+        Path(__file__).resolve().parents[1] / "data" / "investment_orders.jsonl",
+    )
+)
+ALLOWED_INVESTMENT_TICKERS = {"SBRF", "VTBR", "ROSN", "SIBN"}
 
 
 def _find_seed_dir() -> Path | None:
@@ -48,7 +55,10 @@ _transactions: list[dict[str, Any]] = []
 _credit_history: list[dict[str, Any]] = []
 _credit_applications: list[dict[str, Any]] = []
 _credit_applications_lock = threading.Lock()
+_investment_orders: list[dict[str, Any]] = []
+_investment_orders_lock = threading.Lock()
 _APPLICATION_ID_RE = re.compile(r"^ca-(\d{6,})$")
+_INVESTMENT_ORDER_ID_RE = re.compile(r"^io-(\d{6,})$")
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -83,10 +93,22 @@ def _load_credit_applications() -> None:
     _credit_applications.extend(_load_jsonl(APPLICATIONS_PATH))
 
 
+def _load_investment_orders() -> None:
+    _investment_orders.extend(_load_jsonl(INVESTMENT_ORDERS_PATH))
+
+
 def _save_credit_application(application: dict[str, Any]) -> None:
     APPLICATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with APPLICATIONS_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(application, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _save_investment_order(order: dict[str, Any]) -> None:
+    INVESTMENT_ORDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with INVESTMENT_ORDERS_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(order, ensure_ascii=False) + "\n")
         f.flush()
         os.fsync(f.fileno())
 
@@ -101,8 +123,19 @@ def _next_credit_application_id() -> str:
     return f"ca-{max_number + 1:06d}"
 
 
+def _next_investment_order_id() -> str:
+    max_number = 0
+    for order in _investment_orders:
+        raw_id = str(order.get("order_id") or "")
+        match = _INVESTMENT_ORDER_ID_RE.match(raw_id)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return f"io-{max_number + 1:06d}"
+
+
 _load_seed()
 _load_credit_applications()
+_load_investment_orders()
 
 app = FastAPI(title="backend — ядро данных", version="1.0.0")
 
@@ -113,7 +146,8 @@ async def health() -> dict:
             "commit": COMMIT, "clients_loaded": len(_clients),
             "transactions_loaded": len(_transactions),
             "credit_history_loaded": len(_credit_history),
-            "credit_applications_loaded": len(_credit_applications)}
+            "credit_applications_loaded": len(_credit_applications),
+            "investment_orders_loaded": len(_investment_orders)}
 
 
 @app.get("/clients")
@@ -297,6 +331,156 @@ async def get_credit_applications(client_id: str) -> dict:
     items = [a for a in _credit_applications if a["client_id"] == client_id]
     items.sort(key=lambda a: a["created_at"], reverse=True)
     return {"client_id": client_id, "total": len(items), "items": items}
+
+
+def _validate_investment_order(payload: dict) -> dict[str, Any]:
+    client_id = str(payload.get("client_id") or "").strip()
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    if ticker not in ALLOWED_INVESTMENT_TICKERS:
+        raise HTTPException(
+            status_code=400,
+            detail="доступны только акции SBRF, VTBR, ROSN, SIBN",
+        )
+
+    side = str(payload.get("side") or "buy").strip().lower()
+    if side != "buy":
+        raise HTTPException(status_code=400, detail="сейчас поддерживается только покупка")
+
+    status = str(payload.get("status") or "executed").strip().lower()
+    if status not in {"quoted", "executed", "rejected", "cancelled"}:
+        raise HTTPException(status_code=400, detail="некорректный статус инвестиционной заявки")
+
+    try:
+        quantity = int(payload.get("quantity") or 0)
+        price_rub = float(payload.get("price_rub") or 0)
+        amount_rub = float(payload.get("amount_rub") or 0)
+        commission_rub = float(payload.get("commission_rub") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="некорректные параметры сделки")
+
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="укажи положительное количество акций")
+    if price_rub <= 0:
+        raise HTTPException(status_code=400, detail="укажи положительную цену")
+    if amount_rub <= 0:
+        amount_rub = round(quantity * price_rub, 2)
+    if commission_rub < 0:
+        raise HTTPException(status_code=400, detail="комиссия не может быть отрицательной")
+
+    explanation = str(payload.get("explanation") or "").strip()
+    if not explanation:
+        explanation = (
+            f"Куплено {quantity} акций {ticker} по ориентировочной цене "
+            f"{price_rub:g} ₽."
+        )
+
+    order = {
+        "client_id": client_id,
+        "ticker": ticker,
+        "side": side,
+        "quantity": quantity,
+        "price_rub": round(price_rub, 4),
+        "amount_rub": round(amount_rub, 2),
+        "commission_rub": round(commission_rub, 2),
+        "status": status,
+        "explanation": explanation,
+    }
+    for optional_field in (
+        "total_rub",
+        "instrument_name",
+        "risk_level",
+        "source",
+    ):
+        if optional_field in payload:
+            order[optional_field] = payload[optional_field]
+    return order
+
+
+def _investment_orders_for_client(client_id: str) -> list[dict[str, Any]]:
+    orders = [o for o in _investment_orders if o["client_id"] == client_id]
+    orders.sort(key=lambda o: o["created_at"], reverse=True)
+    return orders
+
+
+def _build_investment_portfolio(client_id: str) -> dict[str, Any]:
+    client = _clients_by_id[client_id]
+    executed_orders = [
+        o
+        for o in _investment_orders
+        if o["client_id"] == client_id and o.get("status") == "executed"
+    ]
+    positions_by_ticker: dict[str, dict[str, Any]] = {}
+    invested_total = 0.0
+    for order in executed_orders:
+        ticker = order["ticker"]
+        quantity = int(order.get("quantity") or 0)
+        amount = float(order.get("amount_rub") or 0)
+        commission = float(order.get("commission_rub") or 0)
+        if quantity <= 0:
+            continue
+        position = positions_by_ticker.setdefault(
+            ticker,
+            {"ticker": ticker, "quantity": 0, "cost_rub": 0.0},
+        )
+        position["quantity"] += quantity
+        position["cost_rub"] += amount
+        invested_total += amount + commission
+
+    positions = []
+    for position in positions_by_ticker.values():
+        quantity = int(position["quantity"])
+        cost = float(position["cost_rub"])
+        avg_price = round(cost / quantity, 4) if quantity else 0
+        positions.append(
+            {
+                "ticker": position["ticker"],
+                "quantity": quantity,
+                "avg_price_rub": avg_price,
+                "market_value_rub": round(cost, 2),
+            }
+        )
+    positions.sort(key=lambda p: p["ticker"])
+    cash_balance = max(0.0, float(client.get("balance_rub") or 0) - invested_total)
+    return {
+        "client_id": client_id,
+        "cash_balance_rub": round(cash_balance, 2),
+        "positions": positions,
+        "orders_total": len(_investment_orders_for_client(client_id)),
+    }
+
+
+@app.get("/investment-portfolio/{client_id}")
+async def get_investment_portfolio(client_id: str) -> dict:
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    return _build_investment_portfolio(client_id)
+
+
+@app.post("/investment-orders")
+async def create_investment_order(payload: dict) -> dict:
+    order = _validate_investment_order(payload)
+    with _investment_orders_lock:
+        order["order_id"] = _next_investment_order_id()
+        order["created_at"] = datetime.now().replace(microsecond=0).isoformat()
+        _investment_orders.append(order)
+        _save_investment_order(order)
+    return order
+
+
+@app.get("/investment-orders")
+async def list_investment_orders(
+    client_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    items = (
+        _investment_orders_for_client(client_id)
+        if client_id
+        else sorted(_investment_orders, key=lambda o: o["created_at"], reverse=True)
+    )
+    return {"total": len(items), "items": items[:limit]}
 
 
 @app.post("/api/transfer")
