@@ -438,20 +438,29 @@
     function renderAppsHTML(apps, clientId) {
       const statusText = { approved: "Одобрено", rejected: "Отказ", pending: "На рассмотрении" };
       if (!apps.length) return `<div class="empty">Заявок пока нет</div>`;
-      return apps.map((a, i) => `
-        <div class="app-row" data-idx="${i}">
+      return apps.map((a, i) => {
+        const isPaid = a.status === "paid";
+        const statusLabel = isPaid ? "Погашен" : (statusText[a.status] || a.status);
+        const statusClass = isPaid ? "approved" : a.status;
+        const actions = !isPaid && a.status === "pending"
+          ? `<button class="btn-refresh-status" data-idx="${i}" data-client="${clientId}" style="margin-top:6px;font-size:11px;padding:4px 10px;border:1px solid var(--rule);border-radius:4px;background:transparent;cursor:pointer;font-family:inherit;color:var(--text-2)">Узнать решение</button>`
+          : !isPaid && a.status === "approved"
+          ? `<button class="btn-repay" data-idx="${i}" data-client="${clientId}" style="margin-top:6px;font-size:11px;padding:4px 10px;border:1px solid var(--good);border-radius:4px;background:transparent;cursor:pointer;font-family:inherit;color:var(--good)">Погасить досрочно</button>`
+          : "";
+        return `<div class="app-row" data-idx="${i}">
           <div>
             <div class="a-name">${a.product_name}</div>
             <div class="a-meta">${fmt.format(a.amount_rub)} ₽ · ${a.term_months} мес. · ${a.date}</div>
-            ${a.status === "pending" ? `<button class="btn-refresh-status" data-idx="${i}" data-client="${clientId}" style="margin-top:6px;font-size:11px;padding:4px 10px;border:1px solid var(--rule);border-radius:4px;background:transparent;cursor:pointer;font-family:inherit;color:var(--text-2)">Узнать решение</button>` : ""}
+            ${actions}
           </div>
-          <div class="a-status ${a.status}" id="app-status-${i}">${statusText[a.status] || a.status}</div>
-        </div>`).join("");
+          <div class="a-status ${statusClass}">${statusLabel}</div>
+        </div>`;
+      }).join("");
     }
 
     function updateApprovalBanner(clientId) {
       const apps = loadApps(clientId);
-      const approved = apps.filter(a => a.status === "approved");
+      const approved = apps.filter(a => a.status === "approved" && a.status !== "paid");
       const banner = document.getElementById("approval-banner");
       const bannerText = document.getElementById("approval-banner-text");
       if (approved.length) {
@@ -473,13 +482,29 @@
       const myloans = document.getElementById("myloans-list");
       if (myloans) {
         myloans.innerHTML = renderAppsHTML(apps, clientId);
-        myloans.querySelectorAll(".btn-refresh-status").forEach(btn => {
-          btn.addEventListener("click", () => refreshAppStatus(btn.dataset.client, +btn.dataset.idx));
-        });
+        attachAppButtons(myloans, clientId);
       }
-      list.querySelectorAll(".btn-refresh-status").forEach(btn => {
+      attachAppButtons(list, clientId);
+    }
+
+    function attachAppButtons(container, clientId) {
+      container.querySelectorAll(".btn-refresh-status").forEach(btn => {
         btn.addEventListener("click", () => refreshAppStatus(btn.dataset.client, +btn.dataset.idx));
       });
+      container.querySelectorAll(".btn-repay").forEach(btn => {
+        btn.addEventListener("click", () => repayLoan(btn.dataset.client, +btn.dataset.idx));
+      });
+    }
+
+    function repayLoan(clientId, idx) {
+      const apps = loadApps(clientId);
+      const a = apps[idx];
+      if (!a || a.status !== "approved") return;
+      if (!confirm(`Погасить досрочно: ${a.product_name} на ${fmt.format(a.amount_rub)} ₽?`)) return;
+      apps[idx].status = "paid";
+      apps[idx].paid_date = new Date().toLocaleDateString("ru-RU");
+      localStorage.setItem(appsKey(clientId), JSON.stringify(apps));
+      renderApps(clientId);
     }
 
     async function refreshAppStatus(clientId, idx) {
