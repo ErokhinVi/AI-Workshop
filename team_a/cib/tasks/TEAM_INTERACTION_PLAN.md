@@ -276,6 +276,7 @@ CIB должен первым добавить и проверить:
 
 Статус CIB по RaifCoin Tap:
 
+- готово: `GET /products` содержит `raifcoin-tap` с адресами правил и расчёта;
 - готово: `GET /raifcoin/rules` отдаёт экономику `RaifCoin`, дневной лимит,
   множители скорости и антифрод-правила;
 - готово: `POST /raifcoin/tap/score` рассчитывает `raifcoin_earned`,

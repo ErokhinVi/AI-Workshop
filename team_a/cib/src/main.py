@@ -70,6 +70,18 @@ PRODUCTS = [
         "allowed_tickers": ["SBRF", "VTBR", "ROSN", "SIBN"],
         "risk_level": "medium",
     },
+    {
+        "id": "raifcoin-tap",
+        "kind": "loyalty_game",
+        "asset": "RaifCoin",
+        "name": "RaifCoin Tap",
+        "description": "Мини-игра с тапами и виртуальной валютой без блокчейна",
+        "rules_endpoint": "/raifcoin/rules",
+        "score_endpoint": "/raifcoin/tap/score",
+        "blockchain": False,
+        "external_transfer": False,
+        "credit_rating_boost": True,
+    },
 ]
 
 INVESTMENT_INSTRUMENTS = [
