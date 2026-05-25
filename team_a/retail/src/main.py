@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 TEAM_NAME = os.environ.get("TEAM_NAME", "team")
 COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8003").rstrip("/")
+CIB_URL = os.environ.get("CIB_URL", "http://localhost:8002").rstrip("/")
 
 app = FastAPI(title="retail - мобильный банк", version="1.0.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -29,6 +30,7 @@ async def health() -> dict:
         "block": "retail",
         "commit": COMMIT,
         "backend_url": BACKEND_URL,
+        "cib_url": CIB_URL,
     }
 
 
@@ -55,6 +57,28 @@ async def _backend_post(path: str, payload: dict[str, Any]) -> dict:
             r = await client.post(f"{BACKEND_URL}{path}", json=payload)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"backend недоступен: {exc}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:300])
+    return r.json()
+
+
+async def _cib_get(path: str, params: dict | None = None) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(f"{CIB_URL}{path}", params=params)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:300])
+    return r.json()
+
+
+async def _cib_post(path: str, payload: dict[str, Any]) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(f"{CIB_URL}{path}", json=payload)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}")
     if r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail=r.text[:300])
     return r.json()
@@ -178,6 +202,92 @@ def _local_credit_decision(client: dict[str, Any], amount: int, months: int) -> 
     }
 
 
+def _decorate_credit_decision(
+    decision: dict[str, Any],
+    client: dict[str, Any],
+    amount: int,
+    months: int,
+    source: str,
+) -> dict[str, Any]:
+    if isinstance(decision.get("decision"), dict):
+        decision = decision["decision"]
+    is_business = client.get("segment") == "sme"
+    status = decision.get("status") or decision.get("decision") or "counter_offer"
+    approved_amount = int(decision.get("approved_amount_rub") or 0)
+    if status == "approved" and approved_amount <= 0:
+        approved_amount = amount
+    rate = decision.get("rate_pct")
+    rate = round(float(rate), 1) if rate is not None else None
+    monthly_payment = int(decision.get("monthly_payment_rub") or 0)
+    if approved_amount > 0 and rate and monthly_payment <= 0:
+        monthly_rate = rate / 100 / 12
+        monthly_payment = int(approved_amount * monthly_rate / (1 - (1 + monthly_rate) ** (-months)))
+
+    title = decision.get("title")
+    if not title:
+        title = {
+            "approved": "Бизнес-лимит доступен" if is_business else "Персональный лимит доступен",
+            "counter_offer": "Предлагаем безопасную сумму",
+            "declined": "Сейчас лучше не увеличивать нагрузку",
+        }.get(status, "Решение по заявке")
+
+    explanation = (decision.get("explanation") or "").strip()
+    if len(explanation) < 120:
+        explanation = (
+            f"{explanation} " if explanation else ""
+        ) + (
+            "Решение учитывает доход, баланс, кредитный профиль и комфортную долговую нагрузку. "
+            "Мы показываем сумму, ставку, платеж и статус сразу, чтобы клиент понимал условия "
+            "до подтверждения и мог вернуться к заявке в истории."
+        )
+
+    return {
+        "status": status,
+        "status_label": {
+            "approved": "одобрено",
+            "counter_offer": "встречное предложение",
+            "declined": "не рекомендуем сейчас",
+        }.get(status, "решение"),
+        "title": title,
+        "requested_amount_rub": amount,
+        "approved_amount_rub": approved_amount,
+        "max_amount_rub": int(decision.get("max_amount_rub") or approved_amount or 0),
+        "term_months": months,
+        "rate_pct": rate,
+        "monthly_payment_rub": monthly_payment,
+        "explanation": explanation,
+        "conditions": {
+            "product_name": decision.get("product_name")
+            or ("Бизнес-лимит на оборот" if is_business else "Персональный кредитный лимит"),
+            "product_type": decision.get("product_type") or "credit",
+            "currency": "RUB",
+            "decision_valid_days": int(decision.get("decision_valid_days") or 7),
+            "next_step": (
+                decision.get("next_step")
+                or "Заявка сохранена. Клиент может вернуться к ней из истории заявок."
+            ),
+        },
+        "product_kind": "business_limit" if is_business else "personal_limit",
+        "source": source,
+    }
+
+
+async def _credit_decision(client: dict[str, Any], amount: int, months: int) -> dict[str, Any]:
+    payload = {"client_id": client["id"], "amount_rub": amount, "term_months": months}
+    try:
+        cib_decision = await _cib_post("/credit/decide", payload)
+        return _decorate_credit_decision(cib_decision, client, amount, months, "cib")
+    except HTTPException as exc:
+        if exc.status_code not in {404, 405, 502}:
+            raise
+        decision = _local_credit_decision(client, amount, months)
+        decision["source"] = "retail_fallback_waiting_for_cib"
+        decision["integration_note"] = (
+            "Retail уже умеет отправлять заявку в CIB, но CIB пока не отдал /credit/decide."
+        )
+        return decision
+
+
 async def _try_save_credit_application(application: dict[str, Any]) -> dict[str, Any] | None:
     try:
         return await _backend_post("/credit-applications", application)
@@ -225,7 +335,23 @@ async def api_credit_offer(payload: dict) -> dict:
     client = await _backend_get(f"/clients/{client_id}")
     decision = _local_credit_decision(client, _default_amount(client), 24)
     history = await _try_get_credit_history(client_id)
-    return {"client": _client_brief(client), "offer": decision, "history": history}
+    cib_ready = False
+    try:
+        products = await _cib_get("/products")
+        cib_ready = any(
+            "credit" in str(p.get("kind", "")).lower()
+            or "credit" in str(p.get("id", "")).lower()
+            or "кредит" in str(p.get("name", "")).lower()
+            for p in products.get("items", [])
+        )
+    except HTTPException:
+        pass
+    return {
+        "client": _client_brief(client),
+        "offer": decision,
+        "history": history,
+        "integration": {"cib_credit_product_ready": cib_ready},
+    }
 
 
 @app.post("/api/credit-apply")
@@ -241,7 +367,7 @@ async def api_credit_apply(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="выбери срок")
 
     client = await _backend_get(f"/clients/{client_id}")
-    decision = _local_credit_decision(client, amount, months)
+    decision = await _credit_decision(client, amount, months)
     application = {
         "client_id": client_id,
         "amount_rub": amount,
