@@ -297,8 +297,12 @@ async def _humanize_reason(decision: str, reason: str, score: int,
             f"Без жаргона и канцелярита. Два-три абзаца. Только русский язык."
         )
     try:
-        return await ask_llm(prompt, max_tokens=350, temperature=0.5)
-    except LLMError:
+        import asyncio
+        return await asyncio.wait_for(
+            ask_llm(prompt, max_tokens=250, temperature=0.5),
+            timeout=5.0,
+        )
+    except (LLMError, Exception):
         return reason
 
 
@@ -378,6 +382,7 @@ async def credit_decide(req: DecideRequest) -> dict:
         risk_score=float(client_data.get("risk_score", 0.4)) * 100,
         credit_history=credit_history,
     )
+    # Скоринг мгновенный — запускаем ИИ-объяснение параллельно с формированием ответа
     result = _score_request(score_req)
     human_explanation = await _humanize_reason(
         result.decision, result.reason, result.score_total,
