@@ -286,9 +286,28 @@ def _investment_products() -> list[dict[str, Any]]:
             "price_rub": instrument["price_rub"],
             "lot_size": instrument["lot_size"],
             "risk_level": instrument["risk_level"],
+            "trade_rules": _investment_trade_rules(instrument),
         }
         for instrument in INVESTMENT_INSTRUMENTS
     ]
+
+
+def _investment_instrument_payload(instrument: dict[str, Any]) -> dict[str, Any]:
+    return {**instrument, "trade_rules": _investment_trade_rules(instrument)}
+
+
+def _investment_trade_rules(instrument: dict[str, Any]) -> dict[str, Any]:
+    lot_size = int(instrument["lot_size"])
+    return {
+        "allowed_sides": ["buy"],
+        "quantity_unit": "share",
+        "min_quantity": 1,
+        "quantity_step": 1,
+        "lot_size": lot_size,
+        "supports_fractional": False,
+        "commission_rate": INVESTMENT_COMMISSION_RATE,
+        "settlement_currency": instrument["currency"],
+    }
 
 
 def _money(value: int | float) -> str:
@@ -359,7 +378,8 @@ def _quote_investment(
         "commission_rub": commission_rub,
         "total_rub": total_rub,
         "currency": instrument["currency"],
-        "instrument": instrument,
+        "instrument": _investment_instrument_payload(instrument),
+        "trade_rules": _investment_trade_rules(instrument),
         "client_cash_balance_rub": balance,
         "cash_balance_source": balance_source,
         "enough_cash": enough_cash,
@@ -395,7 +415,8 @@ async def credit_decide(payload: CreditDecisionRequest) -> dict:
 
 @app.get("/investments/instruments")
 async def investment_instruments() -> dict:
-    return {"total": len(INVESTMENT_INSTRUMENTS), "items": INVESTMENT_INSTRUMENTS}
+    items = [_investment_instrument_payload(instrument) for instrument in INVESTMENT_INSTRUMENTS]
+    return {"total": len(items), "items": items}
 
 
 @app.post("/investments/quote")

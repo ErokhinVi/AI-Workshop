@@ -11,8 +11,8 @@
 `ROSN`, `SIBN`, CIB отдаёт каталог инструментов и расчёт сделки, backend хранит
 портфель и заявки.
 
-Текущее состояние на 2026-05-25 12:42 UTC: команда A впереди, client base
-`1561` против `712` у команды B, score `20/20`, feature state `working`.
+Текущее состояние на 2026-05-25 12:53 UTC: команда A впереди, client base
+`1777` против `622` у команды B, score `20/20`, feature state `working`.
 Главный риск дальше — регрессия одного из трёх блоков, потеря скорости ответа
 или потеря содержательного объяснения отказа.
 
@@ -272,6 +272,9 @@ CIB должен принимать решение:
 доход, платёж, долговая нагрузка, просрочки, риск-скор и рекомендация.
 
 Для инвестиций CIB должен отдавать каталог доступных акций и расчёт покупки.
+Каталог и расчёт также должны отдавать `trade_rules`, чтобы backend и retail
+не угадывали допустимые стороны сделки, валюту расчёта, шаг количества,
+минимальное количество и комиссию.
 
 `GET /investments/instruments`
 
@@ -288,7 +291,17 @@ CIB должен принимать решение:
       "currency": "RUB",
       "price_rub": 290.5,
       "lot_size": 1,
-      "risk_level": "medium"
+      "risk_level": "medium",
+      "trade_rules": {
+        "allowed_sides": ["buy"],
+        "quantity_unit": "share",
+        "min_quantity": 1,
+        "quantity_step": 1,
+        "lot_size": 1,
+        "supports_fractional": false,
+        "commission_rate": 0.003,
+        "settlement_currency": "RUB"
+      }
     },
     {
       "ticker": "VTBR",
@@ -344,12 +357,33 @@ CIB должен принимать решение:
   "amount_rub": 2905,
   "commission_rub": 8.72,
   "total_rub": 2913.72,
+  "trade_rules": {
+    "allowed_sides": ["buy"],
+    "quantity_unit": "share",
+    "min_quantity": 1,
+    "quantity_step": 1,
+    "lot_size": 1,
+    "supports_fractional": false,
+    "commission_rate": 0.003,
+    "settlement_currency": "RUB"
+  },
   "explanation": "Покупка 10 акций SBRF рассчитана по ориентировочной цене 290.5 ₽ за акцию. Комиссия 0.3%, итог к списанию 2913.72 ₽."
 }
 ```
 
 CIB должен отклонять неизвестный тикер понятной ошибкой, не использовать LLM в
 критическом пути покупки и отвечать быстро.
+
+Статус CIB на 2026-05-25:
+
+- готово: `GET /products` содержит кредит и четыре инвестиционных продукта;
+- готово: `GET /investments/instruments` отдаёт `SBRF`, `VTBR`, `ROSN`, `SIBN`;
+- готово: `POST /investments/quote` рассчитывает покупку, комиссию, итог,
+  понятное объяснение и `enough_cash`;
+- готово: расчёт использует свободные средства инвестиционного портфеля
+  backend, а не исходный баланс клиента;
+- готово: каталог и расчёт отдают `trade_rules` для следующих шагов backend и
+  retail.
 
 ## Retail
 
