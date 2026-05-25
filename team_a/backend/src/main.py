@@ -42,6 +42,18 @@ CASINO_SPINS_PATH = Path(
         Path(__file__).resolve().parents[1] / "data" / "casino_spins.jsonl",
     )
 )
+RAIFCOIN_SESSIONS_PATH = Path(
+    os.environ.get(
+        "RAIFCOIN_SESSIONS_PATH",
+        Path(__file__).resolve().parents[1] / "data" / "raifcoin_sessions.jsonl",
+    )
+)
+RAIFCOIN_TAPS_PATH = Path(
+    os.environ.get(
+        "RAIFCOIN_TAPS_PATH",
+        Path(__file__).resolve().parents[1] / "data" / "raifcoin_taps.jsonl",
+    )
+)
 INVESTMENT_INSTRUMENTS = {
     "SBRF": {"name": "Сбербанк", "currency": "RUB", "lot_size": 1},
     "VTBR": {"name": "ВТБ", "currency": "RUB", "lot_size": 1000},
@@ -50,6 +62,9 @@ INVESTMENT_INSTRUMENTS = {
 }
 ALLOWED_INVESTMENT_TICKERS = set(INVESTMENT_INSTRUMENTS)
 INVESTMENT_COMMISSION_RATE = 0.003
+RAIFCOIN_MAX_TAP_RATE_PER_SEC = 16.0
+RAIFCOIN_MAX_TAP_COUNT = 1000
+RAIFCOIN_MAX_RATING_BOOST = 0.08
 
 
 def _find_seed_dir() -> Path | None:
@@ -80,10 +95,16 @@ _casino_sessions: list[dict[str, Any]] = []
 _casino_sessions_lock = threading.Lock()
 _casino_spins: list[dict[str, Any]] = []
 _casino_spins_lock = threading.Lock()
+_raifcoin_sessions: list[dict[str, Any]] = []
+_raifcoin_sessions_lock = threading.Lock()
+_raifcoin_taps: list[dict[str, Any]] = []
+_raifcoin_taps_lock = threading.Lock()
 _APPLICATION_ID_RE = re.compile(r"^ca-(\d{6,})$")
 _INVESTMENT_ORDER_ID_RE = re.compile(r"^io-(\d{6,})$")
 _CASINO_SESSION_ID_RE = re.compile(r"^cs-(\d{6,})$")
 _CASINO_SPIN_ID_RE = re.compile(r"^sp-(\d{6,})$")
+_RAIFCOIN_SESSION_ID_RE = re.compile(r"^rs-(\d{6,})$")
+_RAIFCOIN_TAP_ID_RE = re.compile(r"^rt-(\d{6,})$")
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -130,6 +151,14 @@ def _load_casino_spins() -> None:
     _casino_spins.extend(_load_jsonl(CASINO_SPINS_PATH))
 
 
+def _load_raifcoin_sessions() -> None:
+    _raifcoin_sessions.extend(_load_jsonl(RAIFCOIN_SESSIONS_PATH))
+
+
+def _load_raifcoin_taps() -> None:
+    _raifcoin_taps.extend(_load_jsonl(RAIFCOIN_TAPS_PATH))
+
+
 def _save_credit_application(application: dict[str, Any]) -> None:
     APPLICATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with APPLICATIONS_PATH.open("a", encoding="utf-8") as f:
@@ -167,6 +196,31 @@ def _save_casino_spin(spin: dict[str, Any]) -> None:
     CASINO_SPINS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CASINO_SPINS_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(spin, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _save_raifcoin_session(session: dict[str, Any]) -> None:
+    RAIFCOIN_SESSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with RAIFCOIN_SESSIONS_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(session, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _rewrite_raifcoin_sessions() -> None:
+    RAIFCOIN_SESSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with RAIFCOIN_SESSIONS_PATH.open("w", encoding="utf-8") as f:
+        for session in _raifcoin_sessions:
+            f.write(json.dumps(session, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _save_raifcoin_tap(tap: dict[str, Any]) -> None:
+    RAIFCOIN_TAPS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with RAIFCOIN_TAPS_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(tap, ensure_ascii=False) + "\n")
         f.flush()
         os.fsync(f.fileno())
 
@@ -211,11 +265,33 @@ def _next_casino_spin_id() -> str:
     return f"sp-{max_number + 1:06d}"
 
 
+def _next_raifcoin_session_id() -> str:
+    max_number = 0
+    for session in _raifcoin_sessions:
+        raw_id = str(session.get("session_id") or "")
+        match = _RAIFCOIN_SESSION_ID_RE.match(raw_id)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return f"rs-{max_number + 1:06d}"
+
+
+def _next_raifcoin_tap_id() -> str:
+    max_number = 0
+    for tap in _raifcoin_taps:
+        raw_id = str(tap.get("tap_id") or "")
+        match = _RAIFCOIN_TAP_ID_RE.match(raw_id)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return f"rt-{max_number + 1:06d}"
+
+
 _load_seed()
 _load_credit_applications()
 _load_investment_orders()
 _load_casino_sessions()
 _load_casino_spins()
+_load_raifcoin_sessions()
+_load_raifcoin_taps()
 
 app = FastAPI(title="backend — ядро данных", version="1.0.0")
 
@@ -229,7 +305,9 @@ async def health() -> dict:
             "credit_applications_loaded": len(_credit_applications),
             "investment_orders_loaded": len(_investment_orders),
             "casino_sessions_loaded": len(_casino_sessions),
-            "casino_spins_loaded": len(_casino_spins)}
+            "casino_spins_loaded": len(_casino_spins),
+            "raifcoin_sessions_loaded": len(_raifcoin_sessions),
+            "raifcoin_taps_loaded": len(_raifcoin_taps)}
 
 
 @app.get("/clients")
@@ -254,7 +332,12 @@ async def get_client(client_id: str) -> dict:
     c = _clients_by_id.get(client_id)
     if not c:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
-    return {**c, "credit_profile": _build_credit_profile(client_id)}
+    raifcoin_balance = _build_raifcoin_balance(client_id)
+    return {
+        **c,
+        "raifcoin_rating_boost": raifcoin_balance["raifcoin_rating_boost"],
+        "credit_profile": _build_credit_profile(client_id),
+    }
 
 
 @app.get("/transactions/{client_id}")
@@ -292,6 +375,7 @@ def _build_credit_profile(client_id: str) -> dict[str, Any]:
         [int(r.get("overdue_days_max") or 0) for r in records],
         default=0,
     )
+    raifcoin_balance = _build_raifcoin_balance(client_id)
     return {
         "history_total": len(records),
         "active_credits": sum(1 for r in records if r.get("status") == "active"),
@@ -301,6 +385,9 @@ def _build_credit_profile(client_id: str) -> dict[str, Any]:
         "recent_records": records[:10],
         "applications_total": len(applications),
         "recent_applications": applications[:10],
+        "raifcoin_balance": raifcoin_balance["balance_raifcoin"],
+        "raifcoin_total_taps": raifcoin_balance["total_taps"],
+        "raifcoin_rating_boost": raifcoin_balance["raifcoin_rating_boost"],
     }
 
 
@@ -621,6 +708,151 @@ def _casino_spins_for_client(client_id: str) -> list[dict[str, Any]]:
     return spins
 
 
+def _raifcoin_sessions_for_client(client_id: str) -> list[dict[str, Any]]:
+    sessions = [s for s in _raifcoin_sessions if s["client_id"] == client_id]
+    sessions.sort(key=lambda s: s["created_at"], reverse=True)
+    return sessions
+
+
+def _raifcoin_taps_for_client(client_id: str) -> list[dict[str, Any]]:
+    taps = [t for t in _raifcoin_taps if t["client_id"] == client_id]
+    taps.sort(key=lambda t: t["created_at"], reverse=True)
+    return taps
+
+
+def _build_raifcoin_balance(client_id: str) -> dict[str, Any]:
+    client_taps = [t for t in _raifcoin_taps if t["client_id"] == client_id]
+    valid_taps = [t for t in client_taps if not t.get("fraud_flag")]
+    balance = sum(int(t.get("raifcoin_earned") or 0) for t in valid_taps)
+    rating_boost = sum(float(t.get("rating_delta") or 0) for t in valid_taps)
+    total_taps = sum(int(t.get("tap_count") or 0) for t in valid_taps)
+    return {
+        "client_id": client_id,
+        "asset": "RaifCoin",
+        "currency": "RC",
+        "balance_raifcoin": balance,
+        "total_taps": total_taps,
+        "sessions_total": len(_raifcoin_sessions_for_client(client_id)),
+        "tap_results_total": len(client_taps),
+        "fraud_results_total": len(client_taps) - len(valid_taps),
+        "raifcoin_rating_boost": round(
+            min(RAIFCOIN_MAX_RATING_BOOST, max(0.0, rating_boost)),
+            4,
+        ),
+        "blockchain": False,
+        "external_transfer": False,
+        "explanation": (
+            "RaifCoin — внутренняя виртуальная валюта банка. Баланс и рейтинговый "
+            "бонус растут только по tap-сессиям без антифрод-флага."
+        ),
+    }
+
+
+def _validate_raifcoin_session(payload: dict) -> dict[str, Any]:
+    client_id = str(payload.get("client_id") or "").strip()
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    return {
+        "client_id": client_id,
+        "status": "active",
+        "asset": "RaifCoin",
+        "currency": "RC",
+        "blockchain": False,
+        "external_transfer": False,
+        "explanation": (
+            "Tap-сессия RaifCoin открыта. После расчёта CIB backend сохранит "
+            "результат, начислит виртуальные монеты без внешнего блокчейна и "
+            "обновит внутренний рейтинговый бонус."
+        ),
+    }
+
+
+def _find_active_raifcoin_session(client_id: str, session_id: str) -> dict[str, Any]:
+    for session in _raifcoin_sessions:
+        if session.get("session_id") == session_id and session.get("client_id") == client_id:
+            if session.get("status") != "active":
+                raise HTTPException(
+                    status_code=400,
+                    detail="tap-сессия уже завершена",
+                )
+            return session
+    raise HTTPException(status_code=404, detail="tap-сессия не найдена")
+
+
+def _validate_raifcoin_tap(payload: dict) -> tuple[dict[str, Any], dict[str, Any]]:
+    client_id = str(payload.get("client_id") or "").strip()
+    session_id = str(payload.get("session_id") or "").strip()
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="нужен идентификатор tap-сессии")
+
+    session = _find_active_raifcoin_session(client_id, session_id)
+    try:
+        tap_count = int(payload.get("tap_count") or 0)
+        duration_ms = int(payload.get("duration_ms") or 0)
+        tap_rate = float(payload.get("tap_rate_per_sec") or 0)
+        raifcoin_earned = int(payload.get("raifcoin_earned") or 0)
+        rating_delta = float(payload.get("rating_delta") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="некорректный результат tap-сессии")
+
+    if tap_count < 0:
+        raise HTTPException(status_code=400, detail="количество тапов не может быть отрицательным")
+    if duration_ms <= 0:
+        raise HTTPException(status_code=400, detail="длительность сессии должна быть положительной")
+    if tap_rate < 0:
+        raise HTTPException(status_code=400, detail="скорость тапов не может быть отрицательной")
+    expected_rate = round(tap_count / (duration_ms / 1000), 2)
+    if abs(tap_rate - expected_rate) > 0.05:
+        raise HTTPException(status_code=400, detail="скорость тапов не совпадает с длительностью")
+
+    fraud_flag = bool(payload.get("fraud_flag"))
+    unrealistic = tap_count > RAIFCOIN_MAX_TAP_COUNT or tap_rate > RAIFCOIN_MAX_TAP_RATE_PER_SEC
+    if unrealistic and not fraud_flag:
+        raise HTTPException(
+            status_code=400,
+            detail="нереалистичная tap-сессия должна быть помечена антифродом",
+        )
+    if fraud_flag:
+        raifcoin_earned = 0
+        rating_delta = 0.0
+    if raifcoin_earned < 0 or rating_delta < 0:
+        raise HTTPException(status_code=400, detail="начисление и бонус не могут быть отрицательными")
+    if rating_delta > 0.05:
+        raise HTTPException(status_code=400, detail="рейтинговый бонус за сессию выше лимита")
+
+    explanation = str(payload.get("explanation") or "").strip()
+    if not explanation:
+        raise HTTPException(status_code=400, detail="нужно объяснение результата для клиента")
+
+    tap = {
+        "client_id": client_id,
+        "session_id": session_id,
+        "tap_count": tap_count,
+        "duration_ms": duration_ms,
+        "tap_rate_per_sec": tap_rate,
+        "raifcoin_earned": raifcoin_earned,
+        "rating_delta": round(rating_delta, 4),
+        "fraud_flag": fraud_flag,
+        "currency": "RC",
+        "blockchain": False,
+        "external_transfer": False,
+        "explanation": explanation,
+    }
+    for optional_field in (
+        "status",
+        "multiplier",
+        "fraud_reasons",
+        "source",
+        "rules",
+        "reason",
+    ):
+        if optional_field in payload:
+            tap[optional_field] = payload[optional_field]
+    return session, tap
+
+
 def _find_casino_application(client_id: str, application_id: str | None) -> dict[str, Any]:
     if client_id not in _clients_by_id:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
@@ -897,6 +1129,69 @@ async def list_casino_spins(
     if client_id not in _clients_by_id:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
     items = _casino_spins_for_client(client_id)
+    return {"client_id": client_id, "total": len(items), "items": items[:limit]}
+
+
+@app.post("/raifcoin/sessions")
+async def create_raifcoin_session(payload: dict) -> dict:
+    session = _validate_raifcoin_session(payload)
+    with _raifcoin_sessions_lock:
+        session["session_id"] = _next_raifcoin_session_id()
+        session["created_at"] = datetime.now().replace(microsecond=0).isoformat()
+        _raifcoin_sessions.append(session)
+        _save_raifcoin_session(session)
+    return session
+
+
+@app.get("/raifcoin/sessions/{client_id}")
+async def list_raifcoin_sessions(
+    client_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    items = _raifcoin_sessions_for_client(client_id)
+    return {"client_id": client_id, "total": len(items), "items": items[:limit]}
+
+
+@app.post("/raifcoin/taps")
+async def create_raifcoin_tap(payload: dict) -> dict:
+    with _raifcoin_sessions_lock:
+        session, tap = _validate_raifcoin_tap(payload)
+        now_iso = datetime.now().replace(microsecond=0).isoformat()
+        session["status"] = "completed"
+        session["completed_at"] = now_iso
+        session["updated_at"] = now_iso
+        session["raifcoin_earned"] = tap["raifcoin_earned"]
+        session["rating_delta"] = tap["rating_delta"]
+        session["fraud_flag"] = tap["fraud_flag"]
+        with _raifcoin_taps_lock:
+            tap["tap_id"] = _next_raifcoin_tap_id()
+            tap["created_at"] = now_iso
+            _raifcoin_taps.append(tap)
+            balance = _build_raifcoin_balance(tap["client_id"])
+            tap["balance_raifcoin"] = balance["balance_raifcoin"]
+            tap["raifcoin_rating_boost"] = balance["raifcoin_rating_boost"]
+            _save_raifcoin_tap(tap)
+        _rewrite_raifcoin_sessions()
+    return tap
+
+
+@app.get("/raifcoin/balance/{client_id}")
+async def get_raifcoin_balance(client_id: str) -> dict:
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    return _build_raifcoin_balance(client_id)
+
+
+@app.get("/raifcoin/taps/{client_id}")
+async def list_raifcoin_taps(
+    client_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    items = _raifcoin_taps_for_client(client_id)
     return {"client_id": client_id, "total": len(items), "items": items[:limit]}
 
 
