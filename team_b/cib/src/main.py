@@ -330,6 +330,7 @@ class DecideRequest(BaseModel):
     client_id: str
     amount_rub: float
     term_months: int = 12
+    product_id: str = "credit-consumer"
 
 
 @app.post("/credit/decide", summary="Кредитное решение по заявке")
@@ -382,7 +383,7 @@ async def credit_decide(req: DecideRequest) -> dict:
         client_id=req.client_id,
         amount_rub=req.amount_rub,
         term_months=req.term_months,
-        product_id="credit-consumer",
+        product_id=req.product_id,
         segment=client_data.get("segment", "mass"),
         monthly_income_rub=float(client_data.get("income_rub", req.amount_rub / 6)),
         age=int(client_data.get("age", 35)),
