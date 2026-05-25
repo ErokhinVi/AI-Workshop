@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 TEAM_NAME = os.environ.get("TEAM_NAME", "team")
 COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
@@ -20,6 +21,7 @@ CIB_URL = os.environ.get("CIB_URL", "http://localhost:8002").rstrip("/")
 
 app = FastAPI(title="retail - мобильный банк", version="1.0.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 INVESTMENT_INSTRUMENTS = [
     {
