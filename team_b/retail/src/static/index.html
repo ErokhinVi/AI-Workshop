@@ -763,6 +763,14 @@
       };
       const productName = document.getElementById("credit-form-title").textContent;
       const dateStr = new Date().toLocaleDateString("ru-RU");
+      if (!payload.amount_rub || payload.amount_rub <= 0) {
+        creditResult.innerHTML = `<div class="alert error">Укажи сумму кредита — она должна быть больше нуля</div>`;
+        return;
+      }
+      if (!payload.term_months || payload.term_months <= 0) {
+        creditResult.innerHTML = `<div class="alert error">Укажи срок кредита в месяцах</div>`;
+        return;
+      }
       creditResult.innerHTML = `<div class="alert info">Заявка принята — рассматриваем...</div>`;
       try {
         const r = await fetch("/api/credit-apply", {
