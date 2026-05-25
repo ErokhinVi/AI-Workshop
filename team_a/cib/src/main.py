@@ -274,6 +274,17 @@ def _investment_products() -> list[dict[str, Any]]:
     ]
 
 
+def _money(value: int | float) -> str:
+    numeric = float(value)
+    precision = 3 if 0 < abs(numeric) < 1 else 2
+    rounded = round(numeric, precision)
+    if rounded.is_integer():
+        return f"{int(rounded):,}".replace(",", " ")
+    whole, fraction = f"{rounded:,.{precision}f}".split(".")
+    fraction = fraction.rstrip("0")
+    return f"{whole.replace(',', ' ')}.{fraction}"
+
+
 def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -> dict[str, Any]:
     ticker = payload.ticker.upper().strip()
     side = payload.side.lower().strip()
@@ -294,17 +305,17 @@ def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -
     enough_cash = balance >= total_rub
     explanation = (
         f"Покупка {quantity} шт. {ticker} ({instrument['name']}) рассчитана по цене "
-        f"{price_rub:g} ₽ за бумагу. Сумма сделки {amount_rub:g} ₽, комиссия "
-        f"{commission_rub:g} ₽, всего к списанию {total_rub:g} ₽. "
+        f"{_money(price_rub)} ₽ за бумагу. Сумма сделки {_money(amount_rub)} ₽, комиссия "
+        f"{_money(commission_rub)} ₽, всего к списанию {_money(total_rub)} ₽. "
     )
     if enough_cash:
         explanation += (
-            f"На счёте клиента {client_name} достаточно средств: доступно {balance:g} ₽. "
+            f"На счёте клиента {client_name} достаточно средств: доступно {_money(balance)} ₽. "
             "После подтверждения retail может сохранить сделку в backend и показать её в портфеле."
         )
     else:
         explanation += (
-            f"На счёте клиента {client_name} сейчас {balance:g} ₽, этого меньше суммы покупки. "
+            f"На счёте клиента {client_name} сейчас {_money(balance)} ₽, этого меньше суммы покупки. "
             "Покажите клиенту расчёт и предложите уменьшить количество бумаг или пополнить счёт."
         )
 
