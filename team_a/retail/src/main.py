@@ -356,13 +356,22 @@ def _decorate_credit_decision(
                 or "Заявка сохранена. Клиент может вернуться к ней из истории заявок."
             ),
         },
+        "purpose": decision.get("purpose"),
+        "purpose_details": decision.get("purpose_details"),
         "product_kind": "business_limit" if is_business else "personal_limit",
         "source": source,
     }
 
 
-async def _credit_decision(client: dict[str, Any], amount: int, months: int) -> dict[str, Any]:
+async def _credit_decision(
+    client: dict[str, Any],
+    amount: int,
+    months: int,
+    purpose: str | None = None,
+) -> dict[str, Any]:
     payload = {"client_id": client["id"], "amount_rub": amount, "term_months": months}
+    if purpose:
+        payload["purpose"] = purpose
     try:
         cib_decision = await _cib_post("/credit/decide", payload)
         return _decorate_credit_decision(cib_decision, client, amount, months, "cib")
@@ -498,6 +507,43 @@ async def _try_get_investment_orders(client_id: str) -> dict[str, Any]:
         raise
 
 
+async def _casino_rules() -> dict[str, Any]:
+    return await _cib_get("/casino/slot-rules")
+
+
+async def _try_get_casino_sessions(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/casino-sessions/{client_id}")
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {"client_id": client_id, "total": 0, "items": [], "storage": "backend_not_ready"}
+        raise
+
+
+async def _try_get_casino_spins(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/casino-spins/{client_id}", {"limit": 5})
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {"client_id": client_id, "total": 0, "items": [], "storage": "backend_not_ready"}
+        raise
+
+
+async def _create_casino_session(payload: dict[str, Any]) -> dict[str, Any]:
+    return await _backend_post("/casino-sessions", payload)
+
+
+async def _resolve_casino_spin(client_id: str, session_id: str, stake_rub: int) -> dict[str, Any]:
+    return await _cib_post(
+        "/casino/spin/resolve",
+        {"client_id": client_id, "session_id": session_id, "stake_rub": stake_rub},
+    )
+
+
+async def _save_casino_spin(spin: dict[str, Any]) -> dict[str, Any]:
+    return await _backend_post("/casino-spins", spin)
+
+
 @app.get("/clients")
 async def list_clients(request: Request) -> dict:
     return await _backend_get("/clients", dict(request.query_params))
@@ -551,6 +597,7 @@ async def api_credit_apply(payload: dict) -> dict:
     client_id = payload.get("client_id")
     amount = int(payload.get("amount_rub") or 0)
     months = int(payload.get("term_months") or 0)
+    purpose = str(payload.get("purpose") or "").strip() or None
     if not client_id:
         raise HTTPException(status_code=400, detail="клиент не выбран")
     if amount <= 0:
@@ -559,7 +606,7 @@ async def api_credit_apply(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="выбери срок от 3 до 84 месяцев")
 
     client = await _backend_get(f"/clients/{client_id}")
-    decision = await _credit_decision(client, amount, months)
+    decision = await _credit_decision(client, amount, months, purpose)
     application = {
         "client_id": client_id,
         "amount_rub": amount,
@@ -572,6 +619,12 @@ async def api_credit_apply(payload: dict) -> dict:
         "product_type": decision["conditions"]["product_type"],
         "product_name": decision["conditions"]["product_name"],
     }
+    if purpose:
+        application["purpose"] = purpose
+    purpose_details = decision.get("purpose_details") or {}
+    for optional_field in ("max_stake_rub", "session_limit_rub"):
+        if optional_field in purpose_details:
+            application[optional_field] = purpose_details[optional_field]
     saved = await _try_save_credit_application(application)
     return {
         "client": _client_brief(client),
@@ -582,6 +635,108 @@ async def api_credit_apply(payload: dict) -> dict:
         "saved_application": saved,
         "storage": "saved" if saved else "backend_not_ready",
     }
+
+
+@app.get("/api/casino/rules")
+async def api_casino_rules() -> dict:
+    return await _casino_rules()
+
+
+@app.get("/api/casino/sessions/{client_id}")
+async def api_casino_sessions(client_id: str) -> dict:
+    return await _try_get_casino_sessions(client_id)
+
+
+@app.get("/api/casino/spins/{client_id}")
+async def api_casino_spins(client_id: str) -> dict:
+    return await _try_get_casino_spins(client_id)
+
+
+@app.post("/api/casino/credit")
+async def api_casino_credit(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    amount = int(payload.get("amount_rub") or 0)
+    months = int(payload.get("term_months") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="укажи сумму")
+    if months < 3 or months > 84:
+        raise HTTPException(status_code=400, detail="выбери срок от 3 до 84 месяцев")
+
+    client = await _backend_get(f"/clients/{client_id}")
+    decision = await _credit_decision(client, amount, months, "casino_slot")
+    application = {
+        "client_id": client_id,
+        "amount_rub": amount,
+        "term_months": months,
+        "purpose": "casino_slot",
+        "status": decision["status"],
+        "approved_amount_rub": decision["approved_amount_rub"],
+        "rate_pct": decision["rate_pct"],
+        "monthly_payment_rub": decision["monthly_payment_rub"],
+        "explanation": decision["explanation"],
+        "product_type": decision["conditions"]["product_type"],
+        "product_name": decision["conditions"]["product_name"],
+    }
+    purpose_details = decision.get("purpose_details") or {}
+    for optional_field in ("max_stake_rub", "session_limit_rub"):
+        if optional_field in purpose_details:
+            application[optional_field] = purpose_details[optional_field]
+    saved = await _try_save_credit_application(application)
+    return {
+        "client": _client_brief(client),
+        "status": decision["status"],
+        "decision": decision,
+        "saved_application": saved,
+        "storage": "saved" if saved else "backend_not_ready",
+        "explanation": decision["explanation"],
+    }
+
+
+@app.post("/api/casino/session")
+async def api_casino_session(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    application_id = str(payload.get("application_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    if not application_id:
+        raise HTTPException(status_code=400, detail="сначала получите кредит под слот-машину")
+    session_payload = {"client_id": client_id, "application_id": application_id}
+    for optional_field in ("session_limit_rub", "max_stake_rub"):
+        if payload.get(optional_field) is not None:
+            session_payload[optional_field] = payload[optional_field]
+    return await _create_casino_session(session_payload)
+
+
+@app.post("/api/casino/spin")
+async def api_casino_spin(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    session_id = str(payload.get("session_id") or "").strip()
+    stake_rub = int(payload.get("stake_rub") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="сначала откройте игровую сессию")
+    if stake_rub <= 0:
+        raise HTTPException(status_code=400, detail="укажите ставку")
+    resolved = await _resolve_casino_spin(client_id, session_id, stake_rub)
+    saved = await _save_casino_spin(
+        {
+            "client_id": client_id,
+            "session_id": session_id,
+            "stake_rub": stake_rub,
+            "symbols": resolved["symbols"],
+            "win_rub": resolved["win_rub"],
+            "net_result_rub": resolved["net_result_rub"],
+            "currency": resolved.get("currency", "RUB"),
+            "status": resolved.get("status"),
+            "payout_multiplier": resolved.get("payout_multiplier"),
+            "source": "cib",
+            "explanation": resolved["explanation"],
+        }
+    )
+    return {"resolved": resolved, "saved_spin": saved, "storage": "saved"}
 
 
 @app.post("/api/transfer")
