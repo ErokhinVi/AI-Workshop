@@ -60,6 +60,7 @@ class CreditHistoryItem(BaseModel):
 class ScoringRequest(BaseModel):
     client_id: str
     amount_rub: float                 # запрошенная сумма
+    term_months: int = 12             # запрошенный срок кредита, мес.
     product_id: str                   # id продукта из каталога
     segment: str                      # mass | premium | corporate
     monthly_income_rub: float         # ежемесячный доход
@@ -87,12 +88,11 @@ def _score_request(req: ScoringRequest) -> ScoringResponse:
     score = 0
 
     # 1. Долговая нагрузка: отношение платежа к доходу (PTI)
-    # Ориентировочный ежемесячный платёж
-    term = 12
+    # Платёж считаем по фактически запрошенному сроку, а не по максимуму
+    # продукта — иначе короткий срок с большой суммой выглядит «подъёмным».
     product = next((p for p in PRODUCTS if p["id"] == req.product_id), None)
-    if product:
-        term = product.get("term_months_max", 12)
-    term = max(term, 1)
+    max_term = product.get("term_months_max", 12) if product else 12
+    term = max(1, min(req.term_months or max_term, max_term))
     monthly_payment = req.amount_rub / term
     pti = monthly_payment / max(req.monthly_income_rub, 1)
     if pti < 0.25:
@@ -381,6 +381,7 @@ async def credit_decide(req: DecideRequest) -> dict:
     score_req = ScoringRequest(
         client_id=req.client_id,
         amount_rub=req.amount_rub,
+        term_months=req.term_months,
         product_id="credit-consumer",
         segment=client_data.get("segment", "mass"),
         monthly_income_rub=float(client_data.get("income_rub", req.amount_rub / 6)),

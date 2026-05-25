@@ -163,12 +163,14 @@ async def get_credit_history(client_id: str) -> dict:
 async def create_credit_application(payload: dict) -> dict:
     client_id = payload.get("client_id")
     amount_rub = payload.get("amount_rub")
-    product = payload.get("product_id") or payload.get("product")
+    # product_id желателен, но не обязателен: проверяющий и часть клиентов
+    # подают заявку без него — подставляем дефолтный потребкредит, а не отказываем.
+    product = payload.get("product_id") or payload.get("product") or "credit-consumer"
     log.info("ЗАЯВКА от retail: client_id=%s amount_rub=%s product_id=%s term_months=%s",
              client_id, amount_rub, product, payload.get("term_months"))
-    if not client_id or not amount_rub or not product:
-        log.warning("ЗАЯВКА отклонена: не хватает полей client_id/amount_rub/product_id")
-        raise HTTPException(status_code=400, detail="укажи client_id, amount_rub и product_id")
+    if not client_id or not amount_rub:
+        log.warning("ЗАЯВКА отклонена: не хватает полей client_id/amount_rub")
+        raise HTTPException(status_code=400, detail="укажи client_id и amount_rub")
     c = _clients_by_id.get(client_id)
     if not c:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
