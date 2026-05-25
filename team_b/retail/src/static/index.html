@@ -514,21 +514,20 @@
       const btn = document.querySelector(`.btn-refresh-status[data-idx="${idx}"]`);
       if (btn) { btn.textContent = "Запрашиваем..."; btn.disabled = true; }
       try {
-        const r = await fetch("/api/credit-apply", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            client_id: clientId,
-            product_id: a.product_id,
-            amount_rub: a.amount_rub,
-            term_months: a.term_months,
-          }),
-        });
-        const d = await r.json();
-        if (r.ok) {
-          apps[idx].status = d.decision === "approved" ? "approved" : "rejected";
+        let decision = null;
+        if (a.application_id) {
+          const r = await fetch(`/api/credit-applications/${a.application_id}`);
+          const d = await r.json();
+          if (r.ok && d.status && d.status !== "pending") {
+            decision = d.status === "approved" ? "approved" : "rejected";
+          }
+        }
+        if (decision) {
+          apps[idx].status = decision;
           localStorage.setItem(appsKey(clientId), JSON.stringify(apps));
           renderApps(clientId);
+        } else {
+          if (btn) { btn.textContent = "Ещё на рассмотрении"; btn.disabled = false; }
         }
       } catch(e) {
         if (btn) { btn.textContent = "Узнать решение"; btn.disabled = false; }
@@ -675,30 +674,18 @@
           body: JSON.stringify(payload),
         });
         const d = await r.json();
-        await new Promise(res => setTimeout(res, 1800));
         if (r.ok) {
-          const decision = d.decision === "approved" ? "approved" : "rejected";
           saveApp(opt.value, {
             product_name: productName,
             product_id: payload.product_id,
             amount_rub: payload.amount_rub,
             term_months: payload.term_months,
             status: "pending",
+            application_id: d.application_id || null,
             date: dateStr,
           });
-          setTimeout(() => {
-            const apps = loadApps(opt.value);
-            if (apps[0] && apps[0].status === "pending") {
-              apps[0].status = decision;
-              localStorage.setItem(appsKey(opt.value), JSON.stringify(apps));
-              renderApps(opt.value);
-            }
-          }, 2000);
           renderApps(opt.value);
-          const status = decision === "approved"
-            ? `<div class="alert ok">Заявка одобрена! ${d.comment || ""}</div>`
-            : `<div class="alert info">Решение: отказ. ${d.comment || ""}</div>`;
-          creditResult.innerHTML = status;
+          creditResult.innerHTML = `<div class="alert info">${d.message || "Заявка принята — рассматриваем..."}</div>`;
         } else {
           creditResult.innerHTML = `<div class="alert error">${d.detail || "ошибка сервера"}</div>`;
         }
