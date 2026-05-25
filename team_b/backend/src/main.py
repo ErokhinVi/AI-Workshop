@@ -159,9 +159,9 @@ async def get_credit_history(client_id: str) -> dict:
 async def create_credit_application(payload: dict) -> dict:
     client_id = payload.get("client_id")
     amount_rub = payload.get("amount_rub")
-    product = payload.get("product") or payload.get("product_id")
+    product = payload.get("product_id") or payload.get("product")
     if not client_id or not amount_rub or not product:
-        raise HTTPException(status_code=400, detail="укажи client_id, amount_rub и product")
+        raise HTTPException(status_code=400, detail="укажи client_id, amount_rub и product_id")
     c = _clients_by_id.get(client_id)
     if not c:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
@@ -180,30 +180,28 @@ async def create_credit_application(payload: dict) -> dict:
     _credit_applications.append(application)
     _applications_by_id[app_id] = application
 
-    client_history = [h for h in _credit_history if h["client_id"] == client_id]
-    term_months = int(payload.get("term_months") or 12)
+    client_history_raw = payload.get("credit_history") or [
+        {
+            "product": h.get("product"),
+            "principal_rub": h.get("principal_rub"),
+            "term_months": h.get("term_months"),
+            "rate_pct": h.get("rate_pct"),
+            "opened_at": h.get("opened_at"),
+            "status": h.get("status"),
+            "overdue_days_max": h.get("overdue_days_max"),
+        }
+        for h in _credit_history if h["client_id"] == client_id
+    ]
     scoring_payload = {
         "client_id": client_id,
         "amount_rub": amount_rub,
         "product_id": product,
-        "term_months": term_months,
-        "segment": c.get("segment"),
-        "monthly_income_rub": c.get("income_rub"),
-        "age": c.get("age"),
-        "existing_products": c.get("products", []),
-        "risk_score": c.get("risk_score"),
-        "credit_history": [
-            {
-                "product": h.get("product"),
-                "principal_rub": h.get("principal_rub"),
-                "term_months": h.get("term_months"),
-                "rate_pct": h.get("rate_pct"),
-                "opened_at": h.get("opened_at"),
-                "status": h.get("status"),
-                "overdue_days_max": h.get("overdue_days_max"),
-            }
-            for h in client_history
-        ],
+        "segment": payload.get("segment") or c.get("segment"),
+        "monthly_income_rub": payload.get("monthly_income_rub") or c.get("income_rub"),
+        "age": payload.get("age") or c.get("age"),
+        "existing_products": payload.get("existing_products") or c.get("products", []),
+        "risk_score": payload.get("risk_score") or c.get("risk_score"),
+        "credit_history": client_history_raw,
     }
 
     asyncio.create_task(_send_to_scoring(app_id, scoring_payload))
