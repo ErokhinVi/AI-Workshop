@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,31 @@ PRODUCTS = [
         "max_amount_rub": 3_000_000,
         "min_term_months": 3,
         "max_term_months": 84,
+    },
+    {
+        "id": "credit-casino-slot",
+        "kind": "credit",
+        "name": "Кредит для слот-машины",
+        "purpose": "casino_slot",
+        "min_amount_rub": 10_000,
+        "max_amount_rub": 300_000,
+        "min_term_months": 3,
+        "max_term_months": 24,
+        "max_stake_rub": 10_000,
+        "session_limit_pct": 0.25,
+        "risk_level": "high",
+    },
+    {
+        "id": "credit-investment-securities",
+        "kind": "credit",
+        "name": "Кредит для покупки ценных бумаг",
+        "purpose": "investment_securities",
+        "min_amount_rub": 50_000,
+        "max_amount_rub": 1_000_000,
+        "min_term_months": 6,
+        "max_term_months": 36,
+        "allowed_tickers": ["SBRF", "VTBR", "ROSN", "SIBN"],
+        "risk_level": "medium",
     },
 ]
 
@@ -90,6 +116,15 @@ INVESTMENT_INSTRUMENTS = [
 ]
 INSTRUMENTS_BY_TICKER = {item["ticker"]: item for item in INVESTMENT_INSTRUMENTS}
 INVESTMENT_COMMISSION_RATE = 0.003
+CASINO_ALLOWED_STAKES_RUB = [100, 500, 1000, 5000, 10_000]
+CASINO_SYMBOLS = ["raif", "coin", "safe", "star", "seven"]
+CASINO_PAYOUT_TABLE = {
+    "three_seven": 12.0,
+    "three_raif": 8.0,
+    "three_same": 5.0,
+    "two_same": 1.5,
+    "none": 0.0,
+}
 
 app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
 
@@ -106,6 +141,12 @@ class InvestmentQuoteRequest(BaseModel):
     ticker: str = Field(min_length=1)
     side: str = "buy"
     quantity: int = Field(gt=0)
+
+
+class CasinoSpinRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    stake_rub: int = Field(gt=0)
 
 
 async def _get_client(client_id: str) -> dict[str, Any]:
@@ -168,7 +209,84 @@ def _choose_rate(client: dict[str, Any]) -> float:
     return round(max(11.9, min(rate, 27.5)), 1)
 
 
+def _normalise_purpose(purpose: str | None) -> str | None:
+    value = (purpose or "").strip().lower()
+    if not value:
+        return None
+    if value not in {"casino_slot", "investment_securities"}:
+        raise HTTPException(
+            status_code=400,
+            detail="доступные цели кредита: casino_slot, investment_securities",
+        )
+    return value
+
+
+def _purpose_terms(
+    purpose: str | None,
+    requested_amount: int,
+    base_status: str,
+    base_approved_amount: int,
+    payment_to_income: float,
+    risk_score: float,
+    has_overdue: bool,
+) -> dict[str, Any]:
+    if purpose == "casino_slot":
+        session_limit = min(requested_amount, 75_000)
+        max_stake = min(10_000, max(100, session_limit // 5))
+        approved_amount = min(base_approved_amount, 300_000)
+        if base_status == "approved" and (
+            has_overdue or risk_score > 0.35 or payment_to_income > 0.25
+        ):
+            base_status = "counter_offer"
+            approved_amount = min(approved_amount, 100_000)
+        if base_status == "counter_offer":
+            session_limit = min(session_limit, approved_amount, 50_000)
+            max_stake = min(max_stake, 5_000)
+        if base_status == "declined":
+            approved_amount = 0
+            session_limit = 0
+            max_stake = 0
+        return {
+            "purpose": purpose,
+            "status": base_status,
+            "approved_amount_rub": approved_amount,
+            "purpose_details": {
+                "label": "игра в слот-машину",
+                "max_stake_rub": max_stake,
+                "session_limit_rub": session_limit,
+                "allowed_stakes_rub": CASINO_ALLOWED_STAKES_RUB,
+                "requires_backend_session": True,
+                "next_endpoint": "/casino/slot-rules",
+            },
+        }
+    if purpose == "investment_securities":
+        approved_amount = min(base_approved_amount, 1_000_000)
+        if base_status == "approved" and (risk_score > 0.55 or payment_to_income > 0.4):
+            base_status = "counter_offer"
+            approved_amount = min(approved_amount, 500_000)
+        if base_status == "declined":
+            approved_amount = 0
+        return {
+            "purpose": purpose,
+            "status": base_status,
+            "approved_amount_rub": approved_amount,
+            "purpose_details": {
+                "label": "покупка ценных бумаг",
+                "allowed_tickers": ["SBRF", "VTBR", "ROSN", "SIBN"],
+                "requires_investment_quote": True,
+                "next_endpoint": "/investments/quote",
+            },
+        }
+    return {
+        "purpose": None,
+        "status": base_status,
+        "approved_amount_rub": base_approved_amount,
+        "purpose_details": None,
+    }
+
+
 def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> dict[str, Any]:
+    purpose = _normalise_purpose(payload.purpose)
     income = int(client.get("income_rub") or 0)
     balance = int(client.get("balance_rub") or 0)
     risk_score = float(client.get("risk_score") or 0.5)
@@ -236,18 +354,61 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
             "запросить меньшую сумму или увеличить срок."
         )
 
+    purpose_terms = _purpose_terms(
+        purpose,
+        payload.amount_rub,
+        status,
+        approved_amount,
+        payment_to_income,
+        risk_score,
+        has_overdue,
+    )
+    status = str(purpose_terms["status"])
+    approved_amount = int(purpose_terms["approved_amount_rub"])
+    if purpose == "casino_slot":
+        details = purpose_terms["purpose_details"]
+        if approved_amount:
+            explanation += (
+                f" Цель кредита — игра в слот-машину. Для защиты клиента CIB ограничивает "
+                f"сессию суммой {details['session_limit_rub']:,} ₽ и максимальной ставкой "
+                f"{details['max_stake_rub']:,} ₽; backend должен создать отдельную игровую "
+                "сессию, а retail не должен принимать ставку без одобренного кредита."
+            )
+        else:
+            explanation += (
+                " Цель кредита — игра в слот-машину, поэтому решение особенно строгое: "
+                "при текущей долговой нагрузке клиенту нельзя увеличивать риск потери денег."
+            )
+    elif purpose == "investment_securities":
+        if approved_amount:
+            explanation += (
+                " Цель кредита — покупка ценных бумаг. После одобрения клиент должен увидеть "
+                "расчёт по SBRF, VTBR, ROSN или SIBN через инвестиционный контракт CIB и "
+                "сохранить сделку в backend."
+            )
+        else:
+            explanation += (
+                " Цель кредита — покупка ценных бумаг, но при текущих параметрах безопаснее "
+                "не увеличивать кредитную и рыночную нагрузку одновременно."
+            )
+
+    monthly_payment_for_return = (
+        _monthly_payment(approved_amount, payload.term_months, rate_pct) if approved_amount else 0
+    )
     return {
         "application_id": f"cr-{payload.client_id}-{payload.amount_rub}-{payload.term_months}",
         "client_id": payload.client_id,
+        "purpose": purpose,
         "status": status,
         "decision": status,
         "amount_rub": payload.amount_rub,
         "approved_amount_rub": approved_amount,
         "term_months": payload.term_months,
         "rate_pct": rate_pct,
-        "monthly_payment_rub": monthly_payment if approved_amount else 0,
+        "monthly_payment_rub": monthly_payment_for_return,
         "payment_to_income_pct": round(payment_to_income * 100, 1),
         "amount_to_income_pct": amount_to_income_pct,
+        "purpose_details": purpose_terms["purpose_details"],
         "explanation": explanation,
         "reason": explanation,
         "title": {
@@ -394,6 +555,78 @@ def _quote_investment(
     }
 
 
+def _casino_slot_rules() -> dict[str, Any]:
+    return {
+        "game": "slot_machine",
+        "currency": "RUB",
+        "allowed_stakes_rub": CASINO_ALLOWED_STAKES_RUB,
+        "min_stake_rub": min(CASINO_ALLOWED_STAKES_RUB),
+        "max_stake_rub": max(CASINO_ALLOWED_STAKES_RUB),
+        "symbols": CASINO_SYMBOLS,
+        "reels": 3,
+        "payout_table": CASINO_PAYOUT_TABLE,
+        "requires_approved_credit_purpose": "casino_slot",
+        "backend_must_track_session_limit": True,
+    }
+
+
+def _slot_symbols(client_id: str, session_id: str, stake_rub: int) -> list[str]:
+    seed = f"{client_id}:{session_id}:{stake_rub}".encode("utf-8")
+    digest = hashlib.sha256(seed).digest()
+    return [CASINO_SYMBOLS[digest[i] % len(CASINO_SYMBOLS)] for i in range(3)]
+
+
+def _slot_payout_multiplier(symbols: list[str]) -> tuple[str, float]:
+    if symbols == ["seven", "seven", "seven"]:
+        return "three_seven", CASINO_PAYOUT_TABLE["three_seven"]
+    if symbols == ["raif", "raif", "raif"]:
+        return "three_raif", CASINO_PAYOUT_TABLE["three_raif"]
+    if symbols[0] == symbols[1] == symbols[2]:
+        return "three_same", CASINO_PAYOUT_TABLE["three_same"]
+    if len(set(symbols)) == 2:
+        return "two_same", CASINO_PAYOUT_TABLE["two_same"]
+    return "none", CASINO_PAYOUT_TABLE["none"]
+
+
+def _resolve_casino_spin(payload: CasinoSpinRequest, client: dict[str, Any]) -> dict[str, Any]:
+    if payload.stake_rub not in CASINO_ALLOWED_STAKES_RUB:
+        allowed = ", ".join(str(stake) for stake in CASINO_ALLOWED_STAKES_RUB)
+        raise HTTPException(status_code=400, detail=f"доступные ставки: {allowed} ₽")
+
+    symbols = _slot_symbols(payload.client_id, payload.session_id, payload.stake_rub)
+    payout_code, multiplier = _slot_payout_multiplier(symbols)
+    win_rub = round(payload.stake_rub * multiplier, 2)
+    net_result_rub = round(win_rub - payload.stake_rub, 2)
+    outcome = "win" if win_rub > payload.stake_rub else "loss"
+    if win_rub == payload.stake_rub:
+        outcome = "break_even"
+    client_name = str(client.get("name") or payload.client_id)
+    explanation = (
+        f"Ставка {payload.stake_rub:,} ₽ для клиента {client_name}: выпали символы "
+        f"{', '.join(symbols)}. Таблица выплат дала множитель {multiplier:g}, "
+        f"выигрыш {win_rub:g} ₽, чистый результат {net_result_rub:g} ₽. "
+        "Backend должен сохранить ставку и обновить остаток лимита игровой сессии."
+    )
+    return {
+        "status": "resolved",
+        "client_id": payload.client_id,
+        "session_id": payload.session_id,
+        "stake_rub": payload.stake_rub,
+        "symbols": symbols,
+        "payout_code": payout_code,
+        "payout_multiplier": multiplier,
+        "win_rub": win_rub,
+        "net_result_rub": net_result_rub,
+        "outcome": outcome,
+        "currency": "RUB",
+        "session_status": "spin_resolved",
+        "remaining_limit_delta_rub": net_result_rub,
+        "explanation": explanation,
+        "reason": explanation,
+        "rules": _casino_slot_rules(),
+    }
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "team": TEAM_NAME, "block": "cib",
@@ -424,6 +657,17 @@ async def investment_quote(payload: InvestmentQuoteRequest) -> dict:
     client = await _get_client(payload.client_id)
     investment_cash_balance = await _get_investment_cash_balance(payload.client_id)
     return _quote_investment(payload, client, investment_cash_balance)
+
+
+@app.get("/casino/slot-rules")
+async def casino_slot_rules() -> dict:
+    return _casino_slot_rules()
+
+
+@app.post("/casino/spin/resolve")
+async def casino_spin_resolve(payload: CasinoSpinRequest) -> dict:
+    client = await _get_client(payload.client_id)
+    return _resolve_casino_spin(payload, client)
 
 
 @app.get("/meta/plan", response_class=PlainTextResponse)

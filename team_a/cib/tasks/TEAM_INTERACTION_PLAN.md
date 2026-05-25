@@ -155,6 +155,21 @@ CIB должен первым добавить и проверить:
 - проверка, что старые `POST /credit/decide`, `/products`,
   `/investments/instruments` и `/investments/quote` не изменили старые поля.
 
+Статус CIB по casino/slot:
+
+- готово: `GET /products` содержит кредит под `casino_slot` и кредит под
+  `investment_securities`, старый кредитный продукт сохранён;
+- готово: `POST /credit/decide` принимает необязательный `purpose` и сохраняет
+  обратную совместимость для старых заявок без `purpose`;
+- готово: для `casino_slot` CIB возвращает `max_stake_rub`,
+  `session_limit_rub`, ограничение риска и понятное объяснение;
+- готово: для `investment_securities` CIB связывает кредит с тикерами `SBRF`,
+  `VTBR`, `ROSN`, `SIBN`;
+- готово: `GET /casino/slot-rules` отдаёт ставки, символы и таблицу выплат;
+- готово: `POST /casino/spin/resolve` рассчитывает символы, выигрыш, чистый
+  результат и объяснение;
+- backend может начинать свою часть после проверки live-ручек CIB.
+
 ### Backend: что делать после CIB
 
 Backend начинает только после CIB gate. Нужно добавить:
