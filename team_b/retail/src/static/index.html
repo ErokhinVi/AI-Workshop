@@ -247,11 +247,6 @@
         <div id="credit-products"></div>
       </div>
 
-      <div id="credit-applications-wrap" style="margin-top:8px;display:none">
-        <div class="section-title">Мои заявки</div>
-        <div id="applications-list" class="applications-list"></div>
-      </div>
-
       <div id="credit-form-wrap" style="display:none">
         <button id="credit-back" class="btn" style="margin-bottom:16px;background:transparent;color:var(--text-2);border:1px solid var(--rule);width:auto;padding:8px 16px;">← Назад</button>
         <form id="credit-form" autocomplete="off">
@@ -475,16 +470,11 @@
     function renderApps(clientId) {
       updateApprovalBanner(clientId);
       const apps = loadApps(clientId);
-      const wrap = document.getElementById("credit-applications-wrap");
-      const list = document.getElementById("applications-list");
-      if (!apps.length) { wrap.style.display = "none"; list.innerHTML = ""; }
-      else { wrap.style.display = ""; list.innerHTML = renderAppsHTML(apps, clientId); }
       const myloans = document.getElementById("myloans-list");
       if (myloans) {
         myloans.innerHTML = renderAppsHTML(apps, clientId);
         attachAppButtons(myloans, clientId);
       }
-      attachAppButtons(list, clientId);
     }
 
     function attachAppButtons(container, clientId) {
@@ -685,7 +675,7 @@
             date: dateStr,
           });
           renderApps(opt.value);
-          creditResult.innerHTML = `<div class="alert info">${d.message || "Заявка принята — рассматриваем..."}</div>`;
+          creditResult.innerHTML = `<div class="alert info">${d.message || "Заявка принята — рассматриваем..."}<br/><span style="font-size:11px;opacity:0.8">Следи за статусом на вкладке «Мои кредиты»</span></div>`;
         } else {
           creditResult.innerHTML = `<div class="alert error">${d.detail || "ошибка сервера"}</div>`;
         }
