@@ -126,6 +126,14 @@ async def get_transactions(
     return {"total": len(txs), "items": txs[:limit]}
 
 
+@app.get("/clients/{client_id}/credit-history")
+async def get_credit_history(client_id: str) -> dict:
+    if client_id not in _clients_by_id:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    history = [h for h in _credit_history if h["client_id"] == client_id]
+    return {"client_id": client_id, "total": len(history), "items": history}
+
+
 @app.post("/credit-applications")
 async def create_credit_application(payload: dict) -> dict:
     client_id = payload.get("client_id")
