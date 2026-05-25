@@ -130,6 +130,23 @@ async def _get_client(client_id: str) -> dict[str, Any]:
     return data
 
 
+async def _get_investment_cash_balance(client_id: str) -> float | None:
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{BACKEND_URL}/investment-portfolio/{client_id}")
+    except httpx.HTTPError:
+        return None
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    if not isinstance(data, dict):
+        return None
+    try:
+        return float(data.get("cash_balance_rub"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _monthly_payment(amount_rub: int, term_months: int, rate_pct: float) -> int:
     monthly_rate = rate_pct / 100 / 12
     if monthly_rate <= 0:
@@ -285,7 +302,11 @@ def _money(value: int | float) -> str:
     return f"{whole.replace(',', ' ')}.{fraction}"
 
 
-def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -> dict[str, Any]:
+def _quote_investment(
+    payload: InvestmentQuoteRequest,
+    client: dict[str, Any],
+    investment_cash_balance: float | None,
+) -> dict[str, Any]:
     ticker = payload.ticker.upper().strip()
     side = payload.side.lower().strip()
     if side != "buy":
@@ -300,7 +321,12 @@ def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -
     amount_rub = round(price_rub * quantity, 2)
     commission_rub = round(max(amount_rub * INVESTMENT_COMMISSION_RATE, 0.01), 2)
     total_rub = round(amount_rub + commission_rub, 2)
-    balance = float(client.get("balance_rub") or 0)
+    balance = (
+        investment_cash_balance
+        if investment_cash_balance is not None
+        else float(client.get("balance_rub") or 0)
+    )
+    balance_source = "investment_portfolio" if investment_cash_balance is not None else "client_balance"
     client_name = str(client.get("name") or payload.client_id)
     enough_cash = balance >= total_rub
     explanation = (
@@ -310,12 +336,14 @@ def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -
     )
     if enough_cash:
         explanation += (
-            f"На счёте клиента {client_name} достаточно средств: доступно {_money(balance)} ₽. "
+            f"У клиента {client_name} достаточно свободных средств для инвестиций: "
+            f"доступно {_money(balance)} ₽. "
             "После подтверждения retail может сохранить сделку в backend и показать её в портфеле."
         )
     else:
         explanation += (
-            f"На счёте клиента {client_name} сейчас {_money(balance)} ₽, этого меньше суммы покупки. "
+            f"У клиента {client_name} сейчас свободно для инвестиций {_money(balance)} ₽, "
+            "этого меньше суммы покупки. "
             "Покажите клиенту расчёт и предложите уменьшить количество бумаг или пополнить счёт."
         )
 
@@ -333,6 +361,7 @@ def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -
         "currency": instrument["currency"],
         "instrument": instrument,
         "client_cash_balance_rub": balance,
+        "cash_balance_source": balance_source,
         "enough_cash": enough_cash,
         "decision": "ready_to_buy" if enough_cash else "insufficient_funds",
         "explanation": explanation,
@@ -372,7 +401,8 @@ async def investment_instruments() -> dict:
 @app.post("/investments/quote")
 async def investment_quote(payload: InvestmentQuoteRequest) -> dict:
     client = await _get_client(payload.client_id)
-    return _quote_investment(payload, client)
+    investment_cash_balance = await _get_investment_cash_balance(payload.client_id)
+    return _quote_investment(payload, client, investment_cash_balance)
 
 
 @app.get("/meta/plan", response_class=PlainTextResponse)
