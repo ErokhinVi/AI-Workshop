@@ -180,7 +180,7 @@ async def create_credit_application(payload: dict) -> dict:
     _credit_applications.append(application)
     _applications_by_id[app_id] = application
 
-    client_history_raw = payload.get("credit_history") or [
+    client_history_raw = [
         {
             "product": h.get("product"),
             "principal_rub": h.get("principal_rub"),
@@ -192,15 +192,17 @@ async def create_credit_application(payload: dict) -> dict:
         }
         for h in _credit_history if h["client_id"] == client_id
     ]
+    term_months = int(payload.get("term_months") or 12)
     scoring_payload = {
         "client_id": client_id,
         "amount_rub": amount_rub,
         "product_id": product,
-        "segment": payload.get("segment") or c.get("segment"),
-        "monthly_income_rub": payload.get("monthly_income_rub") or c.get("income_rub"),
-        "age": payload.get("age") or c.get("age"),
-        "existing_products": payload.get("existing_products") or c.get("products", []),
-        "risk_score": payload.get("risk_score") or c.get("risk_score"),
+        "term_months": term_months,
+        "segment": c.get("segment"),
+        "monthly_income_rub": c.get("income_rub"),
+        "age": c.get("age"),
+        "existing_products": c.get("products", []),
+        "risk_score": c.get("risk_score"),
         "credit_history": client_history_raw,
     }
 
