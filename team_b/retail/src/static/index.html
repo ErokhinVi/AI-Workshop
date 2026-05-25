@@ -149,6 +149,31 @@
       color: var(--muted); font-size: 13px;
     }
 
+    .invest-card {
+      border: 1px solid var(--rule); border-radius: 10px;
+      padding: 14px; margin-bottom: 10px; cursor: pointer;
+      display: grid; grid-template-columns: 1fr auto; gap: 6px;
+      transition: border-color 160ms;
+    }
+    .invest-card:hover { border-color: var(--text); }
+    .invest-card .i-name { font-size: 14px; font-weight: 500; }
+    .invest-card .i-type { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .invest-card .i-price { font-size: 16px; font-weight: 600; text-align: right; }
+    .invest-card .i-change { font-size: 11px; text-align: right; margin-top: 2px; }
+    .invest-card .i-change.up { color: var(--good); }
+    .invest-card .i-change.down { color: var(--bad); }
+    .portfolio-row {
+      padding: 10px 0; border-bottom: 1px solid var(--rule);
+      display: grid; grid-template-columns: 1fr auto; gap: 6px;
+    }
+    .portfolio-row:last-child { border-bottom: 0; }
+    .portfolio-row .p-name { font-size: 13px; }
+    .portfolio-row .p-qty { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .portfolio-row .p-val { font-size: 13px; font-weight: 500; text-align: right; }
+    .portfolio-row .p-pnl { font-size: 11px; text-align: right; margin-top: 2px; }
+    .portfolio-row .p-pnl.up { color: var(--good); }
+    .portfolio-row .p-pnl.down { color: var(--bad); }
+
     .offer-card {
       flex: 0 0 160px;
       background: #1e1c18; border-radius: 10px;
@@ -239,6 +264,7 @@
       <button class="tab active" data-tab="transfers">Переводы</button>
       <button class="tab" data-tab="credits">Кредиты</button>
       <button class="tab" data-tab="myloans">Мои кредиты</button>
+      <button class="tab" data-tab="invest">Инвестиции</button>
     </div>
 
     <div class="tab-pane show" data-pane="transfers">
@@ -301,6 +327,34 @@
           <button class="btn primary" type="submit">Подать заявку</button>
         </form>
         <div id="credit-result"></div>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-pane="invest">
+      <div id="invest-portfolio-wrap" style="display:none;margin-bottom:16px">
+        <div class="section-title">Мой портфель</div>
+        <div id="invest-portfolio"></div>
+        <div id="invest-total" style="font-size:13px;color:var(--text-2);margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"></div>
+      </div>
+
+      <div class="section-title">Доступные инструменты</div>
+      <div id="invest-products"></div>
+
+      <div id="invest-deal-wrap" style="display:none;margin-top:16px">
+        <button id="invest-back" style="margin-bottom:12px;font-size:11px;padding:4px 10px;border:1px solid var(--rule);border-radius:4px;background:transparent;cursor:pointer;font-family:inherit;color:var(--text-2)">← Назад</button>
+        <div class="section-title" id="invest-deal-title"></div>
+        <div id="invest-deal-price" style="font-size:22px;font-weight:600;margin:6px 0 14px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button id="invest-btn-buy" class="btn primary" style="flex:1">Купить</button>
+          <button id="invest-btn-sell" class="btn" style="flex:1;background:var(--bg);border:1px solid var(--rule)">Продать</button>
+        </div>
+        <div class="form-row">
+          <label>Количество лотов</label>
+          <input id="invest-qty" type="number" min="1" value="1" />
+        </div>
+        <div id="invest-deal-total" style="font-size:12px;color:var(--text-2);margin-bottom:14px"></div>
+        <button id="invest-confirm" class="btn primary">Подтвердить</button>
+        <div id="invest-result"></div>
       </div>
     </div>
 
@@ -796,6 +850,175 @@
         }
       } catch(e) {
         creditResult.innerHTML = `<div class="alert error">сервер не ответил</div>`;
+      }
+    });
+
+    // ---- инвестиции ----
+    const INVEST_PRODUCTS = [
+      { id: "raif-etf", name: "Райф ETF Акции РФ", type: "ETF", price: 1240, change: +2.3 },
+      { id: "raif-bond", name: "ОФЗ 26238", type: "Облигация", price: 850, change: +0.1 },
+      { id: "raif-gold", name: "Золото (фонд)", type: "ETF", price: 3100, change: -0.8 },
+      { id: "raif-mixed", name: "Смешанный портфель", type: "ПИФ", price: 2450, change: +1.1 },
+      { id: "raif-usd", name: "Валютный фонд USD", type: "ПИФ", price: 980, change: -0.3 },
+    ];
+
+    function portfolioKey(clientId) { return `invest_portfolio_${clientId}`; }
+
+    function loadPortfolio(clientId) {
+      try { return JSON.parse(localStorage.getItem(portfolioKey(clientId)) || "{}"); }
+      catch(e) { return {}; }
+    }
+
+    function savePortfolio(clientId, portfolio) {
+      localStorage.setItem(portfolioKey(clientId), JSON.stringify(portfolio));
+    }
+
+    function renderInvest(clientId) {
+      const portfolio = loadPortfolio(clientId);
+      const wrap = document.getElementById("invest-portfolio-wrap");
+      const portBox = document.getElementById("invest-portfolio");
+      const totalBox = document.getElementById("invest-total");
+      const entries = Object.entries(portfolio).filter(([,q]) => q > 0);
+
+      if (entries.length) {
+        wrap.style.display = "";
+        let total = 0;
+        portBox.innerHTML = entries.map(([id, qty]) => {
+          const p = INVEST_PRODUCTS.find(x => x.id === id);
+          if (!p) return "";
+          const val = p.price * qty;
+          total += val;
+          const pnlSign = p.change >= 0 ? "up" : "down";
+          const pnlText = (p.change >= 0 ? "+" : "") + p.change + "%";
+          return `<div class="portfolio-row">
+            <div>
+              <div class="p-name">${p.name}</div>
+              <div class="p-qty">${qty} лот${qty === 1 ? "" : qty < 5 ? "а" : "ов"} · ${p.type}</div>
+            </div>
+            <div>
+              <div class="p-val">${fmt.format(val)} ₽</div>
+              <div class="p-pnl ${pnlSign}">${pnlText} сегодня</div>
+            </div>
+          </div>`;
+        }).join("");
+        totalBox.textContent = `Итого: ${fmt.format(total)} ₽`;
+      } else {
+        wrap.style.display = "none";
+      }
+
+      const prodBox = document.getElementById("invest-products");
+      prodBox.innerHTML = INVEST_PRODUCTS.map(p => {
+        const changeClass = p.change >= 0 ? "up" : "down";
+        const changeText = (p.change >= 0 ? "+" : "") + p.change + "%";
+        const qty = portfolio[p.id] || 0;
+        const qtyHint = qty ? ` · у вас ${qty} лот${qty === 1 ? "" : qty < 5 ? "а" : "ов"}` : "";
+        return `<div class="invest-card" data-id="${p.id}">
+          <div>
+            <div class="i-name">${p.name}</div>
+            <div class="i-type">${p.type}${qtyHint}</div>
+          </div>
+          <div>
+            <div class="i-price">${fmt.format(p.price)} ₽</div>
+            <div class="i-change ${changeClass}">${changeText}</div>
+          </div>
+        </div>`;
+      }).join("");
+
+      prodBox.querySelectorAll(".invest-card").forEach(card => {
+        card.addEventListener("click", () => openDeal(card.dataset.id, clientId));
+      });
+    }
+
+    let currentDealId = null;
+    let currentDealAction = "buy";
+
+    function openDeal(productId, clientId) {
+      const p = INVEST_PRODUCTS.find(x => x.id === productId);
+      if (!p) return;
+      currentDealId = productId;
+      currentDealAction = "buy";
+      document.getElementById("invest-products").style.display = "none";
+      document.getElementById("invest-portfolio-wrap").style.display = "none";
+      document.getElementById("invest-deal-wrap").style.display = "";
+      document.getElementById("invest-deal-title").textContent = p.name;
+      document.getElementById("invest-deal-price").textContent = fmt.format(p.price) + " ₽ / лот";
+      document.getElementById("invest-result").innerHTML = "";
+      document.getElementById("invest-qty").value = 1;
+      updateDealTotal(p);
+      document.getElementById("invest-btn-buy").style.background = "var(--raiff)";
+      document.getElementById("invest-btn-sell").style.background = "var(--bg)";
+    }
+
+    function updateDealTotal(p) {
+      const qty = +document.getElementById("invest-qty").value || 0;
+      const total = qty * p.price;
+      const action = currentDealAction === "buy" ? "Итого к оплате" : "Итого к получению";
+      document.getElementById("invest-deal-total").textContent = `${action}: ${fmt.format(total)} ₽`;
+    }
+
+    document.getElementById("invest-qty").addEventListener("input", () => {
+      const p = INVEST_PRODUCTS.find(x => x.id === currentDealId);
+      if (p) updateDealTotal(p);
+    });
+
+    document.getElementById("invest-btn-buy").addEventListener("click", () => {
+      currentDealAction = "buy";
+      document.getElementById("invest-btn-buy").style.background = "var(--raiff)";
+      document.getElementById("invest-btn-sell").style.background = "var(--bg)";
+      const p = INVEST_PRODUCTS.find(x => x.id === currentDealId);
+      if (p) updateDealTotal(p);
+    });
+
+    document.getElementById("invest-btn-sell").addEventListener("click", () => {
+      currentDealAction = "sell";
+      document.getElementById("invest-btn-sell").style.background = "var(--text)";
+      document.getElementById("invest-btn-sell").style.color = "var(--bg)";
+      document.getElementById("invest-btn-buy").style.background = "var(--bg)";
+      const p = INVEST_PRODUCTS.find(x => x.id === currentDealId);
+      if (p) updateDealTotal(p);
+    });
+
+    document.getElementById("invest-back").addEventListener("click", () => {
+      document.getElementById("invest-deal-wrap").style.display = "none";
+      document.getElementById("invest-products").style.display = "";
+      const opt = sel.selectedOptions[0];
+      if (opt) renderInvest(opt.value);
+    });
+
+    document.getElementById("invest-confirm").addEventListener("click", () => {
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      const p = INVEST_PRODUCTS.find(x => x.id === currentDealId);
+      if (!p) return;
+      const qty = +document.getElementById("invest-qty").value;
+      if (!qty || qty <= 0) {
+        document.getElementById("invest-result").innerHTML = `<div class="alert error" style="margin-top:12px">Укажи количество лотов</div>`;
+        return;
+      }
+      const portfolio = loadPortfolio(opt.value);
+      const current = portfolio[p.id] || 0;
+      if (currentDealAction === "sell" && qty > current) {
+        document.getElementById("invest-result").innerHTML = `<div class="alert error" style="margin-top:12px">У тебя только ${current} лот${current === 1 ? "" : "а"} — нельзя продать больше</div>`;
+        return;
+      }
+      if (currentDealAction === "buy") {
+        portfolio[p.id] = current + qty;
+        document.getElementById("invest-result").innerHTML = `<div class="alert ok" style="margin-top:12px">Куплено ${qty} лот${qty === 1 ? "" : "а"} · ${fmt.format(qty * p.price)} ₽</div>`;
+      } else {
+        portfolio[p.id] = current - qty;
+        document.getElementById("invest-result").innerHTML = `<div class="alert ok" style="margin-top:12px">Продано ${qty} лот${qty === 1 ? "" : "а"} · ${fmt.format(qty * p.price)} ₽</div>`;
+      }
+      savePortfolio(opt.value, portfolio);
+    });
+
+    document.querySelectorAll(".tab").forEach(btn => {
+      if (btn.dataset.tab === "invest") {
+        btn.addEventListener("click", () => {
+          document.getElementById("invest-deal-wrap").style.display = "none";
+          document.getElementById("invest-products").style.display = "";
+          const opt = sel.selectedOptions[0];
+          if (opt) renderInvest(opt.value);
+        });
       }
     });
 
