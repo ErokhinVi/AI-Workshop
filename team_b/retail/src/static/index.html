@@ -430,16 +430,17 @@
       localStorage.setItem(appsKey(clientId), JSON.stringify(apps.slice(0, 20)));
     }
 
-    function renderAppsHTML(apps) {
+    function renderAppsHTML(apps, clientId) {
       const statusText = { approved: "Одобрено", rejected: "Отказ", pending: "На рассмотрении" };
       if (!apps.length) return `<div class="empty">Заявок пока нет</div>`;
-      return apps.map(a => `
-        <div class="app-row">
+      return apps.map((a, i) => `
+        <div class="app-row" data-idx="${i}">
           <div>
             <div class="a-name">${a.product_name}</div>
             <div class="a-meta">${fmt.format(a.amount_rub)} ₽ · ${a.term_months} мес. · ${a.date}</div>
+            ${a.status === "pending" ? `<button class="btn-refresh-status" data-idx="${i}" data-client="${clientId}" style="margin-top:6px;font-size:11px;padding:4px 10px;border:1px solid var(--rule);border-radius:4px;background:transparent;cursor:pointer;font-family:inherit;color:var(--text-2)">Узнать решение</button>` : ""}
           </div>
-          <div class="a-status ${a.status}">${statusText[a.status] || a.status}</div>
+          <div class="a-status ${a.status}" id="app-status-${i}">${statusText[a.status] || a.status}</div>
         </div>`).join("");
     }
 
@@ -448,9 +449,45 @@
       const wrap = document.getElementById("credit-applications-wrap");
       const list = document.getElementById("applications-list");
       if (!apps.length) { wrap.style.display = "none"; list.innerHTML = ""; }
-      else { wrap.style.display = ""; list.innerHTML = renderAppsHTML(apps); }
+      else { wrap.style.display = ""; list.innerHTML = renderAppsHTML(apps, clientId); }
       const myloans = document.getElementById("myloans-list");
-      if (myloans) myloans.innerHTML = renderAppsHTML(apps);
+      if (myloans) {
+        myloans.innerHTML = renderAppsHTML(apps, clientId);
+        myloans.querySelectorAll(".btn-refresh-status").forEach(btn => {
+          btn.addEventListener("click", () => refreshAppStatus(btn.dataset.client, +btn.dataset.idx));
+        });
+      }
+      list.querySelectorAll(".btn-refresh-status").forEach(btn => {
+        btn.addEventListener("click", () => refreshAppStatus(btn.dataset.client, +btn.dataset.idx));
+      });
+    }
+
+    async function refreshAppStatus(clientId, idx) {
+      const apps = loadApps(clientId);
+      const a = apps[idx];
+      if (!a) return;
+      const btn = document.querySelector(`.btn-refresh-status[data-idx="${idx}"]`);
+      if (btn) { btn.textContent = "Запрашиваем..."; btn.disabled = true; }
+      try {
+        const r = await fetch("/api/credit-apply", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            client_id: clientId,
+            product_id: a.product_id,
+            amount_rub: a.amount_rub,
+            term_months: a.term_months,
+          }),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          apps[idx].status = d.decision === "approved" ? "approved" : "rejected";
+          localStorage.setItem(appsKey(clientId), JSON.stringify(apps));
+          renderApps(clientId);
+        }
+      } catch(e) {
+        if (btn) { btn.textContent = "Узнать решение"; btn.disabled = false; }
+      }
     }
 
     sel.addEventListener("change", () => {
@@ -599,9 +636,17 @@
             product_id: payload.product_id,
             amount_rub: payload.amount_rub,
             term_months: payload.term_months,
-            status: decision,
+            status: "pending",
             date: dateStr,
           });
+          setTimeout(() => {
+            const apps = loadApps(opt.value);
+            if (apps[0] && apps[0].status === "pending") {
+              apps[0].status = decision;
+              localStorage.setItem(appsKey(opt.value), JSON.stringify(apps));
+              renderApps(opt.value);
+            }
+          }, 2000);
           renderApps(opt.value);
           const status = decision === "approved"
             ? `<div class="alert ok">Заявка одобрена! ${d.comment || ""}</div>`
