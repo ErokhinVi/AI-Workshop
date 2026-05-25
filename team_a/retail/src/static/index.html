@@ -577,7 +577,7 @@
         </form>
 
         <div id="limit-result"></div>
-        <div class="status-note" id="storage-note">История заявок появится после того, как backend добавит хранение по переданной спеке.</div>
+        <div class="status-note" id="storage-note">Заявка получит номер, статус и сохранится в истории клиента.</div>
       </section>
 
       <section class="pane" data-pane="profile">
@@ -784,14 +784,15 @@
       historyList.innerHTML = items.slice(0, 3).map(item =>
         `<div class="history-row">
           <strong>${statusLabel(item.status)}</strong><br/>
-          ${fmt.format(item.amount_rub || 0)} ₽ на ${item.term_months || "-"} мес.
+          ${fmt.format(item.amount_rub || 0)} ₽ на ${item.term_months || "-"} мес.<br/>
+          <span>${item.application_id || "заявка сохранена"}</span>
         </div>`
       ).join("");
     }
 
     async function loadOffer(clientId) {
       limitResult.innerHTML = "";
-      storageNote.textContent = "История заявок появится после того, как backend добавит хранение по переданной спеке.";
+      storageNote.textContent = "Заявка получит номер, статус и сохранится в истории клиента.";
       try {
         const r = await fetch("/api/credit-offer", {
           method: "POST",
@@ -804,7 +805,7 @@
         renderDecision(d.offer);
         renderHistory(d.history || {});
         if ((d.history || {}).storage !== "not_ready") {
-          storageNote.textContent = "Backend уже отдает историю заявок клиента.";
+          storageNote.textContent = "История заявок доступна клиенту: можно вернуться к статусу и условиям.";
         }
       } catch(e) {
         limitResult.innerHTML = `<div class="alert error">Не удалось подготовить предложение</div>`;
@@ -917,11 +918,20 @@
         const paymentLine = d.decision.monthly_payment_rub
           ? `<br/>Платеж: ${fmt.format(d.decision.monthly_payment_rub)} ₽ в месяц`
           : "";
+        const rateLine = d.decision.rate_pct
+          ? `<br/>Ставка: ${pct.format(d.decision.rate_pct)}% годовых`
+          : "";
+        const statusLine = d.saved_application?.application_id
+          ? `<br/>Статус: ${statusLabel(d.decision.status)} · ${d.saved_application.application_id}`
+          : `<br/>Статус: ${statusLabel(d.decision.status)}`;
+        const nextStep = d.decision.conditions?.next_step
+          ? `<br/>${d.decision.conditions.next_step}`
+          : "";
         limitResult.innerHTML =
-          `<div class="alert ${cls}"><strong>${d.decision.title}</strong>${d.decision.explanation}${amountLine}${paymentLine}</div>`;
+          `<div class="alert ${cls}"><strong>${d.decision.title}</strong>${d.decision.explanation}${amountLine}${rateLine}${paymentLine}${statusLine}${nextStep}</div>`;
         storageNote.textContent = d.storage === "saved"
-          ? "Заявка сохранена в backend."
-          : "Решение показано клиенту. Backend пока не добавил сохранение заявок.";
+          ? "Заявка сохранена: клиент видит статус и может вернуться к ней в истории."
+          : "Решение показано клиенту. Как только backend сохранит заявку, здесь появится история.";
         if (d.storage === "saved") {
           const history = await fetch(`/api/credit-history/${opt.value}`).then(res => res.json());
           renderHistory(history);

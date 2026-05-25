@@ -107,26 +107,38 @@ def _local_credit_decision(client: dict[str, Any], amount: int, months: int) -> 
         approved_amount = 0
         title = "Сейчас лучше не увеличивать нагрузку"
         explanation = (
-            "Мы видим повышенную нагрузку и прошлые просрочки. "
-            "Лучший следующий шаг - снизить долг и вернуться к заявке позже."
+            "По текущему профилю мы не рекомендуем брать новый кредит: видим прошлые просрочки, "
+            "повышенный риск и недостаточный запас по регулярному доходу. Чтобы повысить шанс "
+            "одобрения, сначала снизьте долговую нагрузку, внесите несколько платежей без задержек "
+            "и вернитесь к заявке через 2-3 месяца. Так клиент не получит платеж, который может "
+            "стать тяжелым для бюджета."
         )
     elif amount <= max_amount:
         status = "approved"
         approved_amount = amount
         title = "Бизнес-лимит доступен" if is_business else "Персональный лимит доступен"
         explanation = (
-            "Обороты и профиль позволяют дать запас ликвидности для бизнеса."
+            "Заявка одобрена: обороты, остаток на счете и текущий риск позволяют дать бизнесу "
+            "запас ликвидности без перегрузки денежного потока. Лимит можно использовать на "
+            "закупку, аренду, налоги или сезонный разрыв, а ежемесячный платеж уже рассчитан "
+            "так, чтобы его было удобно планировать."
             if is_business
-            else "Доход, баланс и текущий риск позволяют предложить кредит без лишней нагрузки."
+            else "Заявка одобрена: регулярный доход, баланс и кредитный профиль позволяют "
+            "предложить эту сумму без лишней нагрузки на бюджет. Мы сразу показываем ставку, "
+            "ежемесячный платеж и срок, чтобы клиент понимал условия до подтверждения заявки."
         )
     else:
         status = "counter_offer"
         approved_amount = max_amount
         title = "Предлагаем безопасную сумму"
         explanation = (
-            "Запрошенный лимит выше комфортного уровня. Предлагаем сумму, которая не перегрузит оборот."
+            "Запрошенный лимит выше комфортного уровня для текущих оборотов. Вместо отказа "
+            "предлагаем безопасную сумму: она сохраняет запас ликвидности, не перегружает "
+            "денежный поток и дает понятный ежемесячный платеж для планирования бизнеса."
             if is_business
-            else "Запрошенная сумма выше комфортного уровня. Предлагаем лимит, который выглядит устойчивым для бюджета клиента."
+            else "Запрошенная сумма выше комфортного уровня для текущего бюджета. Вместо отказа "
+            "предлагаем лимит, который выглядит устойчивым: платеж остается прогнозируемым, "
+            "а клиент сохраняет запас на регулярные расходы и непредвиденные покупки."
         )
 
     rate = (14.4 if is_business else 12.9) + risk * 10 + (1.8 if has_overdue else 0)
@@ -137,6 +149,11 @@ def _local_credit_decision(client: dict[str, Any], amount: int, months: int) -> 
 
     return {
         "status": status,
+        "status_label": {
+            "approved": "одобрено",
+            "counter_offer": "встречное предложение",
+            "declined": "не рекомендуем сейчас",
+        }[status],
         "title": title,
         "requested_amount_rub": amount,
         "approved_amount_rub": approved_amount,
@@ -145,8 +162,19 @@ def _local_credit_decision(client: dict[str, Any], amount: int, months: int) -> 
         "rate_pct": round(rate, 1),
         "monthly_payment_rub": monthly_payment,
         "explanation": explanation,
+        "conditions": {
+            "product_name": "Бизнес-лимит на оборот" if is_business else "Персональный кредитный лимит",
+            "product_type": "credit",
+            "currency": "RUB",
+            "decision_valid_days": 7,
+            "next_step": (
+                "Заявка сохранена. Менеджер может связаться с клиентом для выдачи лимита."
+                if is_business and approved_amount > 0
+                else "Заявка сохранена. Клиент может вернуться к ней из истории заявок."
+            ),
+        },
         "product_kind": "business_limit" if is_business else "personal_limit",
-        "source": "retail_demo_until_backend_save_ready",
+        "source": "retail_credit_limit",
     }
 
 
@@ -223,6 +251,8 @@ async def api_credit_apply(payload: dict) -> dict:
         "rate_pct": decision["rate_pct"],
         "monthly_payment_rub": decision["monthly_payment_rub"],
         "explanation": decision["explanation"],
+        "product_type": decision["conditions"]["product_type"],
+        "product_name": decision["conditions"]["product_name"],
     }
     saved = await _try_save_credit_application(application)
     return {
