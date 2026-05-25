@@ -46,6 +46,51 @@ PRODUCTS = [
     },
 ]
 
+INVESTMENT_INSTRUMENTS = [
+    {
+        "ticker": "SBRF",
+        "name": "Сбербанк",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 290.5,
+        "lot_size": 1,
+        "risk_level": "medium",
+        "sector": "banks",
+    },
+    {
+        "ticker": "VTBR",
+        "name": "ВТБ",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 0.025,
+        "lot_size": 1000,
+        "risk_level": "high",
+        "sector": "banks",
+    },
+    {
+        "ticker": "ROSN",
+        "name": "Роснефть",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 580.0,
+        "lot_size": 1,
+        "risk_level": "medium",
+        "sector": "oil_and_gas",
+    },
+    {
+        "ticker": "SIBN",
+        "name": "Газпром нефть",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 760.0,
+        "lot_size": 1,
+        "risk_level": "medium",
+        "sector": "oil_and_gas",
+    },
+]
+INSTRUMENTS_BY_TICKER = {item["ticker"]: item for item in INVESTMENT_INSTRUMENTS}
+INVESTMENT_COMMISSION_RATE = 0.003
+
 app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
 
 
@@ -54,6 +99,13 @@ class CreditDecisionRequest(BaseModel):
     amount_rub: int = Field(gt=0)
     term_months: int = Field(ge=3, le=84)
     purpose: str | None = None
+
+
+class InvestmentQuoteRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    ticker: str = Field(min_length=1)
+    side: str = "buy"
+    quantity: int = Field(gt=0)
 
 
 async def _get_client(client_id: str) -> dict[str, Any]:
@@ -205,21 +257,111 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
     }
 
 
+def _investment_products() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": f"stock-{instrument['ticker'].lower()}",
+            "kind": "investment",
+            "asset_class": "stock",
+            "name": f"Акции {instrument['name']}",
+            "ticker": instrument["ticker"],
+            "currency": instrument["currency"],
+            "price_rub": instrument["price_rub"],
+            "lot_size": instrument["lot_size"],
+            "risk_level": instrument["risk_level"],
+        }
+        for instrument in INVESTMENT_INSTRUMENTS
+    ]
+
+
+def _quote_investment(payload: InvestmentQuoteRequest, client: dict[str, Any]) -> dict[str, Any]:
+    ticker = payload.ticker.upper().strip()
+    side = payload.side.lower().strip()
+    if side != "buy":
+        raise HTTPException(status_code=400, detail="сейчас поддерживается только покупка")
+    instrument = INSTRUMENTS_BY_TICKER.get(ticker)
+    if not instrument:
+        allowed = ", ".join(INSTRUMENTS_BY_TICKER)
+        raise HTTPException(status_code=404, detail=f"бумага не найдена, доступны: {allowed}")
+
+    quantity = int(payload.quantity)
+    price_rub = float(instrument["price_rub"])
+    amount_rub = round(price_rub * quantity, 2)
+    commission_rub = round(max(amount_rub * INVESTMENT_COMMISSION_RATE, 0.01), 2)
+    total_rub = round(amount_rub + commission_rub, 2)
+    balance = float(client.get("balance_rub") or 0)
+    client_name = str(client.get("name") or payload.client_id)
+    enough_cash = balance >= total_rub
+    explanation = (
+        f"Покупка {quantity} шт. {ticker} ({instrument['name']}) рассчитана по цене "
+        f"{price_rub:g} ₽ за бумагу. Сумма сделки {amount_rub:g} ₽, комиссия "
+        f"{commission_rub:g} ₽, всего к списанию {total_rub:g} ₽. "
+    )
+    if enough_cash:
+        explanation += (
+            f"На счёте клиента {client_name} достаточно средств: доступно {balance:g} ₽. "
+            "После подтверждения retail может сохранить сделку в backend и показать её в портфеле."
+        )
+    else:
+        explanation += (
+            f"На счёте клиента {client_name} сейчас {balance:g} ₽, этого меньше суммы покупки. "
+            "Покажите клиенту расчёт и предложите уменьшить количество бумаг или пополнить счёт."
+        )
+
+    return {
+        "status": "quoted",
+        "client_id": payload.client_id,
+        "ticker": ticker,
+        "side": "buy",
+        "quantity": quantity,
+        "price_rub": price_rub,
+        "amount_rub": amount_rub,
+        "commission_rate": INVESTMENT_COMMISSION_RATE,
+        "commission_rub": commission_rub,
+        "total_rub": total_rub,
+        "currency": instrument["currency"],
+        "instrument": instrument,
+        "client_cash_balance_rub": balance,
+        "enough_cash": enough_cash,
+        "decision": "ready_to_buy" if enough_cash else "insufficient_funds",
+        "explanation": explanation,
+        "reason": explanation,
+        "next_step": (
+            "Подтвердите покупку в мобильном банке."
+            if enough_cash
+            else "Уменьшите количество бумаг или пополните счёт."
+        ),
+    }
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "team": TEAM_NAME, "block": "cib",
-            "commit": COMMIT, "backend_url": BACKEND_URL, "products": len(PRODUCTS)}
+            "commit": COMMIT, "backend_url": BACKEND_URL,
+            "products": len(PRODUCTS) + len(INVESTMENT_INSTRUMENTS)}
 
 
 @app.get("/products")
 async def products() -> dict:
-    return {"total": len(PRODUCTS), "items": PRODUCTS}
+    items = [*PRODUCTS, *_investment_products()]
+    return {"total": len(items), "items": items}
 
 
 @app.post("/credit/decide")
 async def credit_decide(payload: CreditDecisionRequest) -> dict:
     client = await _get_client(payload.client_id)
     return _decide_credit(payload, client)
+
+
+@app.get("/investments/instruments")
+async def investment_instruments() -> dict:
+    return {"total": len(INVESTMENT_INSTRUMENTS), "items": INVESTMENT_INSTRUMENTS}
+
+
+@app.post("/investments/quote")
+async def investment_quote(payload: InvestmentQuoteRequest) -> dict:
+    client = await _get_client(payload.client_id)
+    return _quote_investment(payload, client)
 
 
 @app.get("/meta/plan", response_class=PlainTextResponse)
@@ -250,7 +392,7 @@ async def update_plan(request: Request) -> PlainTextResponse:
 async def index() -> str:
     rows = "".join(
         f"<tr><td>{p['id']}</td><td>{p['kind']}</td><td>{p['name']}</td></tr>"
-        for p in PRODUCTS
+        for p in [*PRODUCTS, *_investment_products()]
     )
     return (
         "<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
