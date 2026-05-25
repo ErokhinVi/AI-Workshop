@@ -208,7 +208,7 @@
 
     .tabs {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       border-bottom: 1px solid var(--line);
       background: var(--surface);
       position: sticky;
@@ -534,6 +534,42 @@
       line-height: 1.3;
     }
 
+    .tap-pad {
+      align-items: center;
+      background: #fffbe5;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+      margin: 14px 0;
+      padding: 18px;
+    }
+
+    .tap-target {
+      aspect-ratio: 1;
+      border: 0;
+      border-radius: 50%;
+      background: var(--raiff);
+      color: var(--ink);
+      cursor: pointer;
+      font-family: "Navigo", "ALS Hauss", sans-serif;
+      font-size: 22px;
+      min-width: 132px;
+      width: 44%;
+    }
+
+    .tap-target:disabled {
+      cursor: not-allowed;
+      opacity: 0.46;
+    }
+
+    .tap-mini {
+      color: var(--ink-2);
+      font-size: 12px;
+      text-align: center;
+    }
+
     @media (max-width: 360px) {
       .limit-title { font-size: 25px; }
       .metric-grid { grid-template-columns: 1fr; }
@@ -566,6 +602,7 @@
       <button class="tab active" data-tab="limit">Лимит</button>
       <button class="tab" data-tab="investments">Инвестиции</button>
       <button class="tab" data-tab="casino">Казино</button>
+      <button class="tab" data-tab="raifcoin">RaifCoin</button>
       <button class="tab" data-tab="profile">Профиль</button>
       <button class="tab" data-tab="transfers">Платежи</button>
     </nav>
@@ -726,6 +763,50 @@
         </div>
       </section>
 
+      <section class="pane" data-pane="raifcoin">
+        <div class="limit-hero">
+          <div class="segment-line">внутренняя виртуальная валюта</div>
+          <div class="limit-title">RaifCoin</div>
+          <div class="limit-copy">Откройте tap-сессию, нажимайте на кнопку, завершите раунд и получите монеты с понятной антифрод-проверкой.</div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="k">Баланс</div>
+            <div class="v" id="raifcoin-balance">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Тапы</div>
+            <div class="v" id="raifcoin-total-taps">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Буст</div>
+            <div class="v" id="raifcoin-boost">-</div>
+          </div>
+        </div>
+
+        <button class="btn primary" type="button" id="raifcoin-session">Начать tap-сессию</button>
+
+        <div class="tap-pad">
+          <button class="tap-target" type="button" id="raifcoin-tap" disabled>Тап</button>
+          <div class="tap-mini">
+            <span id="raifcoin-counter">0 тапов</span> ·
+            <span id="raifcoin-timer">0.0 сек</span> ·
+            <span id="raifcoin-rate">0 тап/сек</span>
+          </div>
+        </div>
+
+        <button class="btn" type="button" id="raifcoin-finish">Завершить и начислить</button>
+        <div id="raifcoin-result"></div>
+
+        <div class="history-card">
+          <div class="section-title">История RaifCoin</div>
+          <div id="raifcoin-tap-list" class="history-list">
+            <div class="empty">История появится после первой сессии</div>
+          </div>
+        </div>
+      </section>
+
       <section class="pane" data-pane="profile">
         <div class="section-title">Профиль клиента</div>
         <div class="profile-card">
@@ -825,6 +906,15 @@
     const casinoResult = document.getElementById("casino-result");
     const casinoStake = document.getElementById("casino-stake");
     const casinoSpinList = document.getElementById("casino-spin-list");
+    const raifcoinBalance = document.getElementById("raifcoin-balance");
+    const raifcoinTotalTaps = document.getElementById("raifcoin-total-taps");
+    const raifcoinBoost = document.getElementById("raifcoin-boost");
+    const raifcoinResult = document.getElementById("raifcoin-result");
+    const raifcoinTapButton = document.getElementById("raifcoin-tap");
+    const raifcoinCounter = document.getElementById("raifcoin-counter");
+    const raifcoinTimer = document.getElementById("raifcoin-timer");
+    const raifcoinRate = document.getElementById("raifcoin-rate");
+    const raifcoinTapList = document.getElementById("raifcoin-tap-list");
     let currentTerm = 24;
     let currentClient = null;
     let investmentInstruments = [];
@@ -833,6 +923,11 @@
     let casinoRules = null;
     let casinoApplication = null;
     let casinoSession = null;
+    let raifcoinRules = null;
+    let raifcoinSession = null;
+    let raifcoinTapCount = 0;
+    let raifcoinStartedAt = 0;
+    let raifcoinTimerId = null;
 
     document.querySelectorAll(".tab").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -895,6 +990,10 @@
       await loadCasinoRules();
       await loadCasinoSessions(opt.value);
       await loadCasinoSpins(opt.value);
+      await loadRaifCoinRules();
+      await loadRaifCoinBalance(opt.value);
+      await loadRaifCoinSessions(opt.value);
+      await loadRaifCoinTaps(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
@@ -1163,6 +1262,91 @@
       casinoLimit.textContent = `${fmt.format(casinoSession.session_limit_rub || 0)} ₽`;
       casinoRemaining.textContent = `${fmt.format(casinoSession.remaining_limit_rub || 0)} ₽`;
       casinoNet.textContent = `${fmt.format(casinoSession.net_result_rub || 0)} ₽`;
+    }
+
+    async function loadRaifCoinRules() {
+      try {
+        const r = await fetch("/api/raifcoin/rules");
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        raifcoinRules = d;
+      } catch(e) {
+        raifcoinRules = null;
+      }
+    }
+
+    async function loadRaifCoinBalance(clientId) {
+      try {
+        const r = await fetch(`/api/raifcoin/balance/${clientId}`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        renderRaifCoinBalance(d);
+      } catch(e) {
+        renderRaifCoinBalance({});
+      }
+    }
+
+    async function loadRaifCoinSessions(clientId) {
+      try {
+        const r = await fetch(`/api/raifcoin/sessions/${clientId}`);
+        const d = await r.json();
+        const items = d.items || [];
+        raifcoinSession = items.find(item => item.status === "active") || null;
+        renderRaifCoinSession();
+      } catch(e) {
+        raifcoinSession = null;
+        renderRaifCoinSession();
+      }
+    }
+
+    async function loadRaifCoinTaps(clientId) {
+      try {
+        const r = await fetch(`/api/raifcoin/taps/${clientId}`);
+        const d = await r.json();
+        const items = d.items || [];
+        if (!items.length) {
+          raifcoinTapList.innerHTML = `<div class="empty">История появится после первой сессии</div>`;
+          return;
+        }
+        raifcoinTapList.innerHTML = items.slice(0, 5).map(item =>
+          `<div class="history-row">
+            <strong>${fmt.format(item.raifcoin_earned || 0)} RC · ${item.fraud_flag ? "антифрод" : "зачтено"}</strong><br/>
+            ${fmt.format(item.tap_count || 0)} тапов · ${pct.format(item.tap_rate_per_sec || 0)} тап/сек · буст ${pct.format((item.rating_delta || 0) * 100)}%
+          </div>`
+        ).join("");
+      } catch(e) {
+        raifcoinTapList.innerHTML = `<div class="empty">История RaifCoin пока недоступна</div>`;
+      }
+    }
+
+    function renderRaifCoinBalance(balance) {
+      raifcoinBalance.textContent = `${fmt.format(balance.balance_raifcoin || 0)} RC`;
+      raifcoinTotalTaps.textContent = fmt.format(balance.total_taps || 0);
+      raifcoinBoost.textContent = `${pct.format((balance.raifcoin_rating_boost || 0) * 100)}%`;
+    }
+
+    function renderRaifCoinSession() {
+      const active = Boolean(raifcoinSession?.session_id);
+      raifcoinTapButton.disabled = !active;
+      if (!active) {
+        stopRaifCoinTimer();
+        if (!raifcoinTapCount) updateRaifCoinStats(0);
+      }
+    }
+
+    function updateRaifCoinStats(durationMs) {
+      const durationSec = Math.max(durationMs / 1000, 0);
+      const rate = durationSec > 0 ? raifcoinTapCount / durationSec : 0;
+      raifcoinCounter.textContent = `${fmt.format(raifcoinTapCount)} тапов`;
+      raifcoinTimer.textContent = `${pct.format(durationSec)} сек`;
+      raifcoinRate.textContent = `${pct.format(rate)} тап/сек`;
+    }
+
+    function stopRaifCoinTimer() {
+      if (raifcoinTimerId) {
+        clearInterval(raifcoinTimerId);
+        raifcoinTimerId = null;
+      }
     }
 
     async function loadOffer(clientId) {
@@ -1434,6 +1618,76 @@
         await loadCasinoSpins(opt.value);
       } catch(e) {
         casinoResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
+      }
+    });
+
+    document.getElementById("raifcoin-session").addEventListener("click", async () => {
+      raifcoinResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      try {
+        const r = await fetch("/api/raifcoin/session", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ client_id: opt.value }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка сессии");
+        raifcoinSession = d;
+        raifcoinTapCount = 0;
+        raifcoinStartedAt = Date.now();
+        updateRaifCoinStats(0);
+        stopRaifCoinTimer();
+        raifcoinTimerId = setInterval(() => updateRaifCoinStats(Date.now() - raifcoinStartedAt), 200);
+        renderRaifCoinSession();
+        raifcoinResult.innerHTML = `<div class="alert ok"><strong>Сессия открыта</strong>${d.explanation}</div>`;
+      } catch(e) {
+        raifcoinResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
+      }
+    });
+
+    raifcoinTapButton.addEventListener("click", () => {
+      if (!raifcoinSession?.session_id) return;
+      if (!raifcoinStartedAt) raifcoinStartedAt = Date.now();
+      raifcoinTapCount += 1;
+      updateRaifCoinStats(Date.now() - raifcoinStartedAt);
+    });
+
+    document.getElementById("raifcoin-finish").addEventListener("click", async () => {
+      raifcoinResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      if (!raifcoinSession?.session_id) {
+        raifcoinResult.innerHTML = `<div class="alert error">Сначала начните tap-сессию</div>`;
+        return;
+      }
+      const durationMs = Math.max(Date.now() - raifcoinStartedAt, 1000);
+      try {
+        const r = await fetch("/api/raifcoin/tap", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            client_id: opt.value,
+            session_id: raifcoinSession.session_id,
+            tap_count: raifcoinTapCount,
+            duration_ms: durationMs,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка начисления");
+        const score = d.score || {};
+        const saved = d.saved_tap || {};
+        const cls = score.fraud_flag ? "info" : "ok";
+        stopRaifCoinTimer();
+        raifcoinSession = null;
+        raifcoinTapButton.disabled = true;
+        raifcoinResult.innerHTML =
+          `<div class="alert ${cls}"><strong>${score.fraud_flag ? "Проверка антифрода" : "RaifCoin начислен"}</strong>${score.explanation}<br/>Баланс: ${fmt.format(saved.balance_raifcoin || 0)} RC</div>`;
+        renderRaifCoinBalance(d.balance || {});
+        await loadRaifCoinTaps(opt.value);
+        await loadOffer(opt.value);
+      } catch(e) {
+        raifcoinResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
       }
     });
 

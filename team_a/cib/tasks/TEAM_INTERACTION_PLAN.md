@@ -328,11 +328,16 @@ Retail начинает только после CIB gate и backend gate. Нуж
 
 Статус retail по RaifCoin Tap:
 
-- ждём backend gate: в backend ещё должны появиться `POST /raifcoin/sessions`,
-  `POST /raifcoin/taps`, `GET /raifcoin/balance/{client_id}` и профильный
-  `raifcoin_rating_boost`;
-- retail не добавляет экран RaifCoin до готовности backend, чтобы не ломать
-  текущие рабочие кредиты, переводы, инвестиции и casino/slot.
+- готово: backend gate получен, retail использует `POST /raifcoin/sessions`,
+  `POST /raifcoin/taps`, `GET /raifcoin/balance/{client_id}` и историю
+  `GET /raifcoin/taps/{client_id}`;
+- готово: раздел `RaifCoin` добавлен рядом с кредитами, инвестициями и казино;
+- готово: клиент открывает tap-сессию, видит счётчик тапов, таймер, скорость,
+  начисление `RaifCoin`, изменение рейтинга и антифрод-объяснение из CIB;
+- готово: после сохранения результата retail перечитывает баланс и кредитное
+  предложение, чтобы учесть `raifcoin_rating_boost`;
+- проверено: существующие кредиты, переводы, инвестиции и casino/slot нужно
+  гонять в общем gate перед релизом.
 
 Минимальный общий gate перед релизом RaifCoin Tap:
 

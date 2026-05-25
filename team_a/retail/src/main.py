@@ -544,6 +544,70 @@ async def _save_casino_spin(spin: dict[str, Any]) -> dict[str, Any]:
     return await _backend_post("/casino-spins", spin)
 
 
+async def _raifcoin_rules() -> dict[str, Any]:
+    return await _cib_get("/raifcoin/rules")
+
+
+async def _try_get_raifcoin_balance(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/raifcoin/balance/{client_id}")
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {
+                "client_id": client_id,
+                "asset": "RaifCoin",
+                "currency": "RC",
+                "balance_raifcoin": 0,
+                "total_taps": 0,
+                "raifcoin_rating_boost": 0,
+                "storage": "backend_not_ready",
+            }
+        raise
+
+
+async def _try_get_raifcoin_sessions(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/raifcoin/sessions/{client_id}", {"limit": 5})
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {"client_id": client_id, "total": 0, "items": [], "storage": "backend_not_ready"}
+        raise
+
+
+async def _try_get_raifcoin_taps(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/raifcoin/taps/{client_id}", {"limit": 5})
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {"client_id": client_id, "total": 0, "items": [], "storage": "backend_not_ready"}
+        raise
+
+
+async def _create_raifcoin_session(client_id: str) -> dict[str, Any]:
+    return await _backend_post("/raifcoin/sessions", {"client_id": client_id})
+
+
+async def _score_raifcoin_tap(
+    client_id: str,
+    session_id: str,
+    tap_count: int,
+    duration_ms: int,
+) -> dict[str, Any]:
+    return await _cib_post(
+        "/raifcoin/tap/score",
+        {
+            "client_id": client_id,
+            "session_id": session_id,
+            "tap_count": tap_count,
+            "duration_ms": duration_ms,
+        },
+    )
+
+
+async def _save_raifcoin_tap(score: dict[str, Any]) -> dict[str, Any]:
+    return await _backend_post("/raifcoin/taps", score)
+
+
 @app.get("/clients")
 async def list_clients(request: Request) -> dict:
     return await _backend_get("/clients", dict(request.query_params))
@@ -737,6 +801,72 @@ async def api_casino_spin(payload: dict) -> dict:
         }
     )
     return {"resolved": resolved, "saved_spin": saved, "storage": "saved"}
+
+
+@app.get("/api/raifcoin/rules")
+async def api_raifcoin_rules() -> dict:
+    return await _raifcoin_rules()
+
+
+@app.get("/api/raifcoin/balance/{client_id}")
+async def api_raifcoin_balance(client_id: str) -> dict:
+    return await _try_get_raifcoin_balance(client_id)
+
+
+@app.get("/api/raifcoin/sessions/{client_id}")
+async def api_raifcoin_sessions(client_id: str) -> dict:
+    return await _try_get_raifcoin_sessions(client_id)
+
+
+@app.get("/api/raifcoin/taps/{client_id}")
+async def api_raifcoin_taps(client_id: str) -> dict:
+    return await _try_get_raifcoin_taps(client_id)
+
+
+@app.post("/api/raifcoin/session")
+async def api_raifcoin_session(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    await _backend_get(f"/clients/{client_id}")
+    return await _create_raifcoin_session(client_id)
+
+
+@app.post("/api/raifcoin/tap")
+async def api_raifcoin_tap(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    session_id = str(payload.get("session_id") or "").strip()
+    tap_count = int(payload.get("tap_count") or 0)
+    duration_ms = int(payload.get("duration_ms") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="сначала откройте tap-сессию")
+    if tap_count <= 0:
+        raise HTTPException(status_code=400, detail="сделайте хотя бы один тап")
+    if duration_ms < 1000:
+        raise HTTPException(status_code=400, detail="tap-сессия должна длиться хотя бы секунду")
+    score = await _score_raifcoin_tap(client_id, session_id, tap_count, duration_ms)
+    saved = await _save_raifcoin_tap(
+        {
+            "client_id": client_id,
+            "session_id": session_id,
+            "tap_count": score["tap_count"],
+            "duration_ms": score["duration_ms"],
+            "tap_rate_per_sec": score["tap_rate_per_sec"],
+            "raifcoin_earned": score["raifcoin_earned"],
+            "rating_delta": score["rating_delta"],
+            "fraud_flag": score["fraud_flag"],
+            "multiplier": score.get("multiplier"),
+            "fraud_reasons": score.get("fraud_reasons"),
+            "source": "cib",
+            "status": score.get("status"),
+            "explanation": score["explanation"],
+            "rules": score.get("rules"),
+        }
+    )
+    balance = await _try_get_raifcoin_balance(client_id)
+    return {"score": score, "saved_tap": saved, "balance": balance, "storage": "saved"}
 
 
 @app.post("/api/transfer")
