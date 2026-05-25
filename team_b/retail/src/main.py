@@ -69,16 +69,17 @@ async def credit_products() -> dict:
 
 @app.post("/api/credit-apply")
 async def credit_apply(payload: dict) -> dict:
-    cib_payload = {
+    backend_payload = {
         "client_id": payload.get("client_id"),
         "amount_rub": payload.get("amount_rub"),
+        "product_id": payload.get("product_id"),
         "term_months": payload.get("term_months", 12),
     }
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(f"{CIB_URL}/credit/decide", json=cib_payload)
+            r = await client.post(f"{BACKEND_URL}/credit-applications", json=backend_payload)
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}")
+        raise HTTPException(status_code=502, detail=f"backend недоступен: {exc}")
     if r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail=r.text[:300])
     return r.json()
