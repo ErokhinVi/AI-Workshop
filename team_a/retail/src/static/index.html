@@ -4,253 +4,814 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=414,initial-scale=1" />
   <title>Райф · мобильный банк</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg:        #f6f3ec;
-      --surface:   #ffffff;
-      --rule:      #e3ddcc;
-      --text:      #1f1d18;
-      --text-2:    #5a564c;
-      --muted:     #8a857a;
-      --raiff:     #FFE600;
-      --raiff-soft:#fff7a0;
-      --good:      #2f7a3a;
-      --warn:      #a4662d;
-      --bad:       #b14b32;
+    @font-face {
+        font-family: 'NavigoRegular';
+        font-style: normal;
+        font-weight: normal;
+        font-display: swap;
+        src: url('https://www.raiffeisen.ru/static/fonts/navigo-regular.woff2') format('woff2');
     }
+
+    @font-face {
+        font-family: 'Navigo';
+        font-style: normal;
+        font-weight: bold;
+        font-display: swap;
+        src: url('https://www.raiffeisen.ru/static/fonts/navigo-bold.woff2') format('woff2');
+    }
+
+    @font-face {
+        font-family: 'ALS Hauss';
+        font-display: swap;
+        src: url('https://www.raiffeisen.ru/common/new/images/fonts/ALS_Hauss-Regular.woff') format('woff');
+        font-weight: normal;
+        font-style: normal;
+    }
+
+    @font-face {
+        font-family: 'ALS Hauss';
+        font-display: swap;
+        src: url('https://www.raiffeisen.ru/common/new/images/fonts/ALS_Hauss-Medium.woff') format('woff');
+        font-weight: 400;
+        font-style: normal;
+    }
+
+    @font-face {
+        font-family: 'ALS Hauss';
+        font-display: swap;
+        src: url('https://www.raiffeisen.ru/common/new/images/fonts/ALS_Hauss-Bold.woff') format('woff');
+        font-weight: bold;
+        font-style: normal;
+    }
+
+    :root {
+      --bg: #f3f0e8;
+      --surface: #ffffff;
+      --surface-2: #f8f6ef;
+      --ink: #1f1d18;
+      --ink-2: #5d584e;
+      --muted: #918a7b;
+      --line: #e4ddcc;
+      --raiff: #ffe600;
+      --green: #2f7a3a;
+      --orange: #9f6531;
+      --red: #b14b32;
+      --blue: #315f8f;
+    }
+
     * { box-sizing: border-box; }
+
     body {
-      margin: 0; padding: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: "Geist", -apple-system, system-ui, sans-serif;
+      margin: 0;
+      background: radial-gradient(circle at 50% -12%, #fff9c9 0, rgba(255,249,201,0) 34%), var(--bg);
+      color: var(--ink);
+      font-family: "ALS Hauss", -apple-system, system-ui, sans-serif;
       font-size: 14px;
       min-height: 100vh;
     }
+
     .phone {
-      max-width: 420px; margin: 0 auto;
-      background: var(--surface);
+      max-width: 420px;
       min-height: 100vh;
-      box-shadow: 0 0 60px rgba(60,52,40,0.08);
+      margin: 0 auto;
+      background: var(--surface);
+      box-shadow: 0 0 70px rgba(53, 46, 35, 0.14);
     }
+
     .topbar {
-      background: var(--text); color: var(--bg);
-      padding: 28px 22px 16px;
+      background: var(--ink);
+      color: var(--surface);
+      padding: 26px 22px 14px;
     }
-    .topbar .logo {
-      width: 26px; height: 26px;
-      background: var(--raiff); display: inline-block;
-      border-radius: 4px; vertical-align: middle;
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand-left {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .logo {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
       margin-right: 10px;
+      background: var(--raiff);
+      border-radius: 5px;
+      position: relative;
     }
-    .topbar .name {
-      font-weight: 500; font-size: 16px; vertical-align: middle;
+
+    .logo::before,
+    .logo::after {
+      content: "";
+      position: absolute;
+      left: 7px;
+      right: 7px;
+      height: 2px;
+      background: var(--ink);
+      transform-origin: center;
     }
-    .topbar .who {
-      font-size: 12px; color: rgba(255,255,255,0.6);
-      margin-top: 4px;
+
+    .logo::before { top: 10px; transform: rotate(38deg); }
+    .logo::after { bottom: 10px; transform: rotate(-38deg); }
+
+    .name {
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 17px;
+      white-space: nowrap;
+    }
+
+    .mode-chip {
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 999px;
+      color: rgba(255,255,255,0.72);
+      font-size: 11px;
+      padding: 5px 9px;
+      white-space: nowrap;
+    }
+
+    .who {
+      color: rgba(255,255,255,0.64);
+      font-size: 12px;
+      margin-top: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .balance {
-      padding: 26px 22px 22px;
-      background: linear-gradient(180deg, var(--text) 0%, #2c2823 100%);
-      color: var(--bg);
+      background: linear-gradient(180deg, var(--ink) 0%, #2d2923 100%);
+      color: var(--surface);
+      padding: 22px;
     }
-    .balance .l {
-      font-size: 11px; opacity: 0.6;
-      letter-spacing: 0.12em; text-transform: uppercase;
+
+    .balance-label {
+      color: rgba(255,255,255,0.56);
+      font-size: 11px;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
     }
-    .balance .v {
-      font-size: 32px; font-weight: 500; margin-top: 6px;
-      letter-spacing: -0.01em;
+
+    .balance-value {
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 34px;
+      line-height: 1;
+      margin-top: 8px;
+      font-variant-numeric: tabular-nums;
     }
-    .balance .v .cur { font-size: 18px; opacity: 0.7; margin-left: 4px; }
+
+    .balance-value .cur {
+      font-family: "ALS Hauss", sans-serif;
+      font-size: 18px;
+      color: rgba(255,255,255,0.64);
+      margin-left: 4px;
+    }
+
+    .client-picker {
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    label,
+    .field-label {
+      display: block;
+      color: var(--ink-2);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    select,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 10px 12px;
+    }
+
+    select:focus,
+    input:focus {
+      outline: 0;
+      border-color: var(--ink);
+    }
 
     .tabs {
-      display: flex; gap: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-bottom: 1px solid var(--line);
       background: var(--surface);
-      border-bottom: 1px solid var(--rule);
-      position: sticky; top: 0; z-index: 5;
-    }
-    .tabs button {
-      flex: 1;
-      padding: 14px 8px;
-      background: transparent; border: 0;
-      font-family: inherit; font-size: 13px; font-weight: 500;
-      color: var(--text-2);
-      cursor: pointer; position: relative;
-      transition: color 160ms;
-    }
-    .tabs button.active { color: var(--text); }
-    .tabs button.active::after {
-      content: ""; position: absolute;
-      left: 24%; right: 24%; bottom: 0;
-      height: 2px; background: var(--text);
+      position: sticky;
+      top: 0;
+      z-index: 4;
     }
 
-    .tab-pane { display: none; padding: 22px; }
-    .tab-pane.show { display: block; }
+    .tab {
+      border: 0;
+      background: transparent;
+      color: var(--ink-2);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 400;
+      padding: 14px 6px;
+      position: relative;
+    }
+
+    .tab.active { color: var(--ink); }
+
+    .tab.active::after {
+      content: "";
+      position: absolute;
+      left: 28%;
+      right: 28%;
+      bottom: 0;
+      height: 2px;
+      background: var(--ink);
+    }
+
+    .pane {
+      display: none;
+      padding: 22px;
+    }
+
+    .pane.show { display: block; }
 
     .section-title {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--muted); margin: 6px 0 10px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.11em;
+      margin: 4px 0 11px;
+      text-transform: uppercase;
     }
 
     .form-row { margin-bottom: 14px; }
-    .form-row label {
-      display: block; font-size: 12px;
-      color: var(--text-2); margin-bottom: 4px;
-    }
-    .form-row input, .form-row select {
-      width: 100%; padding: 10px 12px;
-      background: var(--bg); color: var(--text);
-      border: 1px solid var(--rule); border-radius: 6px;
-      font-family: inherit; font-size: 14px;
-      transition: border-color 160ms;
-    }
-    .form-row input:focus, .form-row select:focus {
-      outline: 0; border-color: var(--text);
-    }
 
     .btn {
-      width: 100%; padding: 13px;
-      background: var(--text); color: var(--bg);
-      border: 0; border-radius: 8px;
-      font-family: inherit; font-weight: 500; font-size: 14px;
-      letter-spacing: 0.01em; cursor: pointer;
-      transition: background 160ms;
+      width: 100%;
+      min-height: 45px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--ink);
+      color: var(--surface);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 400;
+      padding: 12px 14px;
     }
-    .btn:hover { background: #2c2823; }
-    .btn:active { transform: translateY(1px); }
-    .btn.primary {
-      background: var(--raiff); color: var(--text);
-    }
-    .btn.primary:hover { background: #fff04a; }
 
-    .tx-list { display: flex; flex-direction: column; gap: 0; }
-    .tx-row {
-      padding: 12px 0;
-      border-bottom: 1px solid var(--rule);
-      display: grid; grid-template-columns: 1fr auto;
-      gap: 8px;
+    .btn.primary {
+      background: var(--raiff);
+      color: var(--ink);
     }
+
+    .btn:active { transform: translateY(1px); }
+
+    .tx-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .tx-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
     .tx-row:last-child { border-bottom: 0; }
+
     .tx-row .desc { font-size: 13px; }
-    .tx-row .ts { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .tx-row .amt { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
-    .tx-row .amt.minus { color: var(--text); }
-    .tx-row .amt.plus  { color: var(--good); }
+    .tx-row .ts { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .tx-row .amt { font-weight: bold; font-variant-numeric: tabular-nums; text-align: right; }
+    .tx-row .plus { color: var(--green); }
 
     .empty {
-      text-align: center; padding: 60px 0;
-      color: var(--muted); font-size: 13px;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 44px 0;
+      text-align: center;
+    }
+
+    .limit-hero {
+      background: var(--ink);
+      border-radius: 8px;
+      color: var(--surface);
+      overflow: hidden;
+      padding: 18px;
+      position: relative;
+    }
+
+    .limit-hero::after {
+      content: "";
+      position: absolute;
+      width: 130px;
+      height: 130px;
+      right: -52px;
+      top: -42px;
+      border-radius: 50%;
+      background: var(--raiff);
+      opacity: 0.92;
+    }
+
+    .limit-hero > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .segment-line {
+      color: rgba(255,255,255,0.66);
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+
+    .limit-title {
+      font-family: "Navigo", "ALS Hauss", sans-serif;
+      font-size: 29px;
+      line-height: 1.05;
+      max-width: 260px;
+    }
+
+    .limit-copy {
+      color: rgba(255,255,255,0.74);
+      font-size: 13px;
+      line-height: 1.42;
+      margin-top: 11px;
+      max-width: 292px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 12px 0 18px;
+    }
+
+    .metric {
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 72px;
+      padding: 11px;
+    }
+
+    .metric .k {
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
+
+    .metric .v {
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 17px;
+      line-height: 1.18;
+      word-break: break-word;
+    }
+
+    .profile-card,
+    .history-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-top: 14px;
+      background: var(--surface);
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .profile-item {
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 64px;
+    }
+
+    .profile-item .k {
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .profile-item .v {
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .range-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: end;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+
+    .range-value {
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 17px;
+      white-space: nowrap;
+    }
+
+    input[type="range"] {
+      accent-color: var(--ink);
+      padding: 0;
+    }
+
+    .term-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .term-grid button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--ink);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      min-height: 38px;
+    }
+
+    .term-grid button.active {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: var(--surface);
     }
 
     .alert {
-      margin-top: 18px; padding: 12px 14px;
-      border-radius: 6px;
-      font-size: 13px; line-height: 1.5;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-top: 14px;
+      padding: 13px 14px;
     }
-    .alert.ok    { background: #e8f0e2; color: var(--good); }
-    .alert.info  { background: #f0e8d0; color: var(--warn); }
-    .alert.error { background: #f4dfd6; color: var(--bad); }
 
-    .client-picker { padding: 14px 22px; border-bottom: 1px solid var(--rule); }
-    .client-picker label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
-    .client-picker select { width: 100%; margin-top: 4px; padding: 8px 10px;
-      border: 1px solid var(--rule); background: var(--surface); border-radius: 6px;
-      font-family: inherit; font-size: 13px; }
+    .alert strong {
+      color: var(--ink);
+      display: block;
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+
+    .alert.ok { background: #e7f0e1; color: var(--green); }
+    .alert.info { background: #f1e7d4; color: var(--orange); }
+    .alert.error { background: #f4dfd6; color: var(--red); }
+
+    .status-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 10px;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .history-row {
+      border-top: 1px solid var(--line);
+      padding-top: 9px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    @media (max-width: 360px) {
+      .limit-title { font-size: 25px; }
+      .metric-grid { grid-template-columns: 1fr; }
+      .profile-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <div class="phone">
-    <div class="topbar">
-      <div><span class="logo"></span><span class="name">Райф</span></div>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-left"><span class="logo"></span><span class="name">Райф</span></div>
+        <div class="mode-chip" id="mode-chip">частный клиент</div>
+      </div>
       <div class="who" id="topbar-who"></div>
-    </div>
+    </header>
 
-    <div class="balance">
-      <div class="l">остаток на счёте</div>
-      <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
-    </div>
+    <section class="balance">
+      <div class="balance-label" id="balance-label">остаток на счете</div>
+      <div class="balance-value"><span id="balance-v">-</span><span class="cur">₽</span></div>
+    </section>
 
     <div class="client-picker">
-      <label>Профиль</label>
+      <label for="client-select">Профиль</label>
       <select id="client-select"></select>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="transfers">Переводы</button>
-    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="limit">Лимит</button>
+      <button class="tab" data-tab="profile">Профиль</button>
+      <button class="tab" data-tab="transfers">Платежи</button>
+    </nav>
 
-    <div class="tab-pane show" data-pane="transfers">
-      <div class="section-title">Перевести</div>
-      <form id="transfer-form" autocomplete="off">
-        <div class="form-row">
-          <label>Кому</label>
-          <input name="to" placeholder="имя или ID получателя" />
+    <main>
+      <section class="pane show" data-pane="limit">
+        <div class="limit-hero">
+          <div class="segment-line" id="limit-segment">Подбираем предложение</div>
+          <div class="limit-title" id="limit-title">Персональный лимит</div>
+          <div class="limit-copy" id="limit-copy">Смотрим доход, баланс и кредитный профиль. Покажем сумму, которая не перегружает бюджет.</div>
         </div>
-        <div class="form-row">
-          <label>Сумма, ₽</label>
-          <input name="amount" type="number" min="1" placeholder="0" />
-        </div>
-        <button class="btn primary" type="submit">Перевести</button>
-      </form>
-      <div id="transfer-result"></div>
 
-      <div class="section-title" style="margin-top:24px">Последние операции</div>
-      <div id="tx-list" class="tx-list"></div>
-    </div>
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="k">Доступно</div>
+            <div class="v" id="limit-amount">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Ставка</div>
+            <div class="v" id="limit-rate">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Платеж</div>
+            <div class="v" id="limit-payment">-</div>
+          </div>
+        </div>
+
+        <form id="limit-form" autocomplete="off">
+          <div class="range-head">
+            <label for="limit-range">Сумма заявки</label>
+            <div class="range-value"><span id="range-label">-</span> ₽</div>
+          </div>
+          <input id="limit-range" name="amount" type="range" min="50000" max="1500000" step="10000" value="300000" />
+
+          <div class="form-row" style="margin-top:16px">
+            <div class="field-label">Срок, месяцев</div>
+            <div class="term-grid" id="term-grid">
+              <button type="button" data-months="12">12</button>
+              <button type="button" data-months="24" class="active">24</button>
+              <button type="button" data-months="36">36</button>
+              <button type="button" data-months="48">48</button>
+              <button type="button" data-months="60">60</button>
+            </div>
+          </div>
+
+          <button class="btn primary" type="submit" id="limit-submit">Получить решение</button>
+        </form>
+
+        <div id="limit-result"></div>
+        <div class="status-note" id="storage-note">История заявок появится после того, как backend добавит хранение по переданной спеке.</div>
+      </section>
+
+      <section class="pane" data-pane="profile">
+        <div class="section-title">Профиль клиента</div>
+        <div class="profile-card">
+          <div class="profile-grid">
+            <div class="profile-item">
+              <div class="k">Сегмент</div>
+              <div class="v" id="profile-segment">-</div>
+            </div>
+            <div class="profile-item">
+              <div class="k" id="income-label">Доход</div>
+              <div class="v" id="profile-income">-</div>
+            </div>
+            <div class="profile-item">
+              <div class="k">Риск</div>
+              <div class="v" id="profile-risk">-</div>
+            </div>
+            <div class="profile-item">
+              <div class="k">Продукты</div>
+              <div class="v" id="profile-products">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="history-card">
+          <div class="section-title">История заявок</div>
+          <div id="history-list" class="history-list">
+            <div class="empty">Пока backend не отдает историю</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" data-pane="transfers">
+        <div class="section-title" id="transfer-title">Платеж</div>
+        <form id="transfer-form" autocomplete="off">
+          <div class="form-row">
+            <label for="transfer-to" id="transfer-to-label">Кому</label>
+            <input id="transfer-to" name="to" placeholder="имя или ID получателя" />
+          </div>
+          <div class="form-row">
+            <label for="transfer-amount">Сумма, ₽</label>
+            <input id="transfer-amount" name="amount" type="number" min="1" placeholder="0" />
+          </div>
+          <button class="btn primary" type="submit">Отправить</button>
+        </form>
+        <div id="transfer-result"></div>
+
+        <div class="section-title" style="margin-top:24px">Последние операции</div>
+        <div id="tx-list" class="tx-list"></div>
+      </section>
+    </main>
   </div>
 
   <script>
   (function(){
     "use strict";
+
     const fmt = new Intl.NumberFormat("ru-RU");
+    const pct = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
     const sel = document.getElementById("client-select");
     const balanceV = document.getElementById("balance-v");
+    const balanceLabel = document.getElementById("balance-label");
     const topbarWho = document.getElementById("topbar-who");
+    const modeChip = document.getElementById("mode-chip");
     const txList = document.getElementById("tx-list");
     const transferResult = document.getElementById("transfer-result");
+    const transferTitle = document.getElementById("transfer-title");
+    const transferToLabel = document.getElementById("transfer-to-label");
+    const limitSegment = document.getElementById("limit-segment");
+    const limitTitle = document.getElementById("limit-title");
+    const limitCopy = document.getElementById("limit-copy");
+    const limitAmount = document.getElementById("limit-amount");
+    const limitRate = document.getElementById("limit-rate");
+    const limitPayment = document.getElementById("limit-payment");
+    const limitRange = document.getElementById("limit-range");
+    const rangeLabel = document.getElementById("range-label");
+    const termGrid = document.getElementById("term-grid");
+    const limitSubmit = document.getElementById("limit-submit");
+    const limitResult = document.getElementById("limit-result");
+    const storageNote = document.getElementById("storage-note");
+    const profileSegment = document.getElementById("profile-segment");
+    const incomeLabel = document.getElementById("income-label");
+    const profileIncome = document.getElementById("profile-income");
+    const profileRisk = document.getElementById("profile-risk");
+    const profileProducts = document.getElementById("profile-products");
+    const historyList = document.getElementById("history-list");
+    let currentTerm = 24;
+    let currentClient = null;
 
-    // ---- табы ----
     document.querySelectorAll(".tab").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-        document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("show"));
+        document.querySelectorAll(".pane").forEach(p => p.classList.remove("show"));
         btn.classList.add("active");
         document.querySelector(`[data-pane="${btn.dataset.tab}"]`).classList.add("show");
       });
     });
 
-    // ---- загрузка списка клиентов в селект ----
-    async function loadClients() {
-      try {
-        const r = await fetch("/clients?limit=200");
-        const d = await r.json();
-        const items = (d.items || []).slice(0, 80);
-        sel.innerHTML = items.map(c =>
-          `<option value="${c.id}" data-balance="${c.balance_rub}" data-name="${c.name}" data-segment="${c.segment}">
-            ${c.name}
-          </option>`
-        ).join("");
-        if (items.length) onPickClient();
-      } catch(e) { console.error(e); }
+    function segmentLabel(segment) {
+      return ({
+        mass: "частный клиент",
+        mass_affluent: "частный клиент+",
+        premium: "премиальный клиент",
+        private: "private banking",
+        sme: "бизнес-клиент",
+      })[segment] || segment;
     }
 
-    function onPickClient() {
+    function productLabel(product) {
+      return ({
+        consumer_credit: "кредит",
+        auto_credit: "автокредит",
+        mortgage: "ипотека",
+        deposit: "депозит",
+        savings: "накопления",
+        credit_card: "кредитная карта",
+        debit: "дебетовая карта",
+      })[product] || product;
+    }
+
+    async function loadClients() {
+      try {
+        const r = await fetch("/clients?limit=500");
+        const d = await r.json();
+        const items = d.items || [];
+        const ordered = items.sort((a, b) => Number(b.segment === "sme") - Number(a.segment === "sme"));
+        sel.innerHTML = ordered.map(c =>
+          `<option value="${c.id}" data-balance="${c.balance_rub}" data-name="${c.name}" data-segment="${c.segment}">
+            ${c.name} · ${segmentLabel(c.segment)}
+          </option>`
+        ).join("");
+        if (ordered.length) onPickClient();
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
+    async function onPickClient() {
       const opt = sel.selectedOptions[0];
       if (!opt) return;
-      balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       topbarWho.textContent = opt.dataset.name;
+      balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       loadTx(opt.value);
+      await loadOffer(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
-    // ---- последние операции ----
+    function applyClientMode(client) {
+      currentClient = client;
+      const isBusiness = client.is_business;
+      modeChip.textContent = isBusiness ? "бизнес" : "частный клиент";
+      balanceLabel.textContent = isBusiness ? "деньги на счете бизнеса" : "остаток на счете";
+      limitTitle.textContent = isBusiness ? "Бизнес-лимит на оборот" : "Персональный лимит";
+      limitCopy.textContent = isBusiness
+        ? "Подбираем сумму под обороты и запас ликвидности. Деньги можно направить на закупку, аренду или сезонный разрыв."
+        : "Смотрим доход, баланс и кредитный профиль. Покажем сумму, которая не перегружает бюджет.";
+      limitSegment.textContent = isBusiness ? "для малого бизнеса" : "для частного клиента";
+      limitSubmit.textContent = isBusiness ? "Получить бизнес-решение" : "Получить решение";
+      transferTitle.textContent = isBusiness ? "Платеж контрагенту" : "Перевод";
+      transferToLabel.textContent = isBusiness ? "Контрагент" : "Кому";
+      incomeLabel.textContent = isBusiness ? "Оборот/доход" : "Доход";
+      profileSegment.textContent = segmentLabel(client.segment);
+      profileIncome.textContent = `${fmt.format(client.income_rub || 0)} ₽`;
+      profileRisk.textContent = client.has_overdue_history
+        ? `риск ${pct.format((client.risk_score || 0) * 100)}%, были просрочки`
+        : `риск ${pct.format((client.risk_score || 0) * 100)}%, чистая история`;
+      profileProducts.textContent = (client.products || []).map(productLabel).join(", ") || "нет продуктов";
+    }
+
+    function updateRangeLabel() {
+      rangeLabel.textContent = fmt.format(+limitRange.value || 0);
+    }
+    limitRange.addEventListener("input", updateRangeLabel);
+
+    termGrid.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        termGrid.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentTerm = +btn.dataset.months;
+      });
+    });
+
+    function renderDecision(decision) {
+      const approved = decision.approved_amount_rub || decision.max_amount_rub || 0;
+      limitAmount.textContent = approved ? `${fmt.format(approved)} ₽` : "инд. план";
+      limitRate.textContent = decision.rate_pct ? `${pct.format(decision.rate_pct)}%` : "-";
+      limitPayment.textContent = decision.monthly_payment_rub
+        ? `${fmt.format(decision.monthly_payment_rub)} ₽`
+        : "-";
+      if (approved) {
+        limitRange.max = Math.max(approved, 50_000);
+        limitRange.value = Math.min(+limitRange.value || approved, approved);
+        updateRangeLabel();
+      }
+    }
+
+    function renderHistory(history) {
+      const items = history.items || [];
+      if (!items.length) {
+        historyList.innerHTML = `<div class="empty">Истории пока нет</div>`;
+        return;
+      }
+      historyList.innerHTML = items.slice(0, 3).map(item =>
+        `<div class="history-row">
+          <strong>${statusLabel(item.status)}</strong><br/>
+          ${fmt.format(item.amount_rub || 0)} ₽ на ${item.term_months || "-"} мес.
+        </div>`
+      ).join("");
+    }
+
+    async function loadOffer(clientId) {
+      limitResult.innerHTML = "";
+      storageNote.textContent = "История заявок появится после того, как backend добавит хранение по переданной спеке.";
+      try {
+        const r = await fetch("/api/credit-offer", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ client_id: clientId }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        applyClientMode(d.client);
+        renderDecision(d.offer);
+        renderHistory(d.history || {});
+        if ((d.history || {}).storage !== "not_ready") {
+          storageNote.textContent = "Backend уже отдает историю заявок клиента.";
+        }
+      } catch(e) {
+        limitResult.innerHTML = `<div class="alert error">Не удалось подготовить предложение</div>`;
+      }
+      updateRangeLabel();
+    }
+
     async function loadTx(clientId) {
       try {
         const r = await fetch(`/transactions/${clientId}?limit=10`);
@@ -261,15 +822,15 @@
           return;
         }
         txList.innerHTML = items.map(t => {
-          const sign = t.amount_rub >= 0 ? "plus" : "minus";
-          const amt = (t.amount_rub >= 0 ? "+" : "−") + fmt.format(Math.abs(t.amount_rub));
-          const niceTs = t.ts.replace("T", " ").slice(0, 16);
+          const positive = t.amount_rub >= 0;
+          const amount = `${positive ? "+" : "-"}${fmt.format(Math.abs(t.amount_rub))} ₽`;
+          const niceTs = (t.ts || "").replace("T", " ").slice(0, 16);
           return `<div class="tx-row">
             <div>
               <div class="desc">${typeLabel(t.type)}</div>
               <div class="ts">${niceTs}</div>
             </div>
-            <div class="amt ${sign}">${amt} ₽</div>
+            <div class="amt ${positive ? "plus" : ""}">${amount}</div>
           </div>`;
         }).join("");
       } catch(e) {
@@ -279,13 +840,21 @@
 
     function typeLabel(t) {
       return ({
-        transfer_in:    "Перевод входящий",
-        transfer_out:   "Перевод исходящий",
-        card_purchase:  "Оплата картой",
-        atm_withdraw:   "Снятие в банкомате",
-        salary:         "Зарплата",
-        utility_payment:"Коммунальные",
+        transfer_in: "Входящий перевод",
+        transfer_out: "Исходящий перевод",
+        card_purchase: "Оплата картой",
+        atm_withdraw: "Снятие наличных",
+        salary: currentClient?.is_business ? "Поступление" : "Зарплата",
+        utility_payment: "Регулярный платеж",
       })[t] || t;
+    }
+
+    function statusLabel(status) {
+      return ({
+        approved: "Одобрено",
+        counter_offer: "Встречное предложение",
+        declined: "Не рекомендуем",
+      })[status] || "Решение";
     }
 
     function setBalance(newAmount) {
@@ -294,9 +863,7 @@
       if (opt) opt.dataset.balance = newAmount;
     }
 
-    // ---- форма перевода ----
-    const transferForm = document.getElementById("transfer-form");
-    transferForm.addEventListener("submit", async (ev) => {
+    document.getElementById("transfer-form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
       transferResult.innerHTML = "";
       const opt = sel.selectedOptions[0];
@@ -305,43 +872,67 @@
       const to = (data.get("to") || "").trim();
       const amount = +data.get("amount");
       if (!to || amount <= 0) {
-        transferResult.innerHTML = `<div class="alert error">введи получателя и сумму</div>`;
+        transferResult.innerHTML = `<div class="alert error">Укажите получателя и сумму</div>`;
         return;
       }
-
-      const payload = {
-        from_client_id: opt.value,
-        to: to,
-        amount_rub: amount,
-      };
       try {
         const r = await fetch("/api/transfer", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ from_client_id: opt.value, to, amount_rub: amount }),
         });
         const d = await r.json();
-        if (r.ok) {
-          const kindLabel = d.kind === "internal"
-            ? `${d.to} (клиент банка)`
-            : `${d.to} (внешний счёт)`;
-          transferResult.innerHTML =
-            `<div class="alert ok">Отправлено ${fmt.format(d.amount_rub)} ₽<br/>
-             получатель: ${kindLabel}</div>`;
-          setBalance(d.new_balance_rub);
-          transferForm.reset();
-          loadTx(opt.value);
-        } else {
-          transferResult.innerHTML =
-            `<div class="alert error">${d.detail || "ошибка"}</div>`;
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        transferResult.innerHTML = `<div class="alert ok"><strong>Отправлено</strong>${fmt.format(d.amount_rub)} ₽ · ${d.to}</div>`;
+        setBalance(d.new_balance_rub);
+        ev.target.reset();
+        loadTx(opt.value);
+      } catch(e) {
+        transferResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
+      }
+    });
+
+    document.getElementById("limit-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      limitResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      try {
+        const r = await fetch("/api/credit-apply", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            client_id: opt.value,
+            amount_rub: +limitRange.value,
+            term_months: currentTerm,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        renderDecision(d.decision);
+        const cls = d.decision.status === "declined" ? "info" : "ok";
+        const amountLine = d.decision.approved_amount_rub
+          ? `<br/>Сумма: ${fmt.format(d.decision.approved_amount_rub)} ₽`
+          : "";
+        const paymentLine = d.decision.monthly_payment_rub
+          ? `<br/>Платеж: ${fmt.format(d.decision.monthly_payment_rub)} ₽ в месяц`
+          : "";
+        limitResult.innerHTML =
+          `<div class="alert ${cls}"><strong>${d.decision.title}</strong>${d.decision.explanation}${amountLine}${paymentLine}</div>`;
+        storageNote.textContent = d.storage === "saved"
+          ? "Заявка сохранена в backend."
+          : "Решение показано клиенту. Backend пока не добавил сохранение заявок.";
+        if (d.storage === "saved") {
+          const history = await fetch(`/api/credit-history/${opt.value}`).then(res => res.json());
+          renderHistory(history);
         }
       } catch(e) {
-        transferResult.innerHTML =
-          `<div class="alert error">сервер не ответил</div>`;
+        limitResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
       }
     });
 
     loadClients();
+    updateRangeLabel();
   })();
   </script>
 </body>
