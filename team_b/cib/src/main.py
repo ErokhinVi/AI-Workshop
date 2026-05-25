@@ -215,9 +215,39 @@ def _score_request(req: ScoringRequest) -> ScoringResponse:
     )
 
 
+async def _humanize_reason(decision: str, reason: str, score: int,
+                            offered_amount: Optional[float],
+                            offered_rate: Optional[float],
+                            offered_term: Optional[int]) -> str:
+    """Просим ИИ переформулировать решение живым человеческим языком."""
+    from src.llm import ask_llm, LLMError
+    if decision == "approved":
+        prompt = (
+            f"Ты сотрудник банка. Напиши клиенту короткое радостное сообщение об одобрении кредита. "
+            f"Сумма: {offered_amount:,.0f} ₽, срок: {offered_term} мес., ставка: {offered_rate:.1f}% годовых. "
+            f"Пиши тепло, по-человечески, без канцелярита. Одним абзацем, не длиннее 3 предложений. Только русский язык."
+        )
+    else:
+        prompt = (
+            f"Ты сотрудник банка. Напиши клиенту вежливое и сочувствующее сообщение об отказе в кредите. "
+            f"Скоринговый балл клиента: {score} из 100. Причина отказа: {reason} "
+            f"Объясни по-человечески, без жаргона и канцелярита, почему так вышло и что можно улучшить. "
+            f"Одним абзацем, не длиннее 4 предложений. Только русский язык."
+        )
+    try:
+        return await ask_llm(prompt, max_tokens=200, temperature=0.5)
+    except LLMError:
+        return reason
+
+
 @app.post("/scoring", summary="Скоринг заявки на кредит")
 async def scoring(req: ScoringRequest) -> ScoringResponse:
-    return _score_request(req)
+    result = _score_request(req)
+    human_reason = await _humanize_reason(
+        result.decision, result.reason, result.score_total,
+        result.offered_amount_rub, result.offered_rate_pct, result.offered_term_months,
+    )
+    return result.model_copy(update={"reason": human_reason})
 
 
 # ── Ручка кредитного решения (для retail и симулятора) ────────────────────
@@ -282,10 +312,14 @@ async def credit_decide(req: DecideRequest) -> dict:
         credit_history=credit_history,
     )
     result = _score_request(score_req)
+    human_explanation = await _humanize_reason(
+        result.decision, result.reason, result.score_total,
+        result.offered_amount_rub, result.offered_rate_pct, result.offered_term_months,
+    )
     return {
         "client_id": req.client_id,
         "decision": result.decision,
-        "explanation": result.reason,
+        "explanation": human_explanation,
         "offered_amount_rub": result.offered_amount_rub,
         "offered_rate_pct": result.offered_rate_pct,
         "offered_term_months": result.offered_term_months,
