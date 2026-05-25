@@ -19,8 +19,17 @@ from pydantic import BaseModel, Field
 TEAM_NAME = os.environ.get("TEAM_NAME", "team")
 COMMIT = os.environ.get("RENDER_GIT_COMMIT", "local")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8003").rstrip("/")
-PLAN_PATH = Path(os.environ.get("PLAN_PATH", Path(__file__).with_name("PLAN.md")))
 MAX_PLAN_BYTES = 200_000
+
+
+def _default_plan_path() -> Path:
+    common_plan = Path(__file__).resolve().parents[1] / "tasks" / "TEAM_INTERACTION_PLAN.md"
+    if common_plan.exists():
+        return common_plan
+    return Path(__file__).with_name("PLAN.md")
+
+
+PLAN_PATH = Path(os.environ.get("PLAN_PATH") or _default_plan_path())
 
 # Базовый каталог. Кредитный продукт добавляет владелец блока в рамках задачи.
 PRODUCTS = [

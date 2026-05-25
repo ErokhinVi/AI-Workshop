@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir \
     "httpx>=0.27"
 
 COPY team_a/cib/src /app/src
+COPY team_a/cib/tasks /app/tasks
 
 ENV PYTHONPATH=/app
 EXPOSE 8020
