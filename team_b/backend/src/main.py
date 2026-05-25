@@ -97,6 +97,14 @@ async def get_client(client_id: str) -> dict:
     return c
 
 
+@app.get("/clients/{client_id}/products")
+async def get_client_products(client_id: str) -> dict:
+    c = _clients_by_id.get(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    return {"client_id": client_id, "products": c.get("products", [])}
+
+
 @app.get("/transactions/{client_id}")
 async def get_transactions(
     client_id: str, limit: int = Query(default=20, ge=1, le=200),
