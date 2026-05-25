@@ -21,6 +21,46 @@ CIB_URL = os.environ.get("CIB_URL", "http://localhost:8002").rstrip("/")
 app = FastAPI(title="retail - мобильный банк", version="1.0.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+INVESTMENT_INSTRUMENTS = [
+    {
+        "ticker": "SBRF",
+        "name": "Сбербанк",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 290.5,
+        "lot_size": 1,
+        "risk_level": "medium",
+    },
+    {
+        "ticker": "VTBR",
+        "name": "ВТБ",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 0.025,
+        "lot_size": 1000,
+        "risk_level": "high",
+    },
+    {
+        "ticker": "ROSN",
+        "name": "Роснефть",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 580.0,
+        "lot_size": 1,
+        "risk_level": "medium",
+    },
+    {
+        "ticker": "SIBN",
+        "name": "Газпром нефть",
+        "kind": "stock",
+        "currency": "RUB",
+        "price_rub": 760.0,
+        "lot_size": 1,
+        "risk_level": "medium",
+    },
+]
+INVESTMENT_BY_TICKER = {item["ticker"]: item for item in INVESTMENT_INSTRUMENTS}
+
 
 @app.get("/health")
 async def health() -> dict:
@@ -337,6 +377,96 @@ async def _try_get_credit_history(client_id: str) -> dict[str, Any]:
         raise
 
 
+def _local_investment_quote(client_id: str, ticker: str, quantity: int) -> dict[str, Any]:
+    instrument = INVESTMENT_BY_TICKER.get(ticker)
+    if not instrument:
+        raise HTTPException(status_code=400, detail="выберите доступный тикер")
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="укажите количество")
+    lot_size = int(instrument["lot_size"])
+    lots = quantity if ticker != "VTBR" else max(1, quantity)
+    effective_quantity = lots * lot_size if ticker == "VTBR" else quantity
+    price = float(instrument["price_rub"])
+    amount = round(effective_quantity * price, 2)
+    commission = round(max(amount * 0.003, 1.0), 2)
+    total = round(amount + commission, 2)
+    return {
+        "status": "quoted",
+        "client_id": client_id,
+        "ticker": ticker,
+        "name": instrument["name"],
+        "side": "buy",
+        "quantity": effective_quantity,
+        "lots": lots if ticker == "VTBR" else quantity,
+        "price_rub": price,
+        "amount_rub": amount,
+        "commission_rub": commission,
+        "total_rub": total,
+        "risk_level": instrument["risk_level"],
+        "explanation": (
+            f"Покупка {effective_quantity} шт. {ticker} рассчитана по ориентировочной "
+            f"цене {price} ₽. Сумма сделки {amount} ₽, комиссия 0.3% — {commission} ₽, "
+            f"итого к списанию {total} ₽. Инструмент относится к уровню риска "
+            f"{instrument['risk_level']}; перед подтверждением клиент видит цену, "
+            "комиссию и полный итог."
+        ),
+        "source": "retail_fallback_waiting_for_cib",
+    }
+
+
+async def _investment_instruments() -> dict[str, Any]:
+    try:
+        data = await _cib_get("/investments/instruments")
+        items = data.get("items", [])
+        if isinstance(items, list) and items:
+            return {"total": len(items), "items": items, "source": "cib"}
+    except HTTPException as exc:
+        if exc.status_code not in {404, 405, 502}:
+            raise
+    return {
+        "total": len(INVESTMENT_INSTRUMENTS),
+        "items": INVESTMENT_INSTRUMENTS,
+        "source": "retail_fallback_waiting_for_cib",
+    }
+
+
+async def _investment_quote(client_id: str, ticker: str, quantity: int) -> dict[str, Any]:
+    payload = {"client_id": client_id, "ticker": ticker, "side": "buy", "quantity": quantity}
+    try:
+        quote = await _cib_post("/investments/quote", payload)
+        if quote.get("ticker") and quote.get("amount_rub") is not None:
+            quote.setdefault("source", "cib")
+            quote.setdefault("explanation", "Расчет покупки получен из CIB.")
+            return quote
+    except HTTPException as exc:
+        if exc.status_code not in {404, 405, 502}:
+            raise
+    return _local_investment_quote(client_id, ticker, quantity)
+
+
+async def _try_save_investment_order(order: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        return await _backend_post("/investment-orders", order)
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return None
+        raise
+
+
+async def _try_get_investment_portfolio(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get(f"/investment-portfolio/{client_id}")
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {
+                "client_id": client_id,
+                "cash_balance_rub": 0,
+                "positions": [],
+                "storage": "backend_not_ready",
+            }
+        raise
+
+
 @app.get("/clients")
 async def list_clients(request: Request) -> dict:
     return await _backend_get("/clients", dict(request.query_params))
@@ -426,3 +556,54 @@ async def api_credit_apply(payload: dict) -> dict:
 @app.post("/api/transfer")
 async def api_transfer(payload: dict) -> dict:
     return await _backend_post("/api/transfer", payload)
+
+
+@app.get("/api/investments/instruments")
+async def api_investment_instruments() -> dict:
+    return await _investment_instruments()
+
+
+@app.get("/api/investments/portfolio/{client_id}")
+async def api_investment_portfolio(client_id: str) -> dict:
+    return await _try_get_investment_portfolio(client_id)
+
+
+@app.post("/api/investments/quote")
+async def api_investment_quote(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    quantity = int(payload.get("quantity") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    await _backend_get(f"/clients/{client_id}")
+    return await _investment_quote(client_id, ticker, quantity)
+
+
+@app.post("/api/investments/buy")
+async def api_investment_buy(payload: dict) -> dict:
+    client_id = str(payload.get("client_id") or "").strip()
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    quantity = int(payload.get("quantity") or 0)
+    if not client_id:
+        raise HTTPException(status_code=400, detail="клиент не выбран")
+    await _backend_get(f"/clients/{client_id}")
+    quote = await _investment_quote(client_id, ticker, quantity)
+    order = {
+        "client_id": client_id,
+        "ticker": quote["ticker"],
+        "side": "buy",
+        "quantity": int(quote["quantity"]),
+        "price_rub": quote["price_rub"],
+        "amount_rub": quote["amount_rub"],
+        "commission_rub": quote["commission_rub"],
+        "status": "executed",
+        "explanation": quote["explanation"],
+    }
+    saved = await _try_save_investment_order(order)
+    return {
+        "status": "executed",
+        "explanation": quote["explanation"],
+        "quote": quote,
+        "saved_order": saved,
+        "storage": "saved" if saved else "backend_not_ready",
+    }

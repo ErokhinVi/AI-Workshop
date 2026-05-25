@@ -208,7 +208,7 @@
 
     .tabs {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       border-bottom: 1px solid var(--line);
       background: var(--surface);
       position: sticky;
@@ -499,10 +499,46 @@
       line-height: 1.35;
     }
 
+    .instrument-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .instrument-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      cursor: pointer;
+      min-height: 86px;
+      padding: 11px;
+    }
+
+    .instrument-card.active {
+      border-color: var(--ink);
+      background: #fffbe5;
+    }
+
+    .instrument-card strong {
+      display: block;
+      font-family: "NavigoRegular", "ALS Hauss", sans-serif;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .instrument-card span {
+      color: var(--ink-2);
+      display: block;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
     @media (max-width: 360px) {
       .limit-title { font-size: 25px; }
       .metric-grid { grid-template-columns: 1fr; }
       .profile-grid { grid-template-columns: 1fr; }
+      .instrument-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -528,6 +564,7 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="limit">Лимит</button>
+      <button class="tab" data-tab="investments">Инвестиции</button>
       <button class="tab" data-tab="profile">Профиль</button>
       <button class="tab" data-tab="transfers">Платежи</button>
     </nav>
@@ -578,6 +615,52 @@
 
         <div id="limit-result"></div>
         <div class="status-note" id="storage-note">Заявка получит номер, статус и сохранится в истории клиента.</div>
+      </section>
+
+      <section class="pane" data-pane="investments">
+        <div class="limit-hero">
+          <div class="segment-line">покупка российских акций</div>
+          <div class="limit-title">Инвестиции</div>
+          <div class="limit-copy">Выберите акцию, получите расчёт цены и комиссии, подтвердите покупку и увидите статус сделки.</div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="k">Инструмент</div>
+            <div class="v" id="investment-ticker">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Сумма</div>
+            <div class="v" id="investment-amount">-</div>
+          </div>
+          <div class="metric">
+            <div class="k">Комиссия</div>
+            <div class="v" id="investment-commission">-</div>
+          </div>
+        </div>
+
+        <div class="section-title">Акции</div>
+        <div id="instrument-grid" class="instrument-grid">
+          <div class="empty">Загружаем инструменты</div>
+        </div>
+
+        <form id="investment-form" autocomplete="off">
+          <div class="form-row">
+            <label for="investment-quantity">Количество</label>
+            <input id="investment-quantity" name="quantity" type="number" min="1" value="10" />
+          </div>
+          <button class="btn" type="button" id="investment-quote">Рассчитать</button>
+          <button class="btn primary" type="submit" style="margin-top:8px">Купить</button>
+        </form>
+
+        <div id="investment-result"></div>
+
+        <div class="history-card">
+          <div class="section-title">Портфель</div>
+          <div id="portfolio-list" class="history-list">
+            <div class="empty">Портфель появится после первой сделки</div>
+          </div>
+        </div>
       </section>
 
       <section class="pane" data-pane="profile">
@@ -665,8 +748,17 @@
     const profileRisk = document.getElementById("profile-risk");
     const profileProducts = document.getElementById("profile-products");
     const historyList = document.getElementById("history-list");
+    const instrumentGrid = document.getElementById("instrument-grid");
+    const investmentTicker = document.getElementById("investment-ticker");
+    const investmentAmount = document.getElementById("investment-amount");
+    const investmentCommission = document.getElementById("investment-commission");
+    const investmentResult = document.getElementById("investment-result");
+    const portfolioList = document.getElementById("portfolio-list");
+    const investmentQuantity = document.getElementById("investment-quantity");
     let currentTerm = 24;
     let currentClient = null;
+    let selectedInstrument = null;
+    let currentQuote = null;
 
     document.querySelectorAll(".tab").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -723,6 +815,8 @@
       balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       loadTx(opt.value);
       await loadOffer(opt.value);
+      await loadInvestments();
+      await loadPortfolio(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
@@ -788,6 +882,88 @@
           <span>${item.application_id || "заявка сохранена"}</span>
         </div>`
       ).join("");
+    }
+
+    function renderInstruments(items) {
+      if (!items.length) {
+        instrumentGrid.innerHTML = `<div class="empty">Инструменты пока недоступны</div>`;
+        return;
+      }
+      if (!selectedInstrument) selectedInstrument = items[0].ticker;
+      instrumentGrid.innerHTML = items.map(item =>
+        `<button type="button" class="instrument-card ${item.ticker === selectedInstrument ? "active" : ""}" data-ticker="${item.ticker}">
+          <strong>${item.ticker}</strong>
+          <span>${item.name}</span>
+          <span>${fmt.format(item.price_rub || 0)} ₽ · риск ${riskLabel(item.risk_level)}</span>
+        </button>`
+      ).join("");
+      instrumentGrid.querySelectorAll(".instrument-card").forEach(card => {
+        card.addEventListener("click", () => {
+          selectedInstrument = card.dataset.ticker;
+          currentQuote = null;
+          renderInstruments(items);
+          investmentTicker.textContent = selectedInstrument;
+          investmentAmount.textContent = "-";
+          investmentCommission.textContent = "-";
+          investmentResult.innerHTML = "";
+        });
+      });
+      investmentTicker.textContent = selectedInstrument;
+    }
+
+    async function loadInvestments() {
+      try {
+        const r = await fetch("/api/investments/instruments");
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка");
+        renderInstruments(d.items || []);
+      } catch(e) {
+        instrumentGrid.innerHTML = `<div class="empty">Не удалось загрузить инструменты</div>`;
+      }
+    }
+
+    async function loadPortfolio(clientId) {
+      try {
+        const r = await fetch(`/api/investments/portfolio/${clientId}`);
+        const d = await r.json();
+        const items = d.positions || [];
+        if (!items.length) {
+          portfolioList.innerHTML = `<div class="empty">Портфель появится после первой сделки</div>`;
+          return;
+        }
+        portfolioList.innerHTML = items.slice(0, 4).map(item =>
+          `<div class="history-row">
+            <strong>${item.ticker}</strong><br/>
+            ${fmt.format(item.quantity || 0)} шт. · ${fmt.format(item.market_value_rub || item.amount_rub || 0)} ₽
+          </div>`
+        ).join("");
+      } catch(e) {
+        portfolioList.innerHTML = `<div class="empty">Портфель пока недоступен</div>`;
+      }
+    }
+
+    async function requestInvestmentQuote() {
+      const opt = sel.selectedOptions[0];
+      if (!opt || !selectedInstrument) return null;
+      const quantity = +investmentQuantity.value || 0;
+      const r = await fetch("/api/investments/quote", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ client_id: opt.value, ticker: selectedInstrument, quantity }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "ошибка расчета");
+      currentQuote = d;
+      investmentTicker.textContent = d.ticker;
+      investmentAmount.textContent = `${fmt.format(d.amount_rub || 0)} ₽`;
+      investmentCommission.textContent = `${fmt.format(d.commission_rub || 0)} ₽`;
+      investmentResult.innerHTML =
+        `<div class="alert info"><strong>Расчёт готов</strong>${d.explanation}<br/>Итого: ${fmt.format(d.total_rub || 0)} ₽</div>`;
+      return d;
+    }
+
+    function riskLabel(risk) {
+      return ({ low: "низкий", medium: "средний", high: "высокий" })[risk] || risk || "средний";
     }
 
     async function loadOffer(clientId) {
@@ -938,6 +1114,41 @@
         }
       } catch(e) {
         limitResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
+      }
+    });
+
+    document.getElementById("investment-quote").addEventListener("click", async () => {
+      investmentResult.innerHTML = "";
+      try {
+        await requestInvestmentQuote();
+      } catch(e) {
+        investmentResult.innerHTML = `<div class="alert error">${e.message || "не удалось рассчитать"}</div>`;
+      }
+    });
+
+    document.getElementById("investment-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      investmentResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt || !selectedInstrument) return;
+      try {
+        const quantity = +investmentQuantity.value || 0;
+        const r = await fetch("/api/investments/buy", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ client_id: opt.value, ticker: selectedInstrument, quantity }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || "ошибка покупки");
+        const q = d.quote || currentQuote || {};
+        investmentTicker.textContent = q.ticker || selectedInstrument;
+        investmentAmount.textContent = `${fmt.format(q.amount_rub || 0)} ₽`;
+        investmentCommission.textContent = `${fmt.format(q.commission_rub || 0)} ₽`;
+        investmentResult.innerHTML =
+          `<div class="alert ok"><strong>Покупка исполнена</strong>${d.explanation}<br/>Статус: ${d.storage === "saved" ? "сохранено в портфеле" : "ожидаем хранение backend"}</div>`;
+        await loadPortfolio(opt.value);
+      } catch(e) {
+        investmentResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
       }
     });
 

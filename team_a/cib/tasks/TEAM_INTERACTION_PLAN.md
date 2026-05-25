@@ -337,6 +337,21 @@ Retail должен:
 - показывать портфель через backend `GET /investment-portfolio/{client_id}`;
 - не ломать кредиты и переводы.
 
+Статус retail на 2026-05-25:
+
+- готово: вкладка "Инвестиции" в мобильном интерфейсе;
+- готово: выбор `SBRF`, `VTBR`, `ROSN`, `SIBN`, ввод количества, расчёт и
+  подтверждение покупки;
+- готово: retail вызывает CIB `POST /investments/quote`; на случай временной
+  недоступности CIB есть запасной локальный расчёт без падения клиентского
+  сценария;
+- готово: retail вызывает backend `POST /investment-orders` и
+  `GET /investment-portfolio/{client_id}`;
+- проверено локально: `GET /investments/instruments` и `POST /investments/quote`
+  уже приходят из CIB;
+- проверено локально: `POST /investment-orders` сохраняет сделку в backend, а
+  `GET /investment-portfolio/{client_id}` показывает купленную позицию.
+
 Минимальный клиентский сценарий:
 
 1. Клиент открывает retail.
