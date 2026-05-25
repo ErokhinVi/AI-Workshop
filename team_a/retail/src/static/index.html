@@ -765,6 +765,7 @@
     const investmentQuantity = document.getElementById("investment-quantity");
     let currentTerm = 24;
     let currentClient = null;
+    let investmentInstruments = [];
     let selectedInstrument = null;
     let currentQuote = null;
 
@@ -898,12 +899,14 @@
         instrumentGrid.innerHTML = `<div class="empty">Инструменты пока недоступны</div>`;
         return;
       }
+      investmentInstruments = items;
       if (!selectedInstrument) selectedInstrument = items[0].ticker;
       instrumentGrid.innerHTML = items.map(item =>
         `<button type="button" class="instrument-card ${item.ticker === selectedInstrument ? "active" : ""}" data-ticker="${item.ticker}">
           <strong>${item.ticker}</strong>
           <span>${item.name}</span>
           <span>${fmt.format(item.price_rub || 0)} ₽ · риск ${riskLabel(item.risk_level)}</span>
+          <span>${tradeRulesLabel(item.trade_rules)}</span>
         </button>`
       ).join("");
       instrumentGrid.querySelectorAll(".instrument-card").forEach(card => {
@@ -918,6 +921,7 @@
         });
       });
       investmentTicker.textContent = selectedInstrument;
+      applyTradeRules(currentInstrument()?.trade_rules);
     }
 
     async function loadInvestments() {
@@ -975,6 +979,7 @@
       const opt = sel.selectedOptions[0];
       if (!opt || !selectedInstrument) return null;
       const quantity = +investmentQuantity.value || 0;
+      validateTradeQuantity(quantity, currentInstrument()?.trade_rules);
       const r = await fetch("/api/investments/quote", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -995,6 +1000,35 @@
 
     function riskLabel(risk) {
       return ({ low: "низкий", medium: "средний", high: "высокий" })[risk] || risk || "средний";
+    }
+
+    function currentInstrument() {
+      return investmentInstruments.find(item => item.ticker === selectedInstrument) || null;
+    }
+
+    function applyTradeRules(rules) {
+      const min = Number(rules?.min_quantity || 1);
+      const step = Number(rules?.quantity_step || 1);
+      investmentQuantity.min = String(min);
+      investmentQuantity.step = String(step);
+      if ((+investmentQuantity.value || 0) < min) investmentQuantity.value = String(min);
+    }
+
+    function validateTradeQuantity(quantity, rules) {
+      const min = Number(rules?.min_quantity || 1);
+      const step = Number(rules?.quantity_step || 1);
+      if (quantity < min) throw new Error(`Минимум для покупки — ${fmt.format(min)} шт.`);
+      if (step > 0 && Math.abs((quantity - min) % step) > 0.0001) {
+        throw new Error(`Количество должно идти шагом ${fmt.format(step)} шт.`);
+      }
+    }
+
+    function tradeRulesLabel(rules) {
+      if (!rules) return "правила сделки уточняются";
+      const min = fmt.format(rules.min_quantity || 1);
+      const step = fmt.format(rules.quantity_step || 1);
+      const commission = pct.format((rules.commission_rate || 0) * 100);
+      return `мин. ${min} шт. · шаг ${step} · комиссия ${commission}%`;
     }
 
     function investmentStatusLabel(status) {
@@ -1168,6 +1202,7 @@
       if (!opt || !selectedInstrument) return;
       try {
         const quantity = +investmentQuantity.value || 0;
+        validateTradeQuantity(quantity, currentInstrument()?.trade_rules);
         const r = await fetch("/api/investments/buy", {
           method: "POST",
           headers: {"Content-Type": "application/json"},

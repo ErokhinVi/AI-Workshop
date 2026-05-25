@@ -60,6 +60,24 @@ INVESTMENT_INSTRUMENTS = [
     },
 ]
 INVESTMENT_BY_TICKER = {item["ticker"]: item for item in INVESTMENT_INSTRUMENTS}
+INVESTMENT_COMMISSION_RATE = 0.003
+
+
+def _investment_trade_rules(instrument: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "allowed_sides": ["buy"],
+        "quantity_unit": "share",
+        "min_quantity": 1,
+        "quantity_step": 1,
+        "lot_size": int(instrument["lot_size"]),
+        "supports_fractional": False,
+        "commission_rate": INVESTMENT_COMMISSION_RATE,
+        "settlement_currency": instrument["currency"],
+    }
+
+
+def _investment_instrument_payload(instrument: dict[str, Any]) -> dict[str, Any]:
+    return {**instrument, "trade_rules": _investment_trade_rules(instrument)}
 
 
 @app.get("/health")
@@ -381,14 +399,16 @@ def _local_investment_quote(client_id: str, ticker: str, quantity: int) -> dict[
     instrument = INVESTMENT_BY_TICKER.get(ticker)
     if not instrument:
         raise HTTPException(status_code=400, detail="выберите доступный тикер")
-    if quantity <= 0:
+    trade_rules = _investment_trade_rules(instrument)
+    min_quantity = int(trade_rules["min_quantity"])
+    quantity_step = int(trade_rules["quantity_step"])
+    if quantity < min_quantity:
         raise HTTPException(status_code=400, detail="укажите количество")
-    lot_size = int(instrument["lot_size"])
-    lots = quantity if ticker != "VTBR" else max(1, quantity)
-    effective_quantity = lots * lot_size if ticker == "VTBR" else quantity
+    if quantity % quantity_step != 0:
+        raise HTTPException(status_code=400, detail=f"количество должно идти шагом {quantity_step}")
     price = float(instrument["price_rub"])
-    amount = round(effective_quantity * price, 2)
-    commission = round(max(amount * 0.003, 1.0), 2)
+    amount = round(quantity * price, 2)
+    commission = round(max(amount * INVESTMENT_COMMISSION_RATE, 0.01), 2)
     total = round(amount + commission, 2)
     return {
         "status": "quoted",
@@ -396,15 +416,17 @@ def _local_investment_quote(client_id: str, ticker: str, quantity: int) -> dict[
         "ticker": ticker,
         "name": instrument["name"],
         "side": "buy",
-        "quantity": effective_quantity,
-        "lots": lots if ticker == "VTBR" else quantity,
+        "quantity": quantity,
         "price_rub": price,
         "amount_rub": amount,
+        "commission_rate": INVESTMENT_COMMISSION_RATE,
         "commission_rub": commission,
         "total_rub": total,
         "risk_level": instrument["risk_level"],
+        "instrument": _investment_instrument_payload(instrument),
+        "trade_rules": trade_rules,
         "explanation": (
-            f"Покупка {effective_quantity} шт. {ticker} рассчитана по ориентировочной "
+            f"Покупка {quantity} шт. {ticker} рассчитана по ориентировочной "
             f"цене {price} ₽. Сумма сделки {amount} ₽, комиссия 0.3% — {commission} ₽, "
             f"итого к списанию {total} ₽. Инструмент относится к уровню риска "
             f"{instrument['risk_level']}; перед подтверждением клиент видит цену, "
@@ -425,7 +447,7 @@ async def _investment_instruments() -> dict[str, Any]:
             raise
     return {
         "total": len(INVESTMENT_INSTRUMENTS),
-        "items": INVESTMENT_INSTRUMENTS,
+        "items": [_investment_instrument_payload(instrument) for instrument in INVESTMENT_INSTRUMENTS],
         "source": "retail_fallback_waiting_for_cib",
     }
 
@@ -589,6 +611,8 @@ async def api_investment_quote(payload: dict) -> dict:
     quantity = int(payload.get("quantity") or 0)
     if not client_id:
         raise HTTPException(status_code=400, detail="клиент не выбран")
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="укажите количество")
     await _backend_get(f"/clients/{client_id}")
     return await _investment_quote(client_id, ticker, quantity)
 
@@ -600,6 +624,8 @@ async def api_investment_buy(payload: dict) -> dict:
     quantity = int(payload.get("quantity") or 0)
     if not client_id:
         raise HTTPException(status_code=400, detail="клиент не выбран")
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="укажите количество")
     await _backend_get(f"/clients/{client_id}")
     quote = await _investment_quote(client_id, ticker, quantity)
     if quote.get("enough_cash") is False or quote.get("decision") in {"insufficient_funds", "rejected"}:
