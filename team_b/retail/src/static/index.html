@@ -207,6 +207,11 @@
       <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
     </div>
 
+    <div id="approval-banner" style="display:none;padding:14px 22px;background:#e8f0e2;border-bottom:1px solid #c5ddbf;">
+      <div style="font-size:13px;font-weight:500;color:var(--good)">Ваша заявка одобрена!</div>
+      <div id="approval-banner-text" style="font-size:12px;color:var(--good);margin-top:2px;opacity:0.85"></div>
+    </div>
+
     <div class="client-picker">
       <label>Профиль</label>
       <select id="client-select"></select>
@@ -309,7 +314,7 @@
             ${c.name}
           </option>`
         ).join("");
-        if (items.length) onPickClient();
+        if (items.length) { onPickClient(); updateApprovalBanner(items[0].id); }
       } catch(e) { console.error(e); }
     }
 
@@ -444,7 +449,22 @@
         </div>`).join("");
     }
 
+    function updateApprovalBanner(clientId) {
+      const apps = loadApps(clientId);
+      const approved = apps.filter(a => a.status === "approved");
+      const banner = document.getElementById("approval-banner");
+      const bannerText = document.getElementById("approval-banner-text");
+      if (approved.length) {
+        const a = approved[0];
+        bannerText.textContent = `${a.product_name} · ${fmt.format(a.amount_rub)} ₽ на ${a.term_months} мес.`;
+        banner.style.display = "";
+      } else {
+        banner.style.display = "none";
+      }
+    }
+
     function renderApps(clientId) {
+      updateApprovalBanner(clientId);
       const apps = loadApps(clientId);
       const wrap = document.getElementById("credit-applications-wrap");
       const list = document.getElementById("applications-list");
@@ -560,6 +580,8 @@
 
     sel.addEventListener("change", () => {
       creditProductsLoaded = false;
+      const opt = sel.selectedOptions[0];
+      if (opt) updateApprovalBanner(opt.value);
       const creditsPane = document.querySelector("[data-pane='credits']");
       if (creditsPane && creditsPane.classList.contains("show")) {
         loadCreditProducts();
