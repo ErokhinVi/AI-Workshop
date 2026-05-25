@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +47,8 @@ _clients_by_id: dict[str, dict[str, Any]] = {}
 _transactions: list[dict[str, Any]] = []
 _credit_history: list[dict[str, Any]] = []
 _credit_applications: list[dict[str, Any]] = []
+_credit_applications_lock = threading.Lock()
+_APPLICATION_ID_RE = re.compile(r"^ca-(\d{6,})$")
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -54,8 +58,14 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
-                out.append(json.loads(line))
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                out.append(item)
     return out
 
 
@@ -77,6 +87,18 @@ def _save_credit_application(application: dict[str, Any]) -> None:
     APPLICATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with APPLICATIONS_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(application, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _next_credit_application_id() -> str:
+    max_number = 0
+    for application in _credit_applications:
+        raw_id = str(application.get("application_id") or "")
+        match = _APPLICATION_ID_RE.match(raw_id)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return f"ca-{max_number + 1:06d}"
 
 
 _load_seed()
@@ -180,7 +202,7 @@ async def get_credit_history(client_id: str) -> dict:
 
 
 def _validate_credit_application(payload: dict) -> dict:
-    client_id = (payload.get("client_id") or "").strip()
+    client_id = str(payload.get("client_id") or "").strip()
     if client_id not in _clients_by_id:
         raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
 
@@ -197,10 +219,10 @@ def _validate_credit_application(payload: dict) -> dict:
 
     if amount_rub <= 0:
         raise HTTPException(status_code=400, detail="укажи положительную сумму")
-    if term_months not in (12, 24, 36, 48, 60):
+    if term_months < 3 or term_months > 84:
         raise HTTPException(
             status_code=400,
-            detail="срок должен быть 12, 24, 36, 48 или 60 месяцев",
+            detail="срок должен быть от 3 до 84 месяцев",
         )
     if status not in ("approved", "counter_offer", "declined"):
         raise HTTPException(status_code=400, detail="некорректный статус заявки")
@@ -224,7 +246,7 @@ def _validate_credit_application(payload: dict) -> dict:
     if rate_pct is not None and rate_pct < 0:
         raise HTTPException(status_code=400, detail="ставка не может быть отрицательной")
 
-    return {
+    application = {
         "client_id": client_id,
         "amount_rub": amount_rub,
         "term_months": term_months,
@@ -234,15 +256,29 @@ def _validate_credit_application(payload: dict) -> dict:
         "monthly_payment_rub": monthly_payment_rub,
         "explanation": explanation,
     }
+    for optional_field in (
+        "decision",
+        "reason",
+        "title",
+        "next_step",
+        "product_type",
+        "product_name",
+        "source",
+        "client_snapshot",
+    ):
+        if optional_field in payload:
+            application[optional_field] = payload[optional_field]
+    return application
 
 
 @app.post("/credit-applications")
 async def create_credit_application(payload: dict) -> dict:
     application = _validate_credit_application(payload)
-    application["application_id"] = f"ca-{len(_credit_applications) + 1:06d}"
-    application["created_at"] = datetime.now().replace(microsecond=0).isoformat()
-    _credit_applications.append(application)
-    _save_credit_application(application)
+    with _credit_applications_lock:
+        application["application_id"] = _next_credit_application_id()
+        application["created_at"] = datetime.now().replace(microsecond=0).isoformat()
+        _credit_applications.append(application)
+        _save_credit_application(application)
     return application
 
 
