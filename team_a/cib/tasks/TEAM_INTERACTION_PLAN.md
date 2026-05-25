@@ -324,6 +324,14 @@ Retail начинает только после CIB gate и backend gate. Нуж
 - не ломать проверяемый судьёй кредитный путь, переводы, инвестиции и
   casino/slot.
 
+Статус retail по RaifCoin Tap:
+
+- ждём backend gate: в backend ещё должны появиться `POST /raifcoin/sessions`,
+  `POST /raifcoin/taps`, `GET /raifcoin/balance/{client_id}` и профильный
+  `raifcoin_rating_boost`;
+- retail не добавляет экран RaifCoin до готовности backend, чтобы не ломать
+  текущие рабочие кредиты, переводы, инвестиции и casino/slot.
+
 Минимальный общий gate перед релизом RaifCoin Tap:
 
 - сильный клиент может пройти tap-сессию и получить `RaifCoin`;
