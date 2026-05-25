@@ -337,6 +337,28 @@
         <div id="invest-total" style="font-size:13px;color:var(--text-2);margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)"></div>
       </div>
 
+      <div class="section-title">Подобрать портфель</div>
+      <form id="invest-recommend-form" autocomplete="off" style="margin-bottom:20px">
+        <div class="form-row">
+          <label>Сумма, ₽</label>
+          <input name="amount" type="number" min="1000" placeholder="100000" />
+        </div>
+        <div class="form-row">
+          <label>На сколько месяцев</label>
+          <input name="term_months" type="number" min="1" max="360" placeholder="12" />
+        </div>
+        <div class="form-row">
+          <label>Отношение к риску</label>
+          <select name="risk_level">
+            <option value="low">Низкий — хочу сохранить</option>
+            <option value="medium" selected>Умеренный — баланс</option>
+            <option value="high">Высокий — готов рисковать</option>
+          </select>
+        </div>
+        <button class="btn primary" type="submit">Подобрать</button>
+      </form>
+      <div id="invest-recommend-result" style="margin-bottom:16px"></div>
+
       <div class="section-title">Доступные инструменты</div>
       <div id="invest-products"></div>
 
@@ -1022,6 +1044,53 @@
           const opt = sel.selectedOptions[0];
           if (opt) renderInvest(opt.value);
         });
+      }
+    });
+
+    // ---- форма подбора инвестиций ----
+    document.getElementById("invest-recommend-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const opt = sel.selectedOptions[0];
+      const resultBox = document.getElementById("invest-recommend-result");
+      if (!opt) { resultBox.innerHTML = `<div class="alert error">выбери клиента вверху</div>`; return; }
+      const data = new FormData(ev.target);
+      const amount = +data.get("amount");
+      const term_months = +data.get("term_months");
+      if (!amount || amount <= 0) { resultBox.innerHTML = `<div class="alert error">Укажи сумму</div>`; return; }
+      if (!term_months || term_months <= 0) { resultBox.innerHTML = `<div class="alert error">Укажи срок</div>`; return; }
+      resultBox.innerHTML = `<div class="alert info">Подбираем портфель...</div>`;
+      const payload = {
+        client_id: opt.value,
+        amount_rub: amount,
+        term_months: term_months,
+        risk_level: data.get("risk_level"),
+      };
+      try {
+        const r = await fetch("/api/invest/recommend", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          const products = (d.products || []).map(p =>
+            `<div class="tx-row">
+              <div><div class="desc">${p.name || p.id}</div></div>
+              <div class="amt plus">${p.share_pct}%</div>
+            </div>`
+          ).join("");
+          resultBox.innerHTML = `
+            <div style="border:1px solid var(--rule);border-radius:8px;padding:14px">
+              ${d.comment ? `<div style="font-size:13px;margin-bottom:10px">${d.comment}</div>` : ""}
+              ${products}
+            </div>`;
+        } else if (r.status === 502) {
+          resultBox.innerHTML = `<div class="alert info">Коллеги ещё готовят эту функцию — скоро появится</div>`;
+        } else {
+          resultBox.innerHTML = `<div class="alert error">${d.detail || "ошибка"}</div>`;
+        }
+      } catch(e) {
+        resultBox.innerHTML = `<div class="alert error">сервер не ответил</div>`;
       }
     });
 
