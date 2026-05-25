@@ -30,7 +30,14 @@ INVESTMENT_ORDERS_PATH = Path(
         Path(__file__).resolve().parents[1] / "data" / "investment_orders.jsonl",
     )
 )
-ALLOWED_INVESTMENT_TICKERS = {"SBRF", "VTBR", "ROSN", "SIBN"}
+INVESTMENT_INSTRUMENTS = {
+    "SBRF": {"name": "Сбербанк", "currency": "RUB", "lot_size": 1},
+    "VTBR": {"name": "ВТБ", "currency": "RUB", "lot_size": 1000},
+    "ROSN": {"name": "Роснефть", "currency": "RUB", "lot_size": 1},
+    "SIBN": {"name": "Газпром нефть", "currency": "RUB", "lot_size": 1},
+}
+ALLOWED_INVESTMENT_TICKERS = set(INVESTMENT_INSTRUMENTS)
+INVESTMENT_COMMISSION_RATE = 0.003
 
 
 def _find_seed_dir() -> Path | None:
@@ -349,6 +356,10 @@ def _validate_investment_order(payload: dict) -> dict[str, Any]:
     if side != "buy":
         raise HTTPException(status_code=400, detail="сейчас поддерживается только покупка")
 
+    trade_rules = _investment_trade_rules(ticker, payload.get("trade_rules"))
+    if side not in trade_rules["allowed_sides"]:
+        raise HTTPException(status_code=400, detail="эта операция недоступна для инструмента")
+
     status = str(payload.get("status") or "executed").strip().lower()
     if status not in {"quoted", "executed", "rejected", "cancelled"}:
         raise HTTPException(status_code=400, detail="некорректный статус инвестиционной заявки")
@@ -363,12 +374,28 @@ def _validate_investment_order(payload: dict) -> dict[str, Any]:
 
     if quantity <= 0:
         raise HTTPException(status_code=400, detail="укажи положительное количество акций")
+    min_quantity = int(trade_rules["min_quantity"])
+    quantity_step = int(trade_rules["quantity_step"])
+    if quantity < min_quantity:
+        raise HTTPException(status_code=400, detail=f"минимальное количество: {min_quantity}")
+    if quantity_step > 0 and (quantity - min_quantity) % quantity_step != 0:
+        raise HTTPException(status_code=400, detail=f"количество должно идти шагом {quantity_step}")
     if price_rub <= 0:
         raise HTTPException(status_code=400, detail="укажи положительную цену")
     if amount_rub <= 0:
         amount_rub = round(quantity * price_rub, 2)
     if commission_rub < 0:
         raise HTTPException(status_code=400, detail="комиссия не может быть отрицательной")
+    try:
+        total_rub = round(float(payload.get("total_rub") or amount_rub + commission_rub), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="некорректный итог сделки")
+    if total_rub < round(amount_rub + commission_rub, 2):
+        raise HTTPException(status_code=400, detail="итог сделки меньше суммы и комиссии")
+    if status == "executed":
+        cash_balance = _build_investment_portfolio(client_id)["cash_balance_rub"]
+        if total_rub > cash_balance:
+            raise HTTPException(status_code=400, detail="недостаточно свободных средств для покупки")
 
     explanation = str(payload.get("explanation") or "").strip()
     if not explanation:
@@ -385,18 +412,57 @@ def _validate_investment_order(payload: dict) -> dict[str, Any]:
         "price_rub": round(price_rub, 4),
         "amount_rub": round(amount_rub, 2),
         "commission_rub": round(commission_rub, 2),
+        "total_rub": total_rub,
         "status": status,
         "explanation": explanation,
+        "instrument_name": INVESTMENT_INSTRUMENTS[ticker]["name"],
+        "currency": trade_rules["settlement_currency"],
+        "trade_rules": trade_rules,
     }
     for optional_field in (
-        "total_rub",
-        "instrument_name",
         "risk_level",
         "source",
+        "instrument",
+        "decision",
+        "next_step",
     ):
         if optional_field in payload:
             order[optional_field] = payload[optional_field]
     return order
+
+
+def _investment_trade_rules(
+    ticker: str,
+    payload_rules: Any,
+) -> dict[str, Any]:
+    instrument = INVESTMENT_INSTRUMENTS[ticker]
+    rules = payload_rules if isinstance(payload_rules, dict) else {}
+    allowed_sides = rules.get("allowed_sides") if isinstance(rules.get("allowed_sides"), list) else ["buy"]
+    allowed_sides = [str(side).lower() for side in allowed_sides]
+    try:
+        min_quantity = int(rules.get("min_quantity") or 1)
+        quantity_step = int(rules.get("quantity_step") or 1)
+        lot_size = int(rules.get("lot_size") or instrument["lot_size"])
+        commission_rate = float(rules.get("commission_rate") or INVESTMENT_COMMISSION_RATE)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="некорректные правила сделки")
+    settlement_currency = str(rules.get("settlement_currency") or instrument["currency"]).upper()
+    if min_quantity <= 0 or quantity_step <= 0 or lot_size <= 0:
+        raise HTTPException(status_code=400, detail="некорректный шаг или минимум сделки")
+    if commission_rate < 0:
+        raise HTTPException(status_code=400, detail="комиссия не может быть отрицательной")
+    if settlement_currency != instrument["currency"]:
+        raise HTTPException(status_code=400, detail="некорректная валюта расчёта")
+    return {
+        "allowed_sides": allowed_sides,
+        "quantity_unit": str(rules.get("quantity_unit") or "share"),
+        "min_quantity": min_quantity,
+        "quantity_step": quantity_step,
+        "lot_size": lot_size,
+        "supports_fractional": bool(rules.get("supports_fractional", False)),
+        "commission_rate": commission_rate,
+        "settlement_currency": settlement_currency,
+    }
 
 
 def _investment_orders_for_client(client_id: str) -> list[dict[str, Any]]:
@@ -419,6 +485,7 @@ def _build_investment_portfolio(client_id: str) -> dict[str, Any]:
         quantity = int(order.get("quantity") or 0)
         amount = float(order.get("amount_rub") or 0)
         commission = float(order.get("commission_rub") or 0)
+        total = float(order.get("total_rub") or amount + commission)
         if quantity <= 0:
             continue
         position = positions_by_ticker.setdefault(
@@ -427,7 +494,7 @@ def _build_investment_portfolio(client_id: str) -> dict[str, Any]:
         )
         position["quantity"] += quantity
         position["cost_rub"] += amount
-        invested_total += amount + commission
+        invested_total += total
 
     positions = []
     for position in positions_by_ticker.values():
