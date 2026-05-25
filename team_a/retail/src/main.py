@@ -105,6 +105,16 @@ def _default_amount(client: dict[str, Any]) -> int:
     return max(50_000, min(income * (3 if is_business else 5), 2_500_000 if is_business else 1_500_000))
 
 
+def _rub(amount: int | float | None) -> str:
+    return f"{int(amount or 0):,}".replace(",", " ")
+
+
+def _risk_text(client: dict[str, Any]) -> str:
+    risk = float(client.get("risk_score") or 0)
+    overdue = "есть прошлые просрочки" if client.get("has_overdue_history") else "просрочек не видно"
+    return f"риск-профиль {round(risk * 100, 1)}%, {overdue}"
+
+
 def _local_credit_decision(client: dict[str, Any], amount: int, months: int) -> dict[str, Any]:
     income = int(client.get("income_rub") or 0)
     balance = int(client.get("balance_rub") or 0)
@@ -231,15 +241,36 @@ def _decorate_credit_decision(
             "declined": "Сейчас лучше не увеличивать нагрузку",
         }.get(status, "Решение по заявке")
 
-    explanation = (decision.get("explanation") or "").strip()
-    if len(explanation) < 120:
-        explanation = (
-            f"{explanation} " if explanation else ""
-        ) + (
-            "Решение учитывает доход, баланс, кредитный профиль и комфортную долговую нагрузку. "
-            "Мы показываем сумму, ставку, платеж и статус сразу, чтобы клиент понимал условия "
-            "до подтверждения и мог вернуться к заявке в истории."
+    requested_payment = monthly_payment
+    if requested_payment <= 0 and rate:
+        monthly_rate = rate / 100 / 12
+        requested_payment = int(amount * monthly_rate / (1 - (1 + monthly_rate) ** (-months)))
+    income = int(client.get("income_rub") or 0)
+    balance = int(client.get("balance_rub") or 0)
+    payment_share = round((requested_payment / income) * 100, 1) if income > 0 and requested_payment else 0
+    base_explanation = (decision.get("explanation") or decision.get("reason") or "").strip()
+    explanation = (
+        f"{title}. Запрошено {_rub(amount)} ₽ на {months} мес.; ориентировочный платеж "
+        f"{_rub(requested_payment)} ₽, это {payment_share}% от регулярного дохода "
+        f"{_rub(income)} ₽. На счете {_rub(balance)} ₽, {_risk_text(client)}. "
+    )
+    if status == "approved":
+        explanation += (
+            "Поэтому условия выглядят комфортными: у клиента остается запас на повседневные "
+            "расходы, а ставка и срок понятны до подтверждения заявки. "
         )
+    elif status == "counter_offer":
+        explanation += (
+            "Полная сумма может перегрузить бюджет, поэтому предлагаем меньший лимит с более "
+            "устойчивым платежом и сохраняем заявку, чтобы клиент мог вернуться к условиям. "
+        )
+    else:
+        explanation += (
+            "Мы не рекомендуем выдавать новый долг на таких условиях: сначала лучше снизить "
+            "нагрузку или выбрать меньшую сумму, чтобы не ухудшить финансовое положение клиента. "
+        )
+    if base_explanation:
+        explanation += base_explanation
 
     return {
         "status": status,
@@ -292,7 +323,7 @@ async def _try_save_credit_application(application: dict[str, Any]) -> dict[str,
     try:
         return await _backend_post("/credit-applications", application)
     except HTTPException as exc:
-        if exc.status_code == 404:
+        if exc.status_code in {400, 404}:
             return None
         raise
 
@@ -363,8 +394,8 @@ async def api_credit_apply(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="клиент не выбран")
     if amount <= 0:
         raise HTTPException(status_code=400, detail="укажи сумму")
-    if months not in {12, 24, 36, 48, 60}:
-        raise HTTPException(status_code=400, detail="выбери срок")
+    if months < 3 or months > 84:
+        raise HTTPException(status_code=400, detail="выбери срок от 3 до 84 месяцев")
 
     client = await _backend_get(f"/clients/{client_id}")
     decision = await _credit_decision(client, amount, months)
@@ -383,6 +414,9 @@ async def api_credit_apply(payload: dict) -> dict:
     saved = await _try_save_credit_application(application)
     return {
         "client": _client_brief(client),
+        "status": decision["status"],
+        "explanation": decision["explanation"],
+        "reason": decision["explanation"],
         "decision": decision,
         "saved_application": saved,
         "storage": "saved" if saved else "backend_not_ready",
