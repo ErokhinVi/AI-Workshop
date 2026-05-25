@@ -289,37 +289,41 @@ class DecideRequest(BaseModel):
 
 @app.post("/credit/decide", summary="Кредитное решение по заявке")
 async def credit_decide(req: DecideRequest) -> dict:
-    # Тянем реальные данные клиента из backend
-    client_data: dict = {}
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{BACKEND_URL}/clients/{req.client_id}")
-            if r.status_code == 200:
-                client_data = r.json()
-    except Exception:
-        pass
+    # Оба запроса в backend параллельно, таймаут 3 сек каждый
+    async def _fetch_client(c: httpx.AsyncClient) -> dict:
+        try:
+            r = await c.get(f"{BACKEND_URL}/clients/{req.client_id}")
+            return r.json() if r.status_code == 200 else {}
+        except Exception:
+            return {}
 
-    # Кредитная история из backend (если ручка есть)
+    async def _fetch_history(c: httpx.AsyncClient) -> list:
+        try:
+            r = await c.get(f"{BACKEND_URL}/clients/{req.client_id}/credit-history")
+            return r.json().get("items", []) if r.status_code == 200 else []
+        except Exception:
+            return []
+
+    import asyncio
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        client_data, history_items = await asyncio.gather(
+            _fetch_client(client), _fetch_history(client)
+        )
+
     credit_history: list[CreditHistoryItem] = []
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{BACKEND_URL}/clients/{req.client_id}/credit-history")
-            if r.status_code == 200:
-                for item in r.json().get("items", []):
-                    try:
-                        credit_history.append(CreditHistoryItem(
-                            product=item.get("product", ""),
-                            amount_rub=float(item.get("principal_rub", 0)),
-                            term_months=int(item.get("term_months", 12)),
-                            rate_pct=float(item.get("rate_pct", 0)),
-                            opened_date=item.get("opened_at", "2020-01-01"),
-                            status=item.get("status", "active"),
-                            max_overdue_days=int(item.get("overdue_days_max", 0)),
-                        ))
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+    for item in history_items:
+        try:
+            credit_history.append(CreditHistoryItem(
+                product=item.get("product", ""),
+                amount_rub=float(item.get("principal_rub", 0)),
+                term_months=int(item.get("term_months", 12)),
+                rate_pct=float(item.get("rate_pct", 0)),
+                opened_date=item.get("opened_at", "2020-01-01"),
+                status=item.get("status", "active"),
+                max_overdue_days=int(item.get("overdue_days_max", 0)),
+            ))
+        except Exception:
+            pass
 
     # Если данных нет — строим историю из флага has_overdue_history
     if not credit_history and client_data.get("has_overdue_history"):
