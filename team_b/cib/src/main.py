@@ -166,26 +166,46 @@ def _score_request(req: ScoringRequest) -> ScoringResponse:
     reason = ""
 
     if decision == "approved":
-        # Корректируем сумму под нагрузку
-        if pti > 0.40:
+        base_rate = product.get("rate_pct", 16.0) if product else 16.0
+        max_term = product.get("term_months_max", 12) if product else 12
+        product_kind = product.get("kind", "credit") if product else "credit"
+
+        # Индивидуальная ставка: чем выше скор — тем ниже ставка
+        if score >= 80:
+            offered_rate = base_rate - 2.0
+        elif score >= 65:
+            offered_rate = base_rate - 1.0
+        elif score >= 50:
+            offered_rate = base_rate
+        else:
+            offered_rate = base_rate + 2.5
+
+        # Индивидуальная сумма: корректируем под реальную долговую нагрузку
+        max_affordable = req.monthly_income_rub * 0.40 * max_term
+        if product_kind == "credit" and req.amount_rub > max_affordable:
+            offered_amount = round(max_affordable / 10000) * 10000
+        elif pti > 0.40:
             offered_amount = req.amount_rub * 0.75
         else:
             offered_amount = req.amount_rub
 
-        # Ставка зависит от скора
-        base_rate = product.get("rate_pct", 16.0) if product else 16.0
-        if score >= 80:
-            offered_rate = base_rate - 1.5
-        elif score >= 60:
-            offered_rate = base_rate
+        # Индивидуальный срок: premium получает максимум, mass — пропорционально скору
+        if req.segment == "premium":
+            offered_term = max_term
+        elif score >= 70:
+            offered_term = max_term
+        elif score >= 55:
+            offered_term = max(12, int(max_term * 0.75))
         else:
-            offered_rate = base_rate + 2.0
+            offered_term = max(12, int(max_term * 0.5))
 
-        offered_term = product.get("term_months_max", 12) if product else 12
+        product_name = product.get("name", "кредит") if product else "кредит"
         reason = (
             f"Заявка одобрена. Скоринговый балл {score} из 100. "
-            f"Предлагаем {offered_amount:,.0f} ₽ на {offered_term} мес. "
-            f"по ставке {offered_rate:.1f}% годовых."
+            f"Продукт: {product_name}. "
+            f"Индивидуальные условия для вас: {offered_amount:,.0f} ₽ "
+            f"на {offered_term} мес. по ставке {offered_rate:.1f}% годовых "
+            f"(базовая ставка по продукту — {base_rate:.1f}%)."
         )
     else:
         factors = []
@@ -224,10 +244,24 @@ async def _humanize_reason(decision: str, reason: str, score: int,
     """Просим ИИ переформулировать решение живым человеческим языком."""
     from src.llm import ask_llm, LLMError
     if decision == "approved":
+        base_rate = req.score_breakdown.get("base_rate") if req and hasattr(req, "score_breakdown") else None
+        product_name = ""
+        if req:
+            p = next((p for p in PRODUCTS if p["id"] == getattr(req, "product_id", "")), None)
+            product_name = p.get("name", "") if p else ""
+            base_rate = p.get("rate_pct") if p else None
+        rate_note = ""
+        if base_rate and offered_rate and offered_rate < base_rate:
+            rate_note = f" (это на {base_rate - offered_rate:.1f}% ниже стандартной ставки по этому продукту — ваш хороший скоринговый балл позволил снизить её специально для вас)"
         prompt = (
-            f"Ты сотрудник банка. Напиши клиенту короткое радостное сообщение об одобрении кредита. "
-            f"Сумма: {offered_amount:,.0f} ₽, срок: {offered_term} мес., ставка: {offered_rate:.1f}% годовых. "
-            f"Пиши тепло, по-человечески, без канцелярита. Одним абзацем, не длиннее 3 предложений. Только русский язык."
+            f"Ты сотрудник банка. Напиши клиенту тёплое сообщение об одобрении кредита. "
+            f"Продукт: {product_name or 'кредит'}. "
+            f"Индивидуальные условия: сумма {offered_amount:,.0f} ₽, срок {offered_term} мес., "
+            f"ставка {offered_rate:.1f}% годовых{rate_note}. "
+            f"Скоринговый балл клиента: {score} из 100. "
+            f"Подчеркни, что условия рассчитаны персонально на основе его финансового профиля, "
+            f"а не стандартные. Пиши тепло, без канцелярита. "
+            f"Два-три предложения. Только русский язык."
         )
     else:
         # Собираем конкретные цифры клиента для полезного объяснения
