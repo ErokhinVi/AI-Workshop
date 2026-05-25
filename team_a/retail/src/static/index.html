@@ -661,6 +661,13 @@
             <div class="empty">Портфель появится после первой сделки</div>
           </div>
         </div>
+
+        <div class="history-card">
+          <div class="section-title">История сделок</div>
+          <div id="investment-order-list" class="history-list">
+            <div class="empty">Сделки появятся после первой покупки</div>
+          </div>
+        </div>
       </section>
 
       <section class="pane" data-pane="profile">
@@ -754,6 +761,7 @@
     const investmentCommission = document.getElementById("investment-commission");
     const investmentResult = document.getElementById("investment-result");
     const portfolioList = document.getElementById("portfolio-list");
+    const investmentOrderList = document.getElementById("investment-order-list");
     const investmentQuantity = document.getElementById("investment-quantity");
     let currentTerm = 24;
     let currentClient = null;
@@ -817,6 +825,7 @@
       await loadOffer(opt.value);
       await loadInvestments();
       await loadPortfolio(opt.value);
+      await loadInvestmentOrders(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
@@ -942,6 +951,26 @@
       }
     }
 
+    async function loadInvestmentOrders(clientId) {
+      try {
+        const r = await fetch(`/api/investments/orders/${clientId}`);
+        const d = await r.json();
+        const items = d.items || [];
+        if (!items.length) {
+          investmentOrderList.innerHTML = `<div class="empty">Сделки появятся после первой покупки</div>`;
+          return;
+        }
+        investmentOrderList.innerHTML = items.slice(0, 5).map(item =>
+          `<div class="history-row">
+            <strong>${item.ticker} · ${investmentStatusLabel(item.status)}</strong><br/>
+            ${fmt.format(item.quantity || 0)} шт. · сумма ${fmt.format(item.amount_rub || 0)} ₽ · комиссия ${fmt.format(item.commission_rub || 0)} ₽
+          </div>`
+        ).join("");
+      } catch(e) {
+        investmentOrderList.innerHTML = `<div class="empty">История сделок пока недоступна</div>`;
+      }
+    }
+
     async function requestInvestmentQuote() {
       const opt = sel.selectedOptions[0];
       if (!opt || !selectedInstrument) return null;
@@ -964,6 +993,10 @@
 
     function riskLabel(risk) {
       return ({ low: "низкий", medium: "средний", high: "высокий" })[risk] || risk || "средний";
+    }
+
+    function investmentStatusLabel(status) {
+      return ({ executed: "исполнено", quoted: "рассчитано", rejected: "отклонено" })[status] || "в обработке";
     }
 
     async function loadOffer(clientId) {
@@ -1147,6 +1180,7 @@
         investmentResult.innerHTML =
           `<div class="alert ok"><strong>Покупка исполнена</strong>${d.explanation}<br/>Статус: ${d.storage === "saved" ? "сохранено в портфеле" : "ожидаем хранение backend"}</div>`;
         await loadPortfolio(opt.value);
+        await loadInvestmentOrders(opt.value);
       } catch(e) {
         investmentResult.innerHTML = `<div class="alert error">${e.message || "сервер не ответил"}</div>`;
       }

@@ -467,6 +467,15 @@ async def _try_get_investment_portfolio(client_id: str) -> dict[str, Any]:
         raise
 
 
+async def _try_get_investment_orders(client_id: str) -> dict[str, Any]:
+    try:
+        return await _backend_get("/investment-orders", {"client_id": client_id, "limit": 5})
+    except HTTPException as exc:
+        if exc.status_code in {400, 404, 405, 502}:
+            return {"client_id": client_id, "total": 0, "items": [], "storage": "backend_not_ready"}
+        raise
+
+
 @app.get("/clients")
 async def list_clients(request: Request) -> dict:
     return await _backend_get("/clients", dict(request.query_params))
@@ -566,6 +575,11 @@ async def api_investment_instruments() -> dict:
 @app.get("/api/investments/portfolio/{client_id}")
 async def api_investment_portfolio(client_id: str) -> dict:
     return await _try_get_investment_portfolio(client_id)
+
+
+@app.get("/api/investments/orders/{client_id}")
+async def api_investment_orders(client_id: str) -> dict:
+    return await _try_get_investment_orders(client_id)
 
 
 @app.post("/api/investments/quote")
