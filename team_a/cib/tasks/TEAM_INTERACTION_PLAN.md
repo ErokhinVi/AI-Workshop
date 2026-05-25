@@ -6,6 +6,11 @@
 `working`, закрывать все 10 критериев рубрики, не ломать переводы и наращивать
 клиентскую базу после каждого значимого проверенного релиза.
 
+Кредитная функция остаётся обязательной базой. Следующая добавочная функция
+команды A — инвестиции: клиент в retail может купить акции `SBRF`, `VTBR`,
+`ROSN`, `SIBN`, CIB отдаёт каталог инструментов и расчёт сделки, backend хранит
+портфель и заявки.
+
 Текущее состояние на 2026-05-25 12:23 UTC: команда A впереди, client base
 `1043` против `835` у команды B, score `20/20`, feature state `working`.
 Главный риск дальше — регрессия одного из трёх блоков, потеря скорости ответа
@@ -47,6 +52,22 @@
   ниже;
 - максимум держится только когда все три блока одновременно проходят критерии
   судьи.
+
+## Стратегия: кредит не ломаем, инвестиции добавляем
+
+На 2026-05-25 закрытая probe-рубрика симулятора всё ещё проверяет кредитный
+сценарий. Поэтому инвестиции нельзя делать через замену кредитных ручек,
+переименование существующих полей или изменение текущего клиентского пути.
+
+Правильная стратегия:
+
+- сохранить кредитные endpoints и UI без регрессий;
+- добавить инвестиционные endpoints рядом с кредитными;
+- в CIB добавить акции как отдельные инвестиционные продукты;
+- в backend добавить хранение инвестиционных заявок и портфеля;
+- в retail добавить вкладку или блок "Инвестиции" с покупкой четырёх тикеров;
+- после каждого релиза проверять и кредитный 20/20, и новый инвестиционный
+  сценарий.
 
 ## Как судья проверяет команду
 
@@ -126,6 +147,58 @@ Backend должен хранить заявки:
 `storage = "saved"` и сохраняет заявку в backend. В дальнейших релизах это нужно
 проверять, потому что судья использует именно срок 6 месяцев для слабого клиента.
 
+Для инвестиций backend должен хранить портфель и заявки.
+
+`GET /investment-portfolio/{client_id}`
+
+Должен возвращать:
+
+```json
+{
+  "client_id": "c-01394",
+  "cash_balance_rub": 250000,
+  "positions": [
+    {
+      "ticker": "SBRF",
+      "quantity": 10,
+      "avg_price_rub": 290.5,
+      "market_value_rub": 2905
+    }
+  ]
+}
+```
+
+`POST /investment-orders`
+
+```json
+{
+  "client_id": "c-01394",
+  "ticker": "SBRF",
+  "side": "buy",
+  "quantity": 10,
+  "price_rub": 290.5,
+  "amount_rub": 2905,
+  "commission_rub": 8.72,
+  "status": "executed",
+  "explanation": "Куплено 10 акций SBRF по ориентировочной цене 290.5 ₽."
+}
+```
+
+`GET /investment-orders`
+
+Должен возвращать:
+
+```json
+{
+  "total": 1,
+  "items": []
+}
+```
+
+Backend должен принимать только тикеры `SBRF`, `VTBR`, `ROSN`, `SIBN`, проверять
+положительное `quantity`, сохранять `status`, `amount_rub`, `commission_rub` и
+человеческое `explanation`.
+
 ## CIB
 
 CIB должен отдавать кредитный продукт:
@@ -161,6 +234,86 @@ CIB должен принимать решение:
 Для отказа слабому клиенту CIB должен возвращать длинное объяснение с цифрами:
 доход, платёж, долговая нагрузка, просрочки, риск-скор и рекомендация.
 
+Для инвестиций CIB должен отдавать каталог доступных акций и расчёт покупки.
+
+`GET /investments/instruments`
+
+Должен возвращать:
+
+```json
+{
+  "total": 4,
+  "items": [
+    {
+      "ticker": "SBRF",
+      "name": "Сбербанк",
+      "kind": "stock",
+      "currency": "RUB",
+      "price_rub": 290.5,
+      "lot_size": 1,
+      "risk_level": "medium"
+    },
+    {
+      "ticker": "VTBR",
+      "name": "ВТБ",
+      "kind": "stock",
+      "currency": "RUB",
+      "price_rub": 0.025,
+      "lot_size": 1000,
+      "risk_level": "high"
+    },
+    {
+      "ticker": "ROSN",
+      "name": "Роснефть",
+      "kind": "stock",
+      "currency": "RUB",
+      "price_rub": 580.0,
+      "lot_size": 1,
+      "risk_level": "medium"
+    },
+    {
+      "ticker": "SIBN",
+      "name": "Газпром нефть",
+      "kind": "stock",
+      "currency": "RUB",
+      "price_rub": 760.0,
+      "lot_size": 1,
+      "risk_level": "medium"
+    }
+  ]
+}
+```
+
+`POST /investments/quote`
+
+```json
+{
+  "client_id": "c-01394",
+  "ticker": "SBRF",
+  "side": "buy",
+  "quantity": 10
+}
+```
+
+Ответ CIB:
+
+```json
+{
+  "status": "quoted",
+  "ticker": "SBRF",
+  "side": "buy",
+  "quantity": 10,
+  "price_rub": 290.5,
+  "amount_rub": 2905,
+  "commission_rub": 8.72,
+  "total_rub": 2913.72,
+  "explanation": "Покупка 10 акций SBRF рассчитана по ориентировочной цене 290.5 ₽ за акцию. Комиссия 0.3%, итог к списанию 2913.72 ₽."
+}
+```
+
+CIB должен отклонять неизвестный тикер понятной ошибкой, не использовать LLM в
+критическом пути покупки и отвечать быстро.
+
 ## Retail
 
 Retail должен:
@@ -172,6 +325,27 @@ Retail должен:
 - возвращать клиенту `explanation` из CIB без сокращения;
 - сохранять итог в backend через `POST /credit-applications`;
 - не ломать переводы.
+
+Для инвестиций retail должен:
+
+- показывать раздел "Инвестиции";
+- показывать четыре акции: `SBRF`, `VTBR`, `ROSN`, `SIBN`;
+- давать клиенту выбрать тикер и количество;
+- получать расчёт через CIB `POST /investments/quote`;
+- после подтверждения сохранять сделку в backend через `POST /investment-orders`;
+- показывать клиенту статус, сумму сделки, комиссию и понятное объяснение;
+- показывать портфель через backend `GET /investment-portfolio/{client_id}`;
+- не ломать кредиты и переводы.
+
+Минимальный клиентский сценарий:
+
+1. Клиент открывает retail.
+2. Выбирает "Инвестиции".
+3. Выбирает `SBRF`, `VTBR`, `ROSN` или `SIBN`.
+4. Вводит количество.
+5. Видит расчёт цены и комиссии.
+6. Подтверждает покупку.
+7. Видит, что заявка исполнена и появилась в портфеле.
 
 ## Быстрая проверка перед релизом
 
@@ -190,6 +364,19 @@ curl -fsS -X POST https://raif-a-retail.onrender.com/api/credit-apply \
   -H 'Content-Type: application/json' \
   -d '{"client_id":"c-01434","amount_rub":900000,"term_months":6}'
 curl -fsS https://raif-simulator.onrender.com/state
+```
+
+Проверить инвестиции:
+
+```bash
+curl -fsS https://raif-a-cib.onrender.com/investments/instruments
+curl -fsS -X POST https://raif-a-cib.onrender.com/investments/quote \
+  -H 'Content-Type: application/json' \
+  -d '{"client_id":"c-01394","ticker":"SBRF","side":"buy","quantity":10}'
+curl -fsS -X POST https://raif-a-retail.onrender.com/api/investments/buy \
+  -H 'Content-Type: application/json' \
+  -d '{"client_id":"c-01394","ticker":"SBRF","quantity":10}'
+curl -fsS https://raif-a-backend.onrender.com/investment-portfolio/c-01394
 ```
 
 На табло должно быть:
