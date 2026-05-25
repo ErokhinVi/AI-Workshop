@@ -256,8 +256,22 @@
       </form>
       <div id="transfer-result"></div>
 
-      <div class="section-title" style="margin-top:24px">Последние операции</div>
+      <div class="section-title" style="margin-top:24px">История операций</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="tx-search" placeholder="поиск..." style="flex:1;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;font-family:inherit;font-size:13px;background:var(--bg);color:var(--text)" />
+        <select id="tx-filter" style="padding:8px 10px;border:1px solid var(--rule);border-radius:6px;font-family:inherit;font-size:13px;background:var(--bg);color:var(--text)">
+          <option value="">Все</option>
+          <option value="transfer_in">Входящие</option>
+          <option value="transfer_out">Исходящие</option>
+          <option value="card_purchase">Карта</option>
+          <option value="atm_withdraw">Банкомат</option>
+          <option value="salary">Зарплата</option>
+          <option value="utility_payment">Коммунальные</option>
+        </select>
+      </div>
+      <div id="tx-count" style="font-size:11px;color:var(--muted);margin-bottom:8px"></div>
       <div id="tx-list" class="tx-list"></div>
+      <button id="tx-load-more" style="display:none;width:100%;margin-top:12px;padding:10px;background:transparent;border:1px solid var(--rule);border-radius:6px;font-family:inherit;font-size:13px;color:var(--text-2);cursor:pointer">Показать ещё</button>
     </div>
     <div class="tab-pane" data-pane="credits">
       <div id="credit-products-list">
@@ -342,32 +356,68 @@
     }
     sel.addEventListener("change", onPickClient);
 
-    // ---- последние операции ----
+    // ---- история операций ----
+    let allTx = [];
+    const PAGE = 20;
+    let txPage = 0;
+
+    function renderTx() {
+      const search = (document.getElementById("tx-search").value || "").toLowerCase();
+      const filter = document.getElementById("tx-filter").value;
+      const filtered = allTx.filter(t => {
+        if (filter && t.type !== filter) return false;
+        if (search && !typeLabel(t.type).toLowerCase().includes(search) &&
+            !(t.ts || "").includes(search) &&
+            !String(Math.abs(t.amount_rub)).includes(search)) return false;
+        return true;
+      });
+      const visible = filtered.slice(0, (txPage + 1) * PAGE);
+      const countEl = document.getElementById("tx-count");
+      const moreBtn = document.getElementById("tx-load-more");
+      countEl.textContent = filtered.length ? `Показано ${visible.length} из ${filtered.length}` : "";
+      if (!filtered.length) {
+        txList.innerHTML = `<div class="empty">Ничего не найдено</div>`;
+        moreBtn.style.display = "none";
+        return;
+      }
+      txList.innerHTML = visible.map(t => {
+        const sign = t.amount_rub >= 0 ? "plus" : "minus";
+        const amt = (t.amount_rub >= 0 ? "+" : "−") + fmt.format(Math.abs(t.amount_rub));
+        const niceTs = t.ts.replace("T", " ").slice(0, 16);
+        return `<div class="tx-row">
+          <div>
+            <div class="desc">${typeLabel(t.type)}</div>
+            <div class="ts">${niceTs}</div>
+          </div>
+          <div class="amt ${sign}">${amt} ₽</div>
+        </div>`;
+      }).join("");
+      moreBtn.style.display = visible.length < filtered.length ? "" : "none";
+    }
+
     async function loadTx(clientId) {
+      txList.innerHTML = `<div class="empty">Загружаем...</div>`;
+      allTx = [];
+      txPage = 0;
       try {
-        const r = await fetch(`/transactions/${clientId}?limit=10`);
+        const r = await fetch(`/transactions/${clientId}?limit=500`);
         const d = await r.json();
-        const items = d.items || [];
-        if (!items.length) {
+        allTx = d.items || [];
+        if (!allTx.length) {
           txList.innerHTML = `<div class="empty">Операций пока нет</div>`;
+          document.getElementById("tx-count").textContent = "";
+          document.getElementById("tx-load-more").style.display = "none";
           return;
         }
-        txList.innerHTML = items.map(t => {
-          const sign = t.amount_rub >= 0 ? "plus" : "minus";
-          const amt = (t.amount_rub >= 0 ? "+" : "−") + fmt.format(Math.abs(t.amount_rub));
-          const niceTs = t.ts.replace("T", " ").slice(0, 16);
-          return `<div class="tx-row">
-            <div>
-              <div class="desc">${typeLabel(t.type)}</div>
-              <div class="ts">${niceTs}</div>
-            </div>
-            <div class="amt ${sign}">${amt} ₽</div>
-          </div>`;
-        }).join("");
+        renderTx();
       } catch(e) {
         txList.innerHTML = `<div class="empty">Не удалось загрузить операции</div>`;
       }
     }
+
+    document.getElementById("tx-search").addEventListener("input", () => { txPage = 0; renderTx(); });
+    document.getElementById("tx-filter").addEventListener("change", () => { txPage = 0; renderTx(); });
+    document.getElementById("tx-load-more").addEventListener("click", () => { txPage++; renderTx(); });
 
     function typeLabel(t) {
       return ({
