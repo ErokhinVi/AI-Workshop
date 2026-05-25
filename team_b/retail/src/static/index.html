@@ -149,6 +149,19 @@
       color: var(--muted); font-size: 13px;
     }
 
+    .offer-card {
+      flex: 0 0 160px;
+      background: #1e1c18; border-radius: 10px;
+      padding: 14px; cursor: pointer;
+      border: 1px solid #2e2c28;
+      transition: border-color 160ms;
+    }
+    .offer-card:hover { border-color: var(--raiff); }
+    .offer-card .o-name { font-size: 12px; color: rgba(255,255,255,0.9); font-weight: 500; margin-bottom: 6px; }
+    .offer-card .o-rate { font-size: 20px; font-weight: 600; color: var(--raiff); }
+    .offer-card .o-rate span { font-size: 11px; font-weight: 400; color: rgba(255,255,255,0.4); }
+    .offer-card .o-hint { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 6px; }
+
     .product-card {
       border: 1px solid var(--rule); border-radius: 10px;
       padding: 16px; margin-bottom: 12px; background: var(--surface);
@@ -205,6 +218,11 @@
     <div class="balance">
       <div class="l">остаток на счёте</div>
       <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
+    </div>
+
+    <div id="offers-strip" style="display:none;padding:14px 22px;background:var(--text);border-bottom:1px solid #333;">
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px">Специально для вас</div>
+      <div id="offers-list" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px"></div>
     </div>
 
     <div id="approval-banner" style="display:none;padding:14px 22px;background:#e8f0e2;border-bottom:1px solid #c5ddbf;">
@@ -319,6 +337,8 @@
       balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
       topbarWho.textContent = opt.dataset.name;
       loadTx(opt.value);
+      loadOffers(opt.dataset.segment);
+      updateApprovalBanner(opt.value);
     }
     sel.addEventListener("change", onPickClient);
 
@@ -451,6 +471,45 @@
           <div class="a-status ${statusClass}">${statusLabel}</div>
         </div>`;
       }).join("");
+    }
+
+    // ---- предложения на главном экране ----
+    async function loadOffers(clientSegment) {
+      const strip = document.getElementById("offers-strip");
+      const list = document.getElementById("offers-list");
+      try {
+        const r = await fetch("/api/credit-products");
+        const d = await r.json();
+        const items = (d.items || []).filter(p =>
+          p.kind === "credit" && (!p.segment || !clientSegment || p.segment === clientSegment)
+        );
+        if (!items.length) { strip.style.display = "none"; return; }
+        list.innerHTML = items.map(p => {
+          const rate = p.rate_pct != null ? `<div class="o-rate">${p.rate_pct}% <span>год.</span></div>` : "";
+          const hint = p.max_amount_rub ? `до ${fmt.format(p.max_amount_rub)} ₽` : "";
+          return `<div class="offer-card" data-product="${p.id}">
+            <div class="o-name">${p.name}</div>
+            ${rate}
+            <div class="o-hint">${hint}</div>
+          </div>`;
+        }).join("");
+        strip.style.display = "";
+        list.querySelectorAll(".offer-card").forEach(card => {
+          card.addEventListener("click", () => {
+            document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("show"));
+            const credTab = document.querySelector(".tab[data-tab='credits']");
+            const credPane = document.querySelector("[data-pane='credits']");
+            if (credTab) credTab.classList.add("active");
+            if (credPane) credPane.classList.add("show");
+            loadCreditProducts();
+            const opt = sel.selectedOptions[0];
+            if (opt) renderApps(opt.value);
+          });
+        });
+      } catch(e) {
+        strip.style.display = "none";
+      }
     }
 
     function updateApprovalBanner(clientId) {
@@ -594,8 +653,6 @@
 
     sel.addEventListener("change", () => {
       creditProductsLoaded = false;
-      const opt = sel.selectedOptions[0];
-      if (opt) updateApprovalBanner(opt.value);
       const creditsPane = document.querySelector("[data-pane='credits']");
       if (creditsPane && creditsPane.classList.contains("show")) {
         loadCreditProducts();
