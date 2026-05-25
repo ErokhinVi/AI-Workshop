@@ -18,8 +18,13 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8003").rstrip("/")
 
 # Базовый каталог. Кредитный продукт добавляет владелец блока в рамках задачи.
 PRODUCTS = [
-    {"id": "card-debit", "kind": "card", "name": "Дебетовая карта", "segment": "mass"},
-    {"id": "deposit-base", "kind": "deposit", "name": "Срочный депозит", "rate_pct": 14.0},
+    {"id": "card-debit", "kind": "card", "name": "Дебетовая карта", "segment": "mass", "product_type": "Некредитные"},
+    {"id": "deposit-base", "kind": "deposit", "name": "Срочный депозит", "rate_pct": 14.0, "product_type": "Некредитные"},
+    {"id": "card-credit", "kind": "credit", "name": "Кредитная карта", "limit_rub": 300000, "rate_pct": 19.9, "segment": "mass", "product_type": "Кредитные"},
+    {"id": "credit-consumer", "kind": "credit", "name": "Потребительский кредит на любые цели", "amount_max_rub": 5000000, "term_months_max": 84, "rate_pct": 14.5, "segment": "mass", "product_type": "Кредитные"},
+    {"id": "credit-mortgage", "kind": "credit", "name": "Ипотечный кредит", "amount_max_rub": 50000000, "term_months_max": 360, "rate_pct": 10.9, "segment": "mass", "product_type": "Кредитные"},
+    {"id": "credit-syndicated", "kind": "credit", "name": "Синдицированный кредит", "amount_max_rub": 10000000000, "segment": "corporate", "product_type": "Кредитные"},
+    {"id": "credit-line-corp", "kind": "credit", "name": "Кредитная линия для корпоративных клиентов", "amount_max_rub": 500000000, "segment": "corporate", "product_type": "Кредитные"},
 ]
 
 app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
