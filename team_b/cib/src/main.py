@@ -22,6 +22,13 @@ PRODUCTS = [
     {"id": "credit-mortgage", "kind": "credit", "name": "Ипотечный кредит", "amount_max_rub": 50000000, "term_months_max": 360, "rate_pct": 10.9, "segment": "mass", "product_type": "Кредитные"},
     {"id": "credit-syndicated", "kind": "credit", "name": "Синдицированный кредит", "amount_max_rub": 10000000000, "segment": "corporate", "product_type": "Кредитные"},
     {"id": "credit-line-corp", "kind": "credit", "name": "Кредитная линия для корпоративных клиентов", "amount_max_rub": 500000000, "segment": "corporate", "product_type": "Кредитные"},
+    {"id": "invest-pif-mixed", "kind": "investment", "name": "ПИФ «Смешанные инвестиции»", "min_amount_rub": 1000, "expected_return_pct": 12.0, "segment": "mass", "product_type": "Инвестиционные"},
+    {"id": "invest-pif-bonds", "kind": "investment", "name": "ПИФ «Облигации надёжных эмитентов»", "min_amount_rub": 1000, "expected_return_pct": 9.5, "segment": "mass", "product_type": "Инвестиционные"},
+    {"id": "invest-iis", "kind": "investment", "name": "Индивидуальный инвестиционный счёт (ИИС)", "min_amount_rub": 10000, "tax_deduction_rub": 52000, "expected_return_pct": 11.0, "segment": "mass", "product_type": "Инвестиционные"},
+    {"id": "invest-structured-note", "kind": "investment", "name": "Структурная нота с защитой капитала", "min_amount_rub": 300000, "capital_protection_pct": 100, "expected_return_pct": 15.0, "segment": "premium", "product_type": "Инвестиционные"},
+    {"id": "invest-trust-mgmt", "kind": "investment", "name": "Доверительное управление портфелем", "min_amount_rub": 1000000, "segment": "premium", "product_type": "Инвестиционные"},
+    {"id": "invest-bonds-retail", "kind": "investment", "name": "Облигации федерального займа (ОФЗ)", "min_amount_rub": 1000, "expected_return_pct": 8.5, "segment": "mass", "product_type": "Инвестиционные"},
+    {"id": "invest-corp-portfolio", "kind": "investment", "name": "Корпоративный инвестиционный портфель", "min_amount_rub": 5000000, "segment": "corporate", "product_type": "Инвестиционные"},
 ]
 
 app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
