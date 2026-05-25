@@ -459,9 +459,17 @@
       try {
         const r = await fetch("/api/credit-products");
         const d = await r.json();
-        const items = (d.items || []).filter(p => p.kind === "credit");
+        const clientOpt = sel.selectedOptions[0];
+        const clientSegment = clientOpt ? clientOpt.dataset.segment : null;
+        const allCredits = (d.items || []).filter(p => p.kind === "credit");
+        const items = allCredits.filter(p =>
+          !p.segment || !clientSegment || p.segment === clientSegment
+        );
         if (!items.length) {
-          box.innerHTML = `<div class="empty">Кредитных продуктов пока нет — коллеги скоро добавят</div>`;
+          const msg = allCredits.length
+            ? `<div class="empty">Для вашего профиля подходящих предложений пока нет</div>`
+            : `<div class="empty">Кредитных продуктов пока нет — коллеги скоро добавят</div>`;
+          box.innerHTML = msg;
           return;
         }
         box.innerHTML = items.map(p => {
@@ -469,7 +477,8 @@
           const minAmt = p.min_amount_rub != null ? `<div class="p-meta">От ${fmt.format(p.min_amount_rub)} ₽</div>` : "";
           const maxAmt = p.max_amount_rub != null ? `<div class="p-meta">До ${fmt.format(p.max_amount_rub)} ₽</div>` : "";
           const maxTerm = p.max_term_months != null ? `<div class="p-meta">Срок до ${p.max_term_months} мес.</div>` : "";
-          const segment = p.segment ? `<div class="p-meta">Сегмент: ${p.segment}</div>` : "";
+          const segNames = { mass: "Для всех клиентов", premium: "Премиум", vip: "VIP", sme: "Бизнес" };
+          const segment = p.segment ? `<div class="p-meta">${segNames[p.segment] || p.segment}</div>` : "";
           return `<div class="product-card">
             <div class="p-name">${p.name}</div>
             ${rate}${minAmt}${maxAmt}${maxTerm}${segment}
@@ -498,6 +507,14 @@
     document.getElementById("credit-back").addEventListener("click", () => {
       document.getElementById("credit-form-wrap").style.display = "none";
       document.getElementById("credit-products-list").style.display = "";
+    });
+
+    sel.addEventListener("change", () => {
+      creditProductsLoaded = false;
+      const creditsPane = document.querySelector("[data-pane='credits']");
+      if (creditsPane && creditsPane.classList.contains("show")) {
+        loadCreditProducts();
+      }
     });
 
     document.querySelectorAll(".tab").forEach(btn => {
