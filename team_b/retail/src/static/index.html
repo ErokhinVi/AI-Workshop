@@ -259,6 +259,12 @@
             <input name="term_months" type="number" min="1" max="360" placeholder="12" />
           </div>
           <input type="hidden" name="product_id" id="credit-product-id" />
+          <div id="credit-calc" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border-radius:8px;border:1px solid var(--rule)">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">Предварительный расчёт</div>
+            <div style="font-size:24px;font-weight:600" id="calc-payment">—</div>
+            <div style="font-size:12px;color:var(--text-2);margin-top:2px">₽ в месяц</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px" id="calc-total"></div>
+          </div>
           <button class="btn primary" type="submit">Подать заявку</button>
         </form>
         <div id="credit-result"></div>
@@ -467,7 +473,7 @@
           return `<div class="product-card">
             <div class="p-name">${p.name}</div>
             ${rate}${minAmt}${maxAmt}${maxTerm}${segment}
-            <button class="btn-pick" data-id="${p.id}" data-name="${p.name}">Выбрать →</button>
+            <button class="btn-pick" data-id="${p.id}" data-name="${p.name}" data-rate="${p.rate_pct != null ? p.rate_pct : ""}">Выбрать →</button>
           </div>`;
         }).join("");
 
@@ -476,7 +482,9 @@
             document.getElementById("credit-product-id").value = btn.dataset.id;
             document.getElementById("credit-form-title").textContent = btn.dataset.name;
             document.getElementById("credit-result").innerHTML = "";
+            document.getElementById("credit-calc").style.display = "none";
             document.getElementById("credit-form").reset();
+            currentRate = btn.dataset.rate ? +btn.dataset.rate : null;
             document.getElementById("credit-products-list").style.display = "none";
             document.getElementById("credit-form-wrap").style.display = "";
           });
@@ -501,6 +509,28 @@
         });
       }
     });
+
+    // ---- калькулятор платежа ----
+    let currentRate = null;
+
+    function updateCalc() {
+      const calcBox = document.getElementById("credit-calc");
+      const calcPayment = document.getElementById("calc-payment");
+      const calcTotal = document.getElementById("calc-total");
+      const amount = +document.querySelector("#credit-form [name=amount]").value;
+      const term = +document.querySelector("#credit-form [name=term_months]").value;
+      if (!amount || !term || !currentRate) { calcBox.style.display = "none"; return; }
+      const monthRate = currentRate / 100 / 12;
+      const payment = monthRate
+        ? Math.round(amount * monthRate / (1 - Math.pow(1 + monthRate, -term)))
+        : Math.round(amount / term);
+      const total = payment * term;
+      calcBox.style.display = "";
+      calcPayment.textContent = fmt.format(payment);
+      calcTotal.textContent = `Итого за ${term} мес.: ${fmt.format(total)} ₽ (переплата ${fmt.format(total - amount)} ₽)`;
+    }
+
+    document.getElementById("credit-form").addEventListener("input", updateCalc);
 
     const creditForm = document.getElementById("credit-form");
     const creditResult = document.getElementById("credit-result");
