@@ -407,6 +407,139 @@ async def credit_decide(req: DecideRequest) -> dict:
     }
 
 
+# ── Инвестиционные рекомендации ───────────────────────────────────────────
+
+class InvestRecommendRequest(BaseModel):
+    amount_rub: float               # сумма для вложения
+    horizon_months: int = 12        # горизонт вложения в месяцах
+    risk_level: str = "medium"      # low | medium | high
+    segment: str = "mass"           # mass | premium | corporate
+    client_id: Optional[str] = None # опционально — для персонализации
+
+
+class InvestProduct(BaseModel):
+    id: str
+    name: str
+    product_type: str
+    min_amount_rub: float
+    expected_return_pct: Optional[float] = None
+    why: str                        # объяснение почему подходит
+
+
+class InvestRecommendResponse(BaseModel):
+    amount_rub: float
+    horizon_months: int
+    risk_level: str
+    recommendations: list[InvestProduct]
+    summary: str                    # общий совет от ИИ
+
+
+def _filter_invest_products(amount: float, horizon: int,
+                             risk: str, segment: str) -> list[dict]:
+    """Подбираем подходящие инвестиционные продукты по параметрам клиента."""
+    invest = [p for p in PRODUCTS if p.get("kind") == "investment"]
+
+    # Фильтр по минимальной сумме
+    invest = [p for p in invest if p.get("min_amount_rub", 0) <= amount]
+
+    # Фильтр по сегменту
+    invest = [p for p in invest if p.get("segment") == segment
+              or p.get("segment") == "mass"]
+
+    # Фильтр по риску и горизонту
+    if risk == "low":
+        # Консервативные: ОФЗ, ПИФ облигаций, ИИС
+        preferred = ["invest-bonds-retail", "invest-pif-bonds", "invest-iis"]
+    elif risk == "high":
+        # Агрессивные: смешанный ПИФ, структурные ноты, доверительное управление
+        preferred = ["invest-pif-mixed", "invest-structured-note", "invest-trust-mgmt", "invest-corp-portfolio"]
+    else:
+        # Средний риск: всё кроме агрессивных корп-продуктов
+        preferred = ["invest-iis", "invest-pif-mixed", "invest-pif-bonds",
+                     "invest-structured-note", "invest-bonds-retail"]
+
+    # Короткий горизонт — избегаем долгосрочных продуктов
+    if horizon < 6:
+        preferred = [p for p in preferred if p not in
+                     ["invest-trust-mgmt", "invest-corp-portfolio"]]
+
+    # Сортируем: сначала предпочтительные, потом остальные
+    result = sorted(invest, key=lambda p: (
+        0 if p["id"] in preferred else 1,
+        -(p.get("expected_return_pct") or 0)
+    ))
+    return result[:3]
+
+
+def _why(product: dict, amount: float, horizon: int, risk: str) -> str:
+    """Короткое объяснение почему продукт подходит — без ИИ, как запасной вариант."""
+    pid = product["id"]
+    ret = product.get("expected_return_pct")
+    earn = round(amount * (ret or 0) / 100 * horizon / 12) if ret else None
+    base = f"Ожидаемая доходность {ret}% годовых" if ret else "Надёжный инструмент сбережений"
+    if earn:
+        base += f" — за {horizon} мес. примерно +{earn:,.0f} ₽ к вложенной сумме"
+    if pid == "invest-iis":
+        base += f". Плюс налоговый вычет до 52 000 ₽ в год от государства"
+    if pid == "invest-bonds-retail":
+        base += ". Государственные облигации — минимальный риск"
+    if pid == "invest-structured-note":
+        base += ". Капитал защищён на 100% — даже при падении рынка вы не потеряете вложенное"
+    return base
+
+
+@app.post("/invest/recommend", summary="Подбор инвестиционных продуктов")
+async def invest_recommend(req: InvestRecommendRequest) -> InvestRecommendResponse:
+    from src.llm import ask_llm, LLMError
+    import asyncio
+
+    suited = _filter_invest_products(req.amount_rub, req.horizon_months,
+                                      req.risk_level, req.segment)
+
+    # Формируем список продуктов с объяснениями
+    recs = [
+        InvestProduct(
+            id=p["id"],
+            name=p["name"],
+            product_type=p.get("product_type", "Инвестиционные"),
+            min_amount_rub=p.get("min_amount_rub", 0),
+            expected_return_pct=p.get("expected_return_pct"),
+            why=_why(p, req.amount_rub, req.horizon_months, req.risk_level),
+        )
+        for p in suited
+    ]
+
+    # Просим ИИ написать общий совет
+    risk_label = {"low": "низкий", "medium": "средний", "high": "высокий"}.get(req.risk_level, "средний")
+    products_text = "; ".join(p.name for p in recs)
+    prompt = (
+        f"Ты финансовый консультант банка. Клиент хочет вложить {req.amount_rub:,.0f} ₽ "
+        f"на {req.horizon_months} месяцев, отношение к риску — {risk_label}. "
+        f"Мы подобрали ему: {products_text}. "
+        f"Напиши короткий дружелюбный совет: почему этот набор подходит именно этому клиенту, "
+        f"на что обратить внимание. Без жаргона, по-человечески, два-три предложения. Только русский язык."
+    )
+    try:
+        summary = await asyncio.wait_for(
+            ask_llm(prompt, max_tokens=200, temperature=0.5), timeout=5.0
+        )
+    except (LLMError, Exception):
+        earn_example = recs[0].expected_return_pct if recs else None
+        summary = (
+            f"Для суммы {req.amount_rub:,.0f} ₽ на {req.horizon_months} мес. "
+            f"с {risk_label} уровнем риска мы подобрали {len(recs)} продукта. "
+            + (f"Потенциальный доход по лучшему варианту — до {earn_example}% годовых." if earn_example else "")
+        )
+
+    return InvestRecommendResponse(
+        amount_rub=req.amount_rub,
+        horizon_months=req.horizon_months,
+        risk_level=req.risk_level,
+        recommendations=recs,
+        summary=summary,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     rows = "".join(
