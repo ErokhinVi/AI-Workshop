@@ -1,6 +1,5 @@
 """Тесты формулы клиентской базы — модель «запаса и потока»."""
 from src.scoring import (
-    CEIL,
     FLOOR,
     compute_commit_round,
     compute_decay,
@@ -90,8 +89,11 @@ def test_commit_stationary_flow_disabled_means_pure_telescope():
     assert r["client_base"] == 640.0
 
 
-def test_commit_clamps_to_ceiling_and_floor():
-    assert compute_commit_round(9999.0, 0.0, 500.0)["client_base"] == CEIL
+def test_commit_unbounded_above_keeps_floor():
+    # Потолок снят (решение оунера): база растёт без верхнего зажима,
+    # далеко за прежние 1000.
+    assert compute_commit_round(9999.0, 0.0, 500.0)["client_base"] > 10000.0
+    # Пол по-прежнему держит снизу.
     assert compute_commit_round(-9999.0, 0.0, 500.0)["client_base"] == FLOOR
 
 
