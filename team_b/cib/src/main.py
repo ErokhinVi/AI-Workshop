@@ -218,7 +218,9 @@ def _score_request(req: ScoringRequest) -> ScoringResponse:
 async def _humanize_reason(decision: str, reason: str, score: int,
                             offered_amount: Optional[float],
                             offered_rate: Optional[float],
-                            offered_term: Optional[int]) -> str:
+                            offered_term: Optional[int],
+                            req: Optional["ScoringRequest"] = None,
+                            breakdown: Optional[dict] = None) -> str:
     """Просим ИИ переформулировать решение живым человеческим языком."""
     from src.llm import ask_llm, LLMError
     if decision == "approved":
@@ -228,14 +230,40 @@ async def _humanize_reason(decision: str, reason: str, score: int,
             f"Пиши тепло, по-человечески, без канцелярита. Одним абзацем, не длиннее 3 предложений. Только русский язык."
         )
     else:
+        # Собираем конкретные цифры клиента для полезного объяснения
+        details = []
+        if req:
+            monthly_payment = req.amount_rub / max(offered_term or 12, 1)
+            pti = monthly_payment / max(req.monthly_income_rub, 1)
+            details.append(f"запрошенная сумма: {req.amount_rub:,.0f} ₽")
+            details.append(f"доход клиента: {req.monthly_income_rub:,.0f} ₽/мес.")
+            details.append(f"ежемесячный платёж составил бы {monthly_payment:,.0f} ₽ ({pti*100:.0f}% от дохода, допустимо до 40%)")
+            details.append(f"возраст: {req.age} лет")
+            if req.credit_history:
+                max_overdue = max((h.max_overdue_days for h in req.credit_history), default=0)
+                overdue_count = sum(1 for h in req.credit_history if h.max_overdue_days > 0)
+                if max_overdue > 0:
+                    details.append(f"в кредитной истории: {overdue_count} случай(ев) просрочки, максимум {max_overdue} дней")
+            details.append(f"внешний риск-скор: {req.risk_score:.0f} из 100 (чем выше — тем хуже)")
+        if breakdown:
+            weak = [k for k, v in breakdown.items() if v < 8]
+            if weak:
+                labels = {"debt_load": "долговая нагрузка", "credit_history": "кредитная история",
+                          "risk_score": "риск-скор", "age": "возраст", "segment": "сегмент"}
+                details.append("слабые места: " + ", ".join(labels.get(w, w) for w in weak))
+
+        context = "; ".join(details)
         prompt = (
-            f"Ты сотрудник банка. Напиши клиенту вежливое и сочувствующее сообщение об отказе в кредите. "
-            f"Скоринговый балл клиента: {score} из 100. Причина отказа: {reason} "
-            f"Объясни по-человечески, без жаргона и канцелярита, почему так вышло и что можно улучшить. "
-            f"Одним абзацем, не длиннее 4 предложений. Только русский язык."
+            f"Ты сотрудник банка. Напиши клиенту вежливое сообщение об отказе в кредите. "
+            f"Вот конкретные данные по этой заявке: {context}. "
+            f"Скоринговый балл: {score} из 100 (минимум для одобрения — 45). "
+            f"Объясни конкретно и по-человечески: что именно не позволило одобрить заявку и "
+            f"что клиент может сделать, чтобы увеличить шансы в следующий раз — например, "
+            f"запросить меньшую сумму или улучшить кредитную историю. "
+            f"Без жаргона и канцелярита. Два-три абзаца. Только русский язык."
         )
     try:
-        return await ask_llm(prompt, max_tokens=200, temperature=0.5)
+        return await ask_llm(prompt, max_tokens=350, temperature=0.5)
     except LLMError:
         return reason
 
@@ -246,6 +274,7 @@ async def scoring(req: ScoringRequest) -> ScoringResponse:
     human_reason = await _humanize_reason(
         result.decision, result.reason, result.score_total,
         result.offered_amount_rub, result.offered_rate_pct, result.offered_term_months,
+        req=req, breakdown=result.score_breakdown,
     )
     return result.model_copy(update={"reason": human_reason})
 
@@ -315,6 +344,7 @@ async def credit_decide(req: DecideRequest) -> dict:
     human_explanation = await _humanize_reason(
         result.decision, result.reason, result.score_total,
         result.offered_amount_rub, result.offered_rate_pct, result.offered_term_months,
+        req=score_req, breakdown=result.score_breakdown,
     )
     return {
         "client_id": req.client_id,
