@@ -95,44 +95,67 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
     balance = int(client.get("balance_rub") or 0)
     risk_score = float(client.get("risk_score") or 0.5)
     has_overdue = bool(client.get("has_overdue_history"))
+    credit_profile = (
+        client.get("credit_profile")
+        if isinstance(client.get("credit_profile"), dict)
+        else {}
+    )
+    active_debt = int(credit_profile.get("active_debt_rub") or 0)
+    max_overdue_days = int(credit_profile.get("max_overdue_days") or 0)
+    active_credits = int(credit_profile.get("active_credits") or 0)
     rate_pct = _choose_rate(client)
     monthly_payment = _monthly_payment(payload.amount_rub, payload.term_months, rate_pct)
     payment_to_income = monthly_payment / income if income > 0 else 1.0
     amount_to_income = payload.amount_rub / income if income > 0 else 99.0
+    burden_pct = round(payment_to_income * 100, 1)
+    amount_to_income_pct = round(amount_to_income * 100, 1)
 
     if has_overdue and (payment_to_income > 0.35 or amount_to_income > 6):
         status = "declined"
         approved_amount = 0
         explanation = (
-            "Мы не можем одобрить заявку на выбранных условиях: по клиентскому профилю "
-            "видны прошлые просрочки, а запрошенный платёж создаёт слишком высокую "
-            "нагрузку относительно текущего дохода. Рекомендуем уменьшить сумму, "
-            "увеличить срок или сначала стабилизировать кредитную историю."
+            f"Мы не можем одобрить заявку на {payload.amount_rub:,} ₽ на выбранных "
+            f"условиях: при доходе {income:,} ₽ расчётный платёж составил бы "
+            f"{monthly_payment:,} ₽, то есть {burden_pct}% дохода. В профиле есть "
+            f"просрочки до {max_overdue_days} дней, активных кредитов: {active_credits}, "
+            f"текущий активный долг около {active_debt:,} ₽, риск-скор {risk_score:.3f}. "
+            "Рекомендуем уменьшить сумму, выбрать более длинный срок и несколько "
+            "месяцев подтверждать стабильные платежи без задержек."
         )
     elif payment_to_income <= 0.35 and risk_score <= 0.45 and not has_overdue:
         status = "approved"
         approved_amount = payload.amount_rub
         explanation = (
-            "Заявка одобрена: доход, баланс и кредитная история клиента позволяют "
-            "обслуживать такой платёж без повышенной нагрузки. Предлагаем подтвердить "
+            f"Заявка одобрена: при доходе {income:,} ₽ и балансе {balance:,} ₽ "
+            f"ежемесячный платёж {monthly_payment:,} ₽ составляет только {burden_pct}% "
+            f"дохода. Просрочек в профиле нет, риск-скор {risk_score:.3f}, активная "
+            f"кредитная нагрузка около {active_debt:,} ₽. Клиент может подтвердить "
             "условия в мобильном банке и перейти к оформлению."
         )
     elif payment_to_income <= 0.5 and risk_score <= 0.55:
         status = "counter_offer"
         approved_amount = max(50_000, min(payload.amount_rub, int(income * 4)))
         monthly_payment = _monthly_payment(approved_amount, payload.term_months, rate_pct)
+        revised_burden_pct = (
+            round((monthly_payment / income) * 100, 1) if income > 0 else 100.0
+        )
         explanation = (
-            "Полностью одобрить запрошенную сумму рискованно, но профиль клиента "
-            "позволяет предложить более безопасные условия. Встречное предложение "
-            "снижает ежемесячную нагрузку и оставляет запас на регулярные расходы."
+            f"Запрошенная сумма {payload.amount_rub:,} ₽ создаёт повышенную нагрузку: "
+            f"первичный платёж был бы {burden_pct}% дохода при риск-скоре {risk_score:.3f}. "
+            f"Предлагаем безопасную сумму {approved_amount:,} ₽: платёж около "
+            f"{monthly_payment:,} ₽, или {revised_burden_pct}% дохода. Такой вариант "
+            "оставляет запас на регулярные расходы и снижает риск просрочки."
         )
     else:
         status = "declined"
         approved_amount = 0
         explanation = (
-            "Заявка отклонена, потому что сочетание суммы, срока, дохода и риск-профиля "
-            "клиента создаёт чрезмерную долговую нагрузку. Чтобы повысить шанс "
-            "одобрения, стоит запросить меньшую сумму или выбрать более длинный срок."
+            f"Заявка отклонена: сумма {payload.amount_rub:,} ₽ равна {amount_to_income_pct}% "
+            f"годового дохода, а расчётный платёж {monthly_payment:,} ₽ занял бы "
+            f"{burden_pct}% текущего дохода. С учётом риск-скора {risk_score:.3f}, "
+            f"активного долга около {active_debt:,} ₽ и истории просрочек до "
+            f"{max_overdue_days} дней такая нагрузка выглядит небезопасной. Лучше "
+            "запросить меньшую сумму или увеличить срок."
         )
 
     return {
@@ -146,8 +169,14 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
         "rate_pct": rate_pct,
         "monthly_payment_rub": monthly_payment if approved_amount else 0,
         "payment_to_income_pct": round(payment_to_income * 100, 1),
+        "amount_to_income_pct": amount_to_income_pct,
         "explanation": explanation,
         "reason": explanation,
+        "title": {
+            "approved": "Кредит одобрен на запрошенных условиях",
+            "counter_offer": "Предлагаем более безопасные условия",
+            "declined": "Сейчас лучше не увеличивать долговую нагрузку",
+        }[status],
         "next_step": (
             "Подтвердите условия в мобильном банке."
             if status == "approved"
@@ -160,6 +189,9 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
             "balance_rub": balance,
             "risk_score": risk_score,
             "has_overdue_history": has_overdue,
+            "active_debt_rub": active_debt,
+            "max_overdue_days": max_overdue_days,
+            "active_credits": active_credits,
         },
     }
 
