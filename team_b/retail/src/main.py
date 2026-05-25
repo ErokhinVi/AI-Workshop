@@ -55,6 +55,30 @@ async def transactions(client_id: str, request: Request) -> dict:
     return await _backend_get(f"/transactions/{client_id}", dict(request.query_params))
 
 
+@app.get("/api/credit-products")
+async def credit_products() -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{CIB_URL}/products")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:300])
+    return r.json()
+
+
+@app.post("/api/credit-apply")
+async def credit_apply(payload: dict) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(f"{CIB_URL}/credit/decide", json=payload)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"cib недоступен: {exc}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:300])
+    return r.json()
+
+
 @app.post("/api/transfer")
 async def api_transfer(payload: dict) -> dict:
     try:
