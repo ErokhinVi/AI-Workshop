@@ -149,6 +149,23 @@
       color: var(--muted); font-size: 13px;
     }
 
+    .product-card {
+      border: 1px solid var(--rule); border-radius: 10px;
+      padding: 16px; margin-bottom: 12px; background: var(--surface);
+    }
+    .product-card .p-name { font-weight: 500; font-size: 15px; margin-bottom: 8px; }
+    .product-card .p-meta { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+    .product-card .p-rate { font-size: 22px; font-weight: 600; color: var(--text); margin: 8px 0 12px; }
+    .product-card .p-rate span { font-size: 13px; font-weight: 400; color: var(--muted); }
+    .product-card .btn-pick {
+      width: 100%; padding: 10px;
+      background: var(--raiff); color: var(--text);
+      border: 0; border-radius: 6px;
+      font-family: inherit; font-weight: 500; font-size: 13px;
+      cursor: pointer;
+    }
+    .product-card .btn-pick:hover { background: #fff04a; }
+
     .alert {
       margin-top: 18px; padding: 12px 14px;
       border-radius: 6px;
@@ -206,26 +223,28 @@
       <div id="tx-list" class="tx-list"></div>
     </div>
     <div class="tab-pane" data-pane="credits">
-      <div class="section-title">Доступные продукты</div>
-      <div id="credit-products"></div>
+      <div id="credit-products-list">
+        <div class="section-title">Кредитные продукты</div>
+        <div id="credit-products"></div>
+      </div>
 
-      <form id="credit-form" autocomplete="off" style="margin-top:20px;display:none">
-        <div class="section-title">Заявка на кредит</div>
-        <div class="form-row">
-          <label>Продукт</label>
-          <select id="credit-product-select" name="product_id"></select>
-        </div>
-        <div class="form-row">
-          <label>Сумма, ₽</label>
-          <input name="amount" type="number" min="1000" placeholder="100000" />
-        </div>
-        <div class="form-row">
-          <label>Срок, месяцев</label>
-          <input name="term_months" type="number" min="1" max="360" placeholder="12" />
-        </div>
-        <button class="btn primary" type="submit">Подать заявку</button>
-      </form>
-      <div id="credit-result"></div>
+      <div id="credit-form-wrap" style="display:none">
+        <button id="credit-back" class="btn" style="margin-bottom:16px;background:transparent;color:var(--text-2);border:1px solid var(--rule);width:auto;padding:8px 16px;">← Назад</button>
+        <form id="credit-form" autocomplete="off">
+          <div class="section-title" id="credit-form-title">Заявка</div>
+          <div class="form-row">
+            <label>Сумма, ₽</label>
+            <input name="amount" type="number" min="1000" placeholder="100000" />
+          </div>
+          <div class="form-row">
+            <label>Срок, месяцев</label>
+            <input name="term_months" type="number" min="1" max="360" placeholder="12" />
+          </div>
+          <input type="hidden" name="product_id" id="credit-product-id" />
+          <button class="btn primary" type="submit">Подать заявку</button>
+        </form>
+        <div id="credit-result"></div>
+      </div>
     </div>
   </div>
 
@@ -367,10 +386,16 @@
     loadClients();
 
     // ---- кредиты ----
+    let creditProductsLoaded = false;
+
+    function kindLabel(k) {
+      return ({ credit: "Кредит", card: "Карта", deposit: "Депозит" })[k] || k;
+    }
+
     async function loadCreditProducts() {
+      if (creditProductsLoaded) return;
+      creditProductsLoaded = true;
       const box = document.getElementById("credit-products");
-      const form = document.getElementById("credit-form");
-      const sel2 = document.getElementById("credit-product-select");
       try {
         const r = await fetch("/api/credit-products");
         const d = await r.json();
@@ -379,26 +404,43 @@
           box.innerHTML = `<div class="empty">Кредитных продуктов пока нет — коллеги скоро добавят</div>`;
           return;
         }
-        box.innerHTML = items.map(p =>
-          `<div class="tx-row">
-            <div>
-              <div class="desc">${p.name}</div>
-              <div class="ts">${p.rate_pct != null ? "Ставка " + p.rate_pct + "% годовых" : ""}</div>
-            </div>
-          </div>`
-        ).join("");
-        sel2.innerHTML = items.map(p =>
-          `<option value="${p.id}">${p.name}</option>`
-        ).join("");
-        form.style.display = "";
+        box.innerHTML = items.map(p => {
+          const rate = p.rate_pct != null ? `<div class="p-rate">${p.rate_pct}% <span>годовых</span></div>` : "";
+          const minAmt = p.min_amount_rub != null ? `<div class="p-meta">От ${fmt.format(p.min_amount_rub)} ₽</div>` : "";
+          const maxAmt = p.max_amount_rub != null ? `<div class="p-meta">До ${fmt.format(p.max_amount_rub)} ₽</div>` : "";
+          const maxTerm = p.max_term_months != null ? `<div class="p-meta">Срок до ${p.max_term_months} мес.</div>` : "";
+          const segment = p.segment ? `<div class="p-meta">Сегмент: ${p.segment}</div>` : "";
+          return `<div class="product-card">
+            <div class="p-name">${p.name}</div>
+            ${rate}${minAmt}${maxAmt}${maxTerm}${segment}
+            <button class="btn-pick" data-id="${p.id}" data-name="${p.name}">Выбрать →</button>
+          </div>`;
+        }).join("");
+
+        box.querySelectorAll(".btn-pick").forEach(btn => {
+          btn.addEventListener("click", () => {
+            document.getElementById("credit-product-id").value = btn.dataset.id;
+            document.getElementById("credit-form-title").textContent = btn.dataset.name;
+            document.getElementById("credit-result").innerHTML = "";
+            document.getElementById("credit-form").reset();
+            document.getElementById("credit-products-list").style.display = "none";
+            document.getElementById("credit-form-wrap").style.display = "";
+          });
+        });
       } catch(e) {
         box.innerHTML = `<div class="empty">Не удалось загрузить продукты</div>`;
+        creditProductsLoaded = false;
       }
     }
 
+    document.getElementById("credit-back").addEventListener("click", () => {
+      document.getElementById("credit-form-wrap").style.display = "none";
+      document.getElementById("credit-products-list").style.display = "";
+    });
+
     document.querySelectorAll(".tab").forEach(btn => {
       if (btn.dataset.tab === "credits") {
-        btn.addEventListener("click", loadCreditProducts, { once: true });
+        btn.addEventListener("click", loadCreditProducts);
       }
     });
 
