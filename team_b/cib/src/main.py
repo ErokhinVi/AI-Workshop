@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -229,15 +230,56 @@ class DecideRequest(BaseModel):
 
 @app.post("/credit/decide", summary="Кредитное решение по заявке")
 async def credit_decide(req: DecideRequest) -> dict:
-    # Формируем скоринговый запрос с консервативными дефолтами
+    # Тянем реальные данные клиента из backend
+    client_data: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{BACKEND_URL}/clients/{req.client_id}")
+            if r.status_code == 200:
+                client_data = r.json()
+    except Exception:
+        pass
+
+    # Кредитная история из backend (если ручка есть)
+    credit_history: list[CreditHistoryItem] = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{BACKEND_URL}/clients/{req.client_id}/credit-history")
+            if r.status_code == 200:
+                for item in r.json().get("items", []):
+                    try:
+                        credit_history.append(CreditHistoryItem(
+                            product=item.get("product", ""),
+                            amount_rub=float(item.get("principal_rub", 0)),
+                            term_months=int(item.get("term_months", 12)),
+                            rate_pct=float(item.get("rate_pct", 0)),
+                            opened_date=item.get("opened_at", "2020-01-01"),
+                            status=item.get("status", "active"),
+                            max_overdue_days=int(item.get("overdue_days_max", 0)),
+                        ))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # Если данных нет — строим историю из флага has_overdue_history
+    if not credit_history and client_data.get("has_overdue_history"):
+        credit_history = [CreditHistoryItem(
+            product="unknown", amount_rub=0, term_months=12,
+            rate_pct=0, opened_date="2020-01-01",
+            status="closed_overdue", max_overdue_days=60,
+        )]
+
     score_req = ScoringRequest(
         client_id=req.client_id,
         amount_rub=req.amount_rub,
         product_id="credit-consumer",
-        segment="mass",
-        monthly_income_rub=req.amount_rub / 6,  # консервативная оценка
-        age=35,
-        risk_score=40,
+        segment=client_data.get("segment", "mass"),
+        monthly_income_rub=float(client_data.get("income_rub", req.amount_rub / 6)),
+        age=int(client_data.get("age", 35)),
+        existing_products=client_data.get("products", []),
+        risk_score=float(client_data.get("risk_score", 0.4)) * 100,
+        credit_history=credit_history,
     )
     result = _score_request(score_req)
     return {
