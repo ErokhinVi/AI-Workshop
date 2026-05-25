@@ -281,6 +281,8 @@ CIB должен первым добавить и проверить:
   множители скорости и антифрод-правила;
 - готово: `POST /raifcoin/tap/score` рассчитывает `raifcoin_earned`,
   `tap_rate_per_sec`, `rating_delta`, `fraud_flag` и объяснение;
+- готово: `GET /raifcoin/rules` и `POST /raifcoin/tap/score` отдают
+  `backend_contract` с endpoint'ами и полями, которые backend должен сохранить;
 - готово: нереалистичная скорость тапов не начисляет `RaifCoin` и не повышает
   рейтинг;
 - готово: `POST /credit/decide` учитывает `raifcoin_rating_boost`, если backend
