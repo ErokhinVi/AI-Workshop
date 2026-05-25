@@ -126,6 +126,27 @@ async def get_transactions(
     return {"total": len(txs), "items": txs[:limit]}
 
 
+@app.get("/clients/{client_id}/summary")
+async def get_client_summary(client_id: str) -> dict:
+    c = _clients_by_id.get(client_id)
+    if not c:
+        raise HTTPException(status_code=404, detail=f"клиент {client_id} не найден")
+    history = [h for h in _credit_history if h["client_id"] == client_id]
+    active_credits = [h for h in history if h.get("status") == "active"]
+    total_debt = sum(h.get("principal_rub", 0) for h in active_credits)
+    return {
+        "client_id": client_id,
+        "name": c.get("name"),
+        "segment": c.get("segment"),
+        "balance_rub": c.get("balance_rub"),
+        "income_rub": c.get("income_rub"),
+        "active_credits_count": len(active_credits),
+        "total_debt_rub": total_debt,
+        "risk_score": c.get("risk_score"),
+        "has_overdue_history": c.get("has_overdue_history"),
+    }
+
+
 @app.get("/clients/{client_id}/credit-history")
 async def get_credit_history(client_id: str) -> dict:
     if client_id not in _clients_by_id:
@@ -160,10 +181,12 @@ async def create_credit_application(payload: dict) -> dict:
     _applications_by_id[app_id] = application
 
     client_history = [h for h in _credit_history if h["client_id"] == client_id]
+    term_months = int(payload.get("term_months") or 12)
     scoring_payload = {
         "client_id": client_id,
         "amount_rub": amount_rub,
         "product_id": product,
+        "term_months": term_months,
         "segment": c.get("segment"),
         "monthly_income_rub": c.get("income_rub"),
         "age": c.get("age"),
