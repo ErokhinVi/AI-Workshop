@@ -125,6 +125,14 @@ CASINO_PAYOUT_TABLE = {
     "two_same": 1.5,
     "none": 0.0,
 }
+RAIFCOIN_DAILY_LIMIT = 10_000
+RAIFCOIN_MAX_TAP_RATE_PER_SEC = 16.0
+RAIFCOIN_SPEED_MULTIPLIERS = [
+    {"max_tap_rate_per_sec": 4.0, "multiplier": 1.0},
+    {"max_tap_rate_per_sec": 8.0, "multiplier": 1.4},
+    {"max_tap_rate_per_sec": 12.0, "multiplier": 1.8},
+    {"max_tap_rate_per_sec": RAIFCOIN_MAX_TAP_RATE_PER_SEC, "multiplier": 2.2},
+]
 
 app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
 
@@ -147,6 +155,13 @@ class CasinoSpinRequest(BaseModel):
     client_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     stake_rub: int = Field(gt=0)
+
+
+class RaifCoinTapScoreRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    tap_count: int = Field(ge=0)
+    duration_ms: int = Field(gt=0)
 
 
 async def _get_client(client_id: str) -> dict[str, Any]:
@@ -197,7 +212,7 @@ def _monthly_payment(amount_rub: int, term_months: int, rate_pct: float) -> int:
 
 
 def _choose_rate(client: dict[str, Any]) -> float:
-    risk_score = float(client.get("risk_score") or 0.35)
+    risk_score = max(0.05, float(client.get("risk_score") or 0.35) - _raifcoin_rating_boost(client))
     segment = str(client.get("segment") or "mass")
     rate = 13.9 + risk_score * 10
     if segment in {"premium", "private"}:
@@ -207,6 +222,20 @@ def _choose_rate(client: dict[str, Any]) -> float:
     if client.get("has_overdue_history"):
         rate += 4.0
     return round(max(11.9, min(rate, 27.5)), 1)
+
+
+def _raifcoin_rating_boost(client: dict[str, Any]) -> float:
+    credit_profile = (
+        client.get("credit_profile")
+        if isinstance(client.get("credit_profile"), dict)
+        else {}
+    )
+    raw_boost = client.get("raifcoin_rating_boost", credit_profile.get("raifcoin_rating_boost", 0))
+    try:
+        boost = float(raw_boost or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(boost, 0.08))
 
 
 def _normalise_purpose(purpose: str | None) -> str | None:
@@ -289,7 +318,8 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
     purpose = _normalise_purpose(payload.purpose)
     income = int(client.get("income_rub") or 0)
     balance = int(client.get("balance_rub") or 0)
-    risk_score = float(client.get("risk_score") or 0.5)
+    raifcoin_rating_boost = _raifcoin_rating_boost(client)
+    risk_score = max(0.05, float(client.get("risk_score") or 0.5) - raifcoin_rating_boost)
     has_overdue = bool(client.get("has_overdue_history"))
     credit_profile = (
         client.get("credit_profile")
@@ -391,6 +421,12 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
                 " Цель кредита — покупка ценных бумаг, но при текущих параметрах безопаснее "
                 "не увеличивать кредитную и рыночную нагрузку одновременно."
             )
+    if raifcoin_rating_boost > 0:
+        explanation += (
+            f" В профиле учтён RaifCoin-буст кредитного рейтинга "
+            f"{raifcoin_rating_boost:.3f}: он снижает оценку риска только в пределах "
+            "внутреннего лимита и не заменяет проверку дохода, долга и просрочек."
+        )
 
     monthly_payment_for_return = (
         _monthly_payment(approved_amount, payload.term_months, rate_pct) if approved_amount else 0
@@ -427,6 +463,7 @@ def _decide_credit(payload: CreditDecisionRequest, client: dict[str, Any]) -> di
             "income_rub": income,
             "balance_rub": balance,
             "risk_score": risk_score,
+            "raifcoin_rating_boost": raifcoin_rating_boost,
             "has_overdue_history": has_overdue,
             "active_debt_rub": active_debt,
             "max_overdue_days": max_overdue_days,
@@ -627,6 +664,97 @@ def _resolve_casino_spin(payload: CasinoSpinRequest, client: dict[str, Any]) -> 
     }
 
 
+def _raifcoin_rules() -> dict[str, Any]:
+    return {
+        "asset": "RaifCoin",
+        "kind": "virtual_crypto",
+        "blockchain": False,
+        "external_transfer": False,
+        "unit": "RC",
+        "daily_limit": RAIFCOIN_DAILY_LIMIT,
+        "max_tap_rate_per_sec": RAIFCOIN_MAX_TAP_RATE_PER_SEC,
+        "speed_multipliers": RAIFCOIN_SPEED_MULTIPLIERS,
+        "rating_boost": {
+            "max_delta_per_session": 0.05,
+            "max_total_boost": 0.08,
+            "formula": "min(0.05, raifcoin_earned / 100000)",
+        },
+        "antifraud": {
+            "min_duration_ms": 1000,
+            "max_tap_count": 1000,
+            "max_tap_rate_per_sec": RAIFCOIN_MAX_TAP_RATE_PER_SEC,
+            "fraud_reward": 0,
+        },
+        "explanation": (
+            "RaifCoin — виртуальная криптовалюта банка без блокчейна. Клиент получает "
+            "монеты за нормальную tap-активность; нереалистичная скорость считается "
+            "антифродом и не повышает кредитный рейтинг."
+        ),
+    }
+
+
+def _raifcoin_multiplier(tap_rate_per_sec: float) -> float:
+    for rule in RAIFCOIN_SPEED_MULTIPLIERS:
+        if tap_rate_per_sec <= rule["max_tap_rate_per_sec"]:
+            return float(rule["multiplier"])
+    return 0.0
+
+
+def _score_raifcoin_taps(
+    payload: RaifCoinTapScoreRequest,
+    client: dict[str, Any],
+) -> dict[str, Any]:
+    duration_sec = payload.duration_ms / 1000
+    tap_rate = round(payload.tap_count / duration_sec, 2)
+    fraud_reasons: list[str] = []
+    if payload.duration_ms < 1000:
+        fraud_reasons.append("слишком короткая сессия")
+    if payload.tap_count > 1000:
+        fraud_reasons.append("слишком много тапов за одну сессию")
+    if tap_rate > RAIFCOIN_MAX_TAP_RATE_PER_SEC:
+        fraud_reasons.append("нереалистичная скорость тапов")
+    fraud_flag = bool(fraud_reasons)
+    multiplier = 0.0 if fraud_flag else _raifcoin_multiplier(tap_rate)
+    raifcoin_earned = 0 if fraud_flag else min(
+        RAIFCOIN_DAILY_LIMIT,
+        int(round(payload.tap_count * multiplier)),
+    )
+    rating_delta = 0.0 if fraud_flag else round(min(0.05, raifcoin_earned / 100_000), 4)
+    client_name = str(client.get("name") or payload.client_id)
+    if fraud_flag:
+        explanation = (
+            f"Сессия RaifCoin для клиента {client_name} не засчитана: "
+            f"{'; '.join(fraud_reasons)}. RaifCoin не начислен, кредитный рейтинг не повышен."
+        )
+    else:
+        explanation = (
+            f"Клиент {client_name} сделал {payload.tap_count} тапов за "
+            f"{duration_sec:.1f} сек., скорость {tap_rate} тап/сек. Множитель "
+            f"{multiplier:g}, начислено {raifcoin_earned} RC. Внутренний кредитный "
+            f"рейтинг можно повысить на {rating_delta:.4f}; backend должен сохранить "
+            "баланс и передать накопленный raifcoin_rating_boost в профиль клиента."
+        )
+    return {
+        "status": "scored",
+        "client_id": payload.client_id,
+        "session_id": payload.session_id,
+        "tap_count": payload.tap_count,
+        "duration_ms": payload.duration_ms,
+        "tap_rate_per_sec": tap_rate,
+        "multiplier": multiplier,
+        "raifcoin_earned": raifcoin_earned,
+        "currency": "RC",
+        "rating_delta": rating_delta,
+        "fraud_flag": fraud_flag,
+        "fraud_reasons": fraud_reasons,
+        "blockchain": False,
+        "external_transfer": False,
+        "explanation": explanation,
+        "reason": explanation,
+        "rules": _raifcoin_rules(),
+    }
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "team": TEAM_NAME, "block": "cib",
@@ -668,6 +796,17 @@ async def casino_slot_rules() -> dict:
 async def casino_spin_resolve(payload: CasinoSpinRequest) -> dict:
     client = await _get_client(payload.client_id)
     return _resolve_casino_spin(payload, client)
+
+
+@app.get("/raifcoin/rules")
+async def raifcoin_rules() -> dict:
+    return _raifcoin_rules()
+
+
+@app.post("/raifcoin/tap/score")
+async def raifcoin_tap_score(payload: RaifCoinTapScoreRequest) -> dict:
+    client = await _get_client(payload.client_id)
+    return _score_raifcoin_taps(payload, client)
 
 
 @app.get("/meta/plan", response_class=PlainTextResponse)
