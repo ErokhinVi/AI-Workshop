@@ -5,8 +5,14 @@
       "Read(team_a/**)",
       "Edit(team_a/**)",
       "Write(team_a/**)",
+      "Read(team_b/retail/src/**)",
+      "Read(team_b/retail/pyproject.toml)",
+      "Read(team_b/retail/Dockerfile)",
       "Edit(team_b/retail/**)",
       "Write(team_b/retail/**)",
+      "Read(team_b/backend/src/**)",
+      "Read(team_b/backend/pyproject.toml)",
+      "Read(team_b/backend/Dockerfile)",
       "Edit(team_b/backend/**)",
       "Write(team_b/backend/**)",
       "Edit(simulator/**)",
@@ -21,7 +27,9 @@
     "allow": [
       "Edit(team_b/cib/**)",
       "Write(team_b/cib/**)",
-      "Read(team_b/**)",
+      "Read(team_b/cib/**)",
+      "Read(team_b/retail/CONTRACT.md)",
+      "Read(team_b/backend/CONTRACT.md)",
       "Read(tasks/**)",
       "Read(seed/**)",
       "Bash(docker-compose:*)",
@@ -38,9 +46,9 @@
       "Bash(git push:*)",
       "Bash(git pull:*)",
       "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(cat:team_b/cib/**)",
+      "Bash(grep:team_b/cib/**)",
+      "Bash(find:team_b/cib/**)"
     ]
   }
 }

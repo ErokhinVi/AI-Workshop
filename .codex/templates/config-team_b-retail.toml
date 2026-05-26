@@ -18,11 +18,21 @@ default_permissions = "raif-team_b-retail"
 [permissions.raif-team_b-retail.filesystem]
 ":root" = "read"
 
+# Модель «свой блок + витрины соседей»:
+# - читаем корень репозитория (tasks/, seed/, корневые md),
+# - пишем только в свой блок,
+# - папки соседей по команде закрыты полностью,
+# - но CONTRACT.md соседей разрешён на чтение — это точка стыковки,
+# - чужая команда невидима целиком.
 [permissions.raif-team_b-retail.filesystem.":workspace_roots"]
-"." = "read"               # читать все три блока своей команды, tasks, seed
-"team_b/retail" = "write"  # писать можно только в свой блок
-".git" = "write"           # служебная папка git — нужна для сохранения в копилку
-"team_a" = "deny"          # чужая команда не видна вовсе (ни чтения, ни записи)
+"." = "read"
+"team_b/retail" = "write"
+".git" = "write"
+"team_b/cib" = "deny"
+"team_b/backend" = "deny"
+"team_b/cib/CONTRACT.md" = "read"
+"team_b/backend/CONTRACT.md" = "read"
+"team_a" = "deny"
 
 # Сеть нужна, чтобы сохранять работу в общую копилку.
 [permissions.raif-team_b-retail.network]
