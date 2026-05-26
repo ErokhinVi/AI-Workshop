@@ -109,6 +109,124 @@ function Require-Command($name, $hint) {
   if (-not $cmd) { Die ("$name не найден. $hint") }
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Portable Git (MinGit) — раскатывается локально, если на машине нет git/ssh.
+# MinGit — официальный мини-дистрибутив Git for Windows, ~38 МБ, содержит
+# git.exe + ssh.exe + минимум helpers. Распаковывается из zip без admin.
+# Цель: машины членов правления, где Git for Windows может быть не установлен,
+# а корпоративный Artifactory недоступен. URL и версия — pinned, на случай если
+# api.github.com задросселит при одновременном запуске у нескольких участников.
+# ─────────────────────────────────────────────────────────────────────────────
+$MinGitVersion = '2.54.0'
+$MinGitUrl     = 'https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/MinGit-2.54.0-64-bit.zip'
+# Tools вне $RepoDir — иначе git clone падает на «destination path already exists
+# and is not an empty directory». LOCALAPPDATA — стандартное место для пер-юзер
+# тулов на Windows, не требует админ-прав и не зависит от того, где репо.
+$ToolsRoot     = Join-Path $env:LOCALAPPDATA 'raif-workshop\tools'
+$MinGitDir     = Join-Path $ToolsRoot 'MinGit'
+
+function Test-CommandAvailable($name) {
+  return [bool](Get-Command $name -ErrorAction SilentlyContinue)
+}
+
+function Add-ToUserPath($folder) {
+  # Постоянный User-PATH через HKCU\Environment. setx обрезает на 1024 символах
+  # и теряет переменные другого пользователя — [Environment]::SetEnvironmentVariable
+  # обходит обе ловушки. Новые процессы (Claude/Codex App при перезапуске) увидят.
+  $current = [Environment]::GetEnvironmentVariable('PATH', 'User')
+  if ($null -eq $current) { $current = '' }
+  $parts = $current -split ';' | Where-Object { $_ -and ($_.Trim()) }
+  if ($parts -contains $folder) { return $false }
+  $newPath = (@($folder) + $parts) -join ';'
+  [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+  return $true
+}
+
+function Install-MinGit {
+  if (-not (Test-Path $ToolsRoot)) { New-Item -ItemType Directory -Path $ToolsRoot -Force | Out-Null }
+
+  $gitExe = Join-Path $MinGitDir 'cmd\git.exe'
+  if (Test-Path $gitExe) {
+    Info ('Portable git уже распакован: ' + $MinGitDir)
+  } else {
+    $zipPath = Join-Path $ToolsRoot ('MinGit-' + $MinGitVersion + '-64-bit.zip')
+    if (-not (Test-Path $zipPath)) {
+      Info ('Скачиваю MinGit ' + $MinGitVersion + ' (~38 МБ)')
+      Note ('  ' + $MinGitUrl)
+      $prevPP = $ProgressPreference
+      $ProgressPreference = 'SilentlyContinue'
+      try {
+        # TLS 1.2 — нужен для github.com на старых Win10 без свежих апдейтов
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $MinGitUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
+      } catch {
+        Warn 'Не смог скачать MinGit с github.com. Возможно, корпоративный прокси блокирует HTTPS.'
+        Note 'Ручной fallback:'
+        Note ('  1. Открой в браузере: ' + $MinGitUrl)
+        Note ('  2. Скачай zip-файл, положи в: ' + $ToolsRoot)
+        Note ('  3. Запусти этот .cmd ещё раз — он распакует уже скачанный архив.')
+        Die ('Скачивание MinGit не удалось: ' + $_.Exception.Message)
+      } finally {
+        $ProgressPreference = $prevPP
+      }
+    } else {
+      Info ('Использую уже скачанный архив: ' + $zipPath)
+    }
+    try { Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue } catch {}
+    Info 'Распаковываю...'
+    if (Test-Path $MinGitDir) { Remove-Item -LiteralPath $MinGitDir -Recurse -Force }
+    try {
+      Expand-Archive -LiteralPath $zipPath -DestinationPath $MinGitDir -Force
+    } catch {
+      Die ('Не смог распаковать MinGit: ' + $_.Exception.Message)
+    }
+    if (-not (Test-Path $gitExe)) { Die ('Распаковка MinGit прошла, но git.exe не найден в ' + $gitExe) }
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    Ok ('MinGit распакован в ' + $MinGitDir)
+  }
+
+  $gitBin = Join-Path $MinGitDir 'cmd'
+  $sshBin = Join-Path $MinGitDir 'usr\bin'
+
+  # PATH текущей сессии — чтобы дальнейшие & git и & ssh ниже по скрипту работали
+  if (($env:PATH -split ';') -notcontains $gitBin) { $env:PATH = $gitBin + ';' + $env:PATH }
+  if (($env:PATH -split ';') -notcontains $sshBin) { $env:PATH = $sshBin + ';' + $env:PATH }
+
+  # Постоянный User-PATH — чтобы Claude/Codex App после перезапуска видел git/ssh
+  $added = $false
+  if (Add-ToUserPath $gitBin) { $added = $true }
+  if (Add-ToUserPath $sshBin) { $added = $true }
+  if ($added) {
+    Ok 'PortableGit добавлен в постоянный User-PATH'
+    Note '(новые окна Claude/Codex увидят git после перезапуска приложения)'
+  } else {
+    Info 'PortableGit уже был в User-PATH'
+  }
+}
+
+function Ensure-PortableTools {
+  $needGit = -not (Test-CommandAvailable 'git')
+  $needSsh = -not (Test-CommandAvailable 'ssh')
+  if (-not $needGit -and -not $needSsh) {
+    Info ('git: ' + ((& git --version) | Out-String).Trim())
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
+    $ErrorActionPreference = $prevEAP
+    Info ('ssh: ' + $sshVer)
+    return
+  }
+  if ($needGit) { Info 'git в PATH не найден — поставлю portable-копию (MinGit)' }
+  if ($needSsh) { Info 'ssh в PATH не найден — возьму ssh из portable MinGit' }
+  Install-MinGit
+  if (-not (Test-CommandAvailable 'git')) { Die 'После установки MinGit git всё равно не доступен. Покажи ведущему лог выше.' }
+  if (-not (Test-CommandAvailable 'ssh')) { Die 'После установки MinGit ssh всё равно не доступен. Покажи ведущему лог выше.' }
+  Ok ('git: ' + ((& git --version) | Out-String).Trim())
+  $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
+  $ErrorActionPreference = $prevEAP
+  Ok ('ssh: ' + $sshVer)
+}
+
 function Write-FileNoBom($path, $text) {
   $enc = New-Object System.Text.UTF8Encoding $false
   [System.IO.File]::WriteAllText($path, $text, $enc)
@@ -150,15 +268,46 @@ function Add-CodexTrust($RepoDir) {
 
 # ── 0. sanity ────────────────────────────────────────────────────────────────
 Banner
-Step 'Проверяю окружение'
-Info ('OS:  ' + [System.Environment]::OSVersion.VersionString)
-Require-Command git 'Установи Git for Windows: https://git-scm.com/download/win'
-Info ('git: ' + ((& git --version) | Out-String).Trim())
-Require-Command ssh 'OpenSSH Client отсутствует. Settings → Apps → Optional Features → Add → OpenSSH Client.'
-$prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
-$ErrorActionPreference = $prevEAP
-Info ('ssh: ' + $sshVer)
+Step 'Проверяю окружение и инструменты'
+
+# Полный осмотр инструментов: что есть на машине прямо сейчас, чтобы при
+# раздаче скрипта в зале было видно по логу, у кого что не стоит.
+$osCaption = ''
+try { $osCaption = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption } catch {}
+Info ('OS:        ' + [System.Environment]::OSVersion.VersionString + $(if ($osCaption) { '  (' + $osCaption + ')' }))
+Info ('arch:      ' + $env:PROCESSOR_ARCHITECTURE)
+Info ('user:      ' + $env:USERNAME)
+Info ('HOME:      ' + $env:USERPROFILE)
+Info ('REPO_DIR:  ' + $RepoDir)
+Info ('TOOLS:     ' + $ToolsRoot)
+
+function Show-Tool($name, $hint) {
+  $cmd = Get-Command $name -ErrorAction SilentlyContinue
+  if ($cmd) {
+    $ver = '?'
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+      $raw = (& $name --version 2>&1) | Out-String
+      $ver = ($raw -split "`n")[0].Trim()
+    } catch {}
+    $ErrorActionPreference = $prevEAP
+    Info ($name.PadRight(8) + ': ✓  ' + $cmd.Source + '  (' + $ver + ')')
+    return $true
+  }
+  if ($hint) {
+    Info ($name.PadRight(8) + ': ✗  не установлен  (' + $hint + ')')
+  } else {
+    Info ($name.PadRight(8) + ': ✗  не установлен')
+  }
+  return $false
+}
+
+Show-Tool 'git'    'поднимем через portable MinGit ниже' | Out-Null
+Show-Tool 'ssh'    'если нет — возьмём ssh из MinGit' | Out-Null
+# Больше ничего на хосте не нужно: python/node не используются — агент
+# (Claude Code App у борда уже установлен) работает внутри себя.
+
+Ensure-PortableTools
 Ok 'Окружение в порядке'
 
 # ── 1. меню выбора участника (WinForms) ──────────────────────────────────────
@@ -189,10 +338,10 @@ function Show-MemberPicker {
   [void]$listBox.Items.AddRange(@(
     '1) Сергей Монин — Команда A · Розница',
     '2) Никита Патрахин — Команда A · Корпоратив',
-    '3) Иван Курочкин — Команда A · Бэкенд',
+    '3) Роланд Васс — Команда A · Бэкенд',
     '4) Александр Ложечкин — Команда B · Розница',
     '5) Герт Хебенштрайт — Команда B · Корпоратив',
-    '6) Роланд Васс — Команда B · Бэкенд',
+    '6) Иван Курочкин — Команда B · Бэкенд',
     '7) Виталий Ерохин — Организатор'
   ))
   $listBox.SelectedIndex = 0
@@ -227,10 +376,10 @@ if (-not $WhoNum) { Write-Host 'Отменено.'; exit 0 }
 $Members = @{
   1 = @{ Name='Sergey Monin';       Email='monin@raif-workshop.local';      Team='team_a'; Block='retail';  Participant='sergey-monin'       }
   2 = @{ Name='Nikita Patrahin';    Email='patrahin@raif-workshop.local';   Team='team_a'; Block='cib';     Participant='nikita-patrahin'    }
-  3 = @{ Name='Ivan Kurochkin';     Email='kurochkin@raif-workshop.local';  Team='team_a'; Block='backend'; Participant='ivan-kurochkin'     }
+  3 = @{ Name='Roland Vass';        Email='vass@raif-workshop.local';       Team='team_a'; Block='backend'; Participant='roland-vass'        }
   4 = @{ Name='Aleksandr Lozhechkin'; Email='lozhechkin@raif-workshop.local'; Team='team_b'; Block='retail';  Participant='aleksandr-lozhechkin' }
   5 = @{ Name='Gert Hebenstreit';   Email='hebenstreit@raif-workshop.local'; Team='team_b'; Block='cib';     Participant='gert-hebenstreit'   }
-  6 = @{ Name='Roland Vass';        Email='vass@raif-workshop.local';       Team='team_b'; Block='backend'; Participant='roland-vass'        }
+  6 = @{ Name='Ivan Kurochkin';     Email='kurochkin@raif-workshop.local';  Team='team_b'; Block='backend'; Participant='ivan-kurochkin'     }
   7 = @{ Name='Vitaly Erokhin';     Email='erokhin@raif-workshop.local';    Team='host';   Block='host';    Participant='vitaly-erokhin'     }
 }
 $cfg = $Members[$WhoNum]
@@ -384,8 +533,8 @@ if ($cfg.Team -eq 'host') {
   Note 'Codex поставит защиту сам на онбординге (см. AGENTS.md)'
 }
 
-# ── 8. inject key + info в .git/ для Claude в Cowork ─────────────────────────
-Step 'Готовлю sandbox-onboarding для Claude (.git\raif-workshop-*)'
+# ── 8. inject key + info в .git/ для Claude Code App ────────────────────────
+Step 'Готовлю onboarding для Claude (.git\raif-workshop-*)'
 $gitDir = Join-Path $RepoDir '.git'
 $keyInGit  = Join-Path $gitDir 'raif-workshop-key'
 $infoInGit = Join-Path $gitDir 'raif-workshop-info'
@@ -396,8 +545,9 @@ Lock-FileToCurrentUser -path $keyInGit
 Ok ("Ключ для sandbox: " + $keyInGit)
 
 $infoText = @"
-# raif-workshop-2026 — мета-инфо участника для Claude в Cowork.
-# Этот файл читает tools/cowork-onboard.py при первом запуске Claude.
+# raif-workshop-2026 — мета-инфо участника для Claude Code App.
+# Этот файл читает tools/cowork-onboard.py при первом запуске Claude
+# (если агент работает в Linux-sandbox-е; на Win-хосте просто игнорируется).
 WORKSHOP_PARTICIPANT=$($cfg.Participant)
 WORKSHOP_TEAM=$($cfg.Team)
 WORKSHOP_BLOCK=$($cfg.Block)
@@ -411,11 +561,11 @@ Note ('WORKSHOP_PARTICIPANT=' + $cfg.Participant)
 Note ('WORKSHOP_TEAM=' + $cfg.Team)
 Note ('WORKSHOP_BLOCK=' + $cfg.Block)
 
-# ── 9. локальный git config репо (страховка для sandbox-сессий Claude) ───────
-# Claude в Cowork стартует в своём sandbox-е со своим $HOME — --global,
-# прописанный на юзере, там не виден. Кладём подпись и ssh-команду в локальный
-# .git/config: он на диске и виден из любой среды, работающей с этим репо.
-Step 'Локальный git config репо — страховка для sandbox-сессий Claude'
+# ── 9. локальный git config репо (страховка для агентских сессий Claude) ────
+# Если агент стартует в своём sandbox-е со своим $HOME, --global на юзере
+# оттуда не виден. Кладём подпись и ssh-команду в локальный .git/config:
+# он на диске и виден из любой среды, работающей с этим репо.
+Step 'Локальный git config репо — страховка для агентских сессий Claude'
 & git -C $RepoDir config user.name  $cfg.Name  | Out-Null
 & git -C $RepoDir config user.email $cfg.Email | Out-Null
 $keyFwd = $keyInGit -replace '\\', '/'
@@ -475,10 +625,19 @@ if ($cfg.Team -eq 'host') {
 }
 Write-Host ''
 Write-Host '  Что дальше:'
-Write-Host '    1. Открой Claude в Cowork mode.'
-Write-Host ('    2. Подключи папку ' + $RepoDir + ' как working folder.')
-Write-Host '    3. Напиши Claude любое первое сообщение — он сам подцепит'
-Write-Host '       ключ и узнает, кто ты, по info-файлу.'
+if (Test-Path (Join-Path $MinGitDir 'cmd\git.exe')) {
+  Write-Host '    1. Если Claude Code был открыт — закрой его полностью (включая трэй)' -ForegroundColor Yellow
+  Write-Host '       и открой заново. Иначе он не увидит git, который я только что поставил.' -ForegroundColor Yellow
+  Write-Host '    2. Открой Claude Code App.'
+  Write-Host ('    3. Подключи папку ' + $RepoDir + ' как working folder.')
+  Write-Host '    4. Напиши Claude любое первое сообщение — он сам подцепит'
+  Write-Host '       ключ и узнает, кто ты, по info-файлу.'
+} else {
+  Write-Host '    1. Открой Claude Code App.'
+  Write-Host ('    2. Подключи папку ' + $RepoDir + ' как working folder.')
+  Write-Host '    3. Напиши Claude любое первое сообщение — он сам подцепит'
+  Write-Host '       ключ и узнает, кто ты, по info-файлу.'
+}
 Write-Host ''
 Write-Host '  (Старый flow с командой "claude" в терминале тоже работает —'
 Write-Host '   открой папку в терминале и скажи "claude".)'

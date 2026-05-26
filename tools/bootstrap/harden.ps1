@@ -75,7 +75,7 @@ function Harden-GitConfig($repoDir) {
   foreach ($k in $kv.Keys) {
     & git -C $repoDir config $k $kv[$k] | Out-Null
   }
-  & git -C $repoDir maintenance unregister 2>$null | Out-Null
+  try { & git -C $repoDir maintenance unregister *> $null } catch { }
   Ok 'git config: autocrlf=false, fsmonitor=off, gc.auto=0, maintenance=off'
 }
 
