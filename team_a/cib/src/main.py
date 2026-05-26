@@ -22,7 +22,7 @@ PRODUCTS = [
     {"id": "deposit-base", "kind": "deposit", "name": "Срочный депозит", "rate_pct": 14.0},
 ]
 
-app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.0")
+app = FastAPI(title="cib — корпоратив и бизнес-логика", version="1.0.1")
 
 
 @app.get("/health")
