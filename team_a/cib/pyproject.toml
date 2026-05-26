@@ -1,6 +1,6 @@
 [project]
 name = "raif-cib"
-version = "1.0.1"
+version = "1.0.0"
 description = "Блок cib — корпоратив и бизнес-логика банка команды"
 requires-python = ">=3.11"
 dependencies = [
