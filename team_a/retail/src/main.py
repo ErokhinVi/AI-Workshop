@@ -25,8 +25,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "team": TEAM_NAME, "block": "retail",
-            "commit": COMMIT, "backend_url": BACKEND_URL, "cib_url": CIB_URL,
-            "hello": "Сергей на связи"}
+            "commit": COMMIT, "backend_url": BACKEND_URL, "cib_url": CIB_URL}
 
 
 @app.get("/", response_class=HTMLResponse)
