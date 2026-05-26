@@ -125,6 +125,19 @@ $MinGitUrl     = 'https://github.com/git-for-windows/git/releases/download/v2.54
 $ToolsRoot     = Join-Path $env:LOCALAPPDATA 'raif-workshop\tools'
 $MinGitDir     = Join-Path $ToolsRoot 'MinGit'
 
+# Node LTS 22 — нужен Claude Code App'у для MCP-серверов и слэш-команд.
+# Portable ZIP с nodejs.org, без админа, без установщика.
+$NodeVersion   = '22.11.0'
+$NodeUrl       = 'https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip'
+$NodeDir       = Join-Path $ToolsRoot 'node'
+# Python embeddable 3.12 — нужен агенту для `python3 tools/cowork-onboard.py`.
+# Это zip-пакет с python.exe и stdlib (без pip, без site-packages). После
+# распаковки копируем python.exe → python3.exe (CLAUDE.md зовёт именно
+# `python3`) и раскомментируем `import site` в ._pth.
+$PyVersion     = '3.12.7'
+$PyUrl         = 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-amd64.zip'
+$PyDir         = Join-Path $ToolsRoot 'python'
+
 function Test-CommandAvailable($name) {
   return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
@@ -204,27 +217,156 @@ function Install-MinGit {
   }
 }
 
-function Ensure-PortableTools {
-  $needGit = -not (Test-CommandAvailable 'git')
-  $needSsh = -not (Test-CommandAvailable 'ssh')
-  if (-not $needGit -and -not $needSsh) {
-    Info ('git: ' + ((& git --version) | Out-String).Trim())
-    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
-    $ErrorActionPreference = $prevEAP
-    Info ('ssh: ' + $sshVer)
-    return
+function Download-Portable($url, $outZip, $label) {
+  $prevPP = $ProgressPreference
+  $ProgressPreference = 'SilentlyContinue'
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $outZip -UseBasicParsing -TimeoutSec 180
+  } catch {
+    Warn ('Не смог скачать ' + $label + ' с публичного источника.')
+    Note ('Ручной fallback:')
+    Note ('  1. Открой в браузере: ' + $url)
+    Note ('  2. Скачай zip, положи в: ' + $ToolsRoot)
+    Note ('  3. Запусти этот .cmd ещё раз — он распакует уже скачанный архив.')
+    throw
+  } finally {
+    $ProgressPreference = $prevPP
   }
+}
+
+function Install-PortableNode {
+  if (-not (Test-Path $ToolsRoot)) { New-Item -ItemType Directory -Path $ToolsRoot -Force | Out-Null }
+  $nodeExe = Join-Path $NodeDir 'node.exe'
+  if (Test-Path $nodeExe) {
+    Info ('Portable node уже распакован: ' + $NodeDir)
+  } else {
+    $zipName = 'node-v' + $NodeVersion + '-win-x64.zip'
+    $zipPath = Join-Path $ToolsRoot $zipName
+    if (-not (Test-Path $zipPath)) {
+      Info ('Скачиваю Node ' + $NodeVersion + ' (~30 МБ)')
+      Note ('  ' + $NodeUrl)
+      try { Download-Portable $NodeUrl $zipPath 'Node' } catch {
+        Warn ('Не смог скачать Node — пропускаю (Claude может потерять часть MCP/команд)')
+        return
+      }
+    } else {
+      Info ('Использую уже скачанный архив: ' + $zipPath)
+    }
+    try { Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue } catch {}
+    Info 'Распаковываю Node...'
+    $tmpDir = Join-Path $ToolsRoot ('node-tmp-' + [guid]::NewGuid().ToString('N'))
+    try {
+      Expand-Archive -LiteralPath $zipPath -DestinationPath $tmpDir -Force
+    } catch {
+      Warn ('Не смог распаковать Node: ' + $_.Exception.Message)
+      Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+      return
+    }
+    # Внутри tmpDir один каталог node-vXX.X.X-win-x64 — поднимем содержимое
+    $inner = Get-ChildItem -Path $tmpDir -Directory | Select-Object -First 1
+    if ($null -eq $inner) {
+      Warn 'Архив Node пуст — пропускаю'; Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue; return
+    }
+    if (Test-Path $NodeDir) { Remove-Item -LiteralPath $NodeDir -Recurse -Force }
+    Move-Item -LiteralPath $inner.FullName -Destination $NodeDir
+    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $nodeExe)) { Warn ('Распаковка прошла, но node.exe не найден в ' + $nodeExe); return }
+    Ok ('Node распакован в ' + $NodeDir)
+  }
+  # PATH текущей сессии + User-PATH
+  if (($env:PATH -split ';') -notcontains $NodeDir) { $env:PATH = $NodeDir + ';' + $env:PATH }
+  if (Add-ToUserPath $NodeDir) {
+    Ok 'Node добавлен в постоянный User-PATH'
+  } else {
+    Info 'Node уже был в User-PATH'
+  }
+}
+
+function Install-PortablePython {
+  if (-not (Test-Path $ToolsRoot)) { New-Item -ItemType Directory -Path $ToolsRoot -Force | Out-Null }
+  $pyExe  = Join-Path $PyDir 'python.exe'
+  $py3Exe = Join-Path $PyDir 'python3.exe'
+  if (Test-Path $py3Exe) {
+    Info ('Portable python уже распакован: ' + $PyDir)
+  } else {
+    $zipName = 'python-' + $PyVersion + '-embed-amd64.zip'
+    $zipPath = Join-Path $ToolsRoot $zipName
+    if (-not (Test-Path $zipPath)) {
+      Info ('Скачиваю Python ' + $PyVersion + ' embeddable (~11 МБ)')
+      Note ('  ' + $PyUrl)
+      try { Download-Portable $PyUrl $zipPath 'Python' } catch {
+        Warn ('Не смог скачать Python — агент не сможет запустить cowork-onboard.py')
+        return
+      }
+    } else {
+      Info ('Использую уже скачанный архив: ' + $zipPath)
+    }
+    try { Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue } catch {}
+    Info 'Распаковываю Python...'
+    if (Test-Path $PyDir) { Remove-Item -LiteralPath $PyDir -Recurse -Force }
+    try {
+      Expand-Archive -LiteralPath $zipPath -DestinationPath $PyDir -Force
+    } catch {
+      Warn ('Не смог распаковать Python: ' + $_.Exception.Message); return
+    }
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $pyExe)) { Warn ('Распаковка прошла, но python.exe не найден в ' + $pyExe); return }
+    # python3.exe — копия python.exe (CLAUDE.md зовёт именно `python3`)
+    Copy-Item -LiteralPath $pyExe -Destination $py3Exe -Force
+    # Дубликат _pth под именем python3._pth: embeddable ищет _pth по basename
+    # исполняемого файла (python3.exe → python3._pth). Без этого есть риск
+    # `ModuleNotFoundError: os` при isolated mode. Заодно раскомментируем
+    # `import site` в обоих файлах — превентивно, для надёжности stdlib.
+    $pthFile = Get-ChildItem -Path $PyDir -Filter 'python*._pth' -File | Select-Object -First 1
+    if ($null -ne $pthFile) {
+      $py3Pth = Join-Path $PyDir 'python3._pth'
+      if (-not (Test-Path $py3Pth)) {
+        Copy-Item -LiteralPath $pthFile.FullName -Destination $py3Pth -Force
+      }
+      foreach ($pthPath in @($pthFile.FullName, $py3Pth)) {
+        $pth = Get-Content -LiteralPath $pthPath -Raw
+        $pthNew = $pth -replace '(?m)^\s*#\s*import\s+site\s*$', 'import site'
+        if ($pth -ne $pthNew) {
+          Set-Content -LiteralPath $pthPath -Value $pthNew -Encoding ASCII -NoNewline
+        }
+      }
+    }
+    Ok ('Python распакован в ' + $PyDir + ' (python3.exe готов)')
+  }
+  # PATH текущей сессии + User-PATH
+  if (($env:PATH -split ';') -notcontains $PyDir) { $env:PATH = $PyDir + ';' + $env:PATH }
+  if (Add-ToUserPath $PyDir) {
+    Ok 'Python добавлен в постоянный User-PATH'
+  } else {
+    Info 'Python уже был в User-PATH'
+  }
+}
+
+function Ensure-PortableTools {
+  $needGit  = -not (Test-CommandAvailable 'git')
+  $needSsh  = -not (Test-CommandAvailable 'ssh')
+  $needNode = -not (Test-CommandAvailable 'node')
+  $needPy   = -not ((Test-CommandAvailable 'python3') -or (Test-CommandAvailable 'python'))
+
   if ($needGit) { Info 'git в PATH не найден — поставлю portable-копию (MinGit)' }
   if ($needSsh) { Info 'ssh в PATH не найден — возьму ssh из portable MinGit' }
-  Install-MinGit
+  if ($needGit -or $needSsh) { Install-MinGit }
   if (-not (Test-CommandAvailable 'git')) { Die 'После установки MinGit git всё равно не доступен. Покажи ведущему лог выше.' }
   if (-not (Test-CommandAvailable 'ssh')) { Die 'После установки MinGit ssh всё равно не доступен. Покажи ведущему лог выше.' }
+
+  if ($needNode) { Info 'node в PATH не найден — поставлю portable-копию (Node LTS)'; Install-PortableNode }
+  if ($needPy)   { Info 'python в PATH не найден — поставлю portable-копию (Python embeddable)'; Install-PortablePython }
+
   Ok ('git: ' + ((& git --version) | Out-String).Trim())
   $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
   try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(версия недоступна)' }
   $ErrorActionPreference = $prevEAP
   Ok ('ssh: ' + $sshVer)
+  if (Test-CommandAvailable 'node')    { Ok ('node: ' + ((& node --version) | Out-String).Trim()) }
+  if (Test-CommandAvailable 'python3') { Ok ('python3: ' + ((& python3 --version 2>&1) | Out-String).Trim()) }
+  elseif (Test-CommandAvailable 'python') { Ok ('python: ' + ((& python --version 2>&1) | Out-String).Trim()) }
 }
 
 function Write-FileNoBom($path, $text) {

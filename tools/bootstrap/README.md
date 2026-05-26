@@ -35,9 +35,15 @@
 
 ## Зависимости на ноутбуке участника
 
-**macOS.** Xcode Command Line Tools (git и ssh оттуда). Если нет — `xcode-select --install`. Скрипт сам это проверит и подскажет.
+**Generic-сценарий (тест-прогон)** — git+ssh ставит сам пользователь:
+- macOS: Xcode Command Line Tools (`xcode-select --install`).
+- Windows: Git for Windows + OpenSSH Client.
 
-**Windows.** Git for Windows ([git-scm.com](https://git-scm.com/download/win)) и OpenSSH Client (в Windows 10/11 идёт из коробки; если в корпоративном образе вырезан — Settings → Apps → Optional Features → Add → OpenSSH Client).
+**Board-сценарий (раздаётся правлению)** — `raif-workshop-setup-board.*` ставит всё сам с публичных источников, без админа и без Artifactory:
+- macOS: если нет `git` — сам зовёт `xcode-select --install` (GUI-попап Apple). Если нет `node` — скачивает Node 22 LTS tarball с nodejs.org в `~/.raif-workshop/tools/`, прописывает PATH через `~/.zshenv`.
+- Windows: если нет `git`/`ssh` — качает MinGit 2.54.0 zip с github.com. Если нет `node` — Node 22 LTS zip с nodejs.org. Если нет `python` — Python 3.12.7 embeddable zip с python.org (плюс копия `python.exe` → `python3.exe`). Всё в `%LOCALAPPDATA%\raif-workshop\tools\`, User-PATH через `[Environment]::SetEnvironmentVariable(...)`.
+
+После запуска board-скрипта **Claude Code App нужно полностью перезапустить** (включая трэй на Win), чтобы он подцепил новый PATH.
 
 ## Как раздавать
 

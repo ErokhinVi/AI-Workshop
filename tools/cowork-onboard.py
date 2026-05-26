@@ -62,7 +62,7 @@ WIN_GIT_DIR = REPO_ROOT / ".git"
 KEY_SRC = COMMON_GIT_DIR / "raif-workshop-key"
 INFO_SRC = COMMON_GIT_DIR / "raif-workshop-info"
 
-HOME = Path(os.environ["HOME"])
+HOME = Path.home()
 SSH_DIR = HOME / ".ssh"
 KEY_DST = SSH_DIR / "raif_workshop"
 SSH_CONFIG = SSH_DIR / "config"
@@ -214,8 +214,9 @@ def setup_linux_gitdir() -> str:
     Шим ставится только если копия .git действительно собралась в рабочий
     репозиторий.
     """
-    if sys.platform == "darwin":
-        return _fallback_plain_git("macOS — virtiofs-проблемы нет, шим не нужен")
+    if sys.platform != "linux":
+        return _fallback_plain_git(
+            f"{sys.platform} — virtiofs-проблемы нет (не Linux), шим не нужен")
 
     if not WIN_GIT_DIR.is_dir():
         return _fallback_plain_git(
