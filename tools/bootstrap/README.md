@@ -1,65 +1,76 @@
-# tools/bootstrap — стартовые скрипты для ноутбуков участников
+# tools/bootstrap — starter scripts for participants' laptops
 
-Эти файлы раздаются членам правления перед воркшопом, чтобы их ноутбуки за пару минут оказались настроены: SSH-ключ воркшопа, git identity, склонированный репо и `.git/raif-workshop-info`, который читает `tools/cowork-onboard.py` при первом запуске агента. Работать можно в Claude Code (читает `CLAUDE.md`) или в Codex (читает `AGENTS.md`) — защиту блока скрипт ставит для обоих.
+These files are handed to board members before the workshop so their laptops
+are configured in a couple of minutes: workshop SSH key, git identity, cloned
+repo and `.git/raif-workshop-info` (read by `tools/cowork-onboard.py` on the
+agent's first launch). The agent can be Claude Code (reads `CLAUDE.md`) or
+Codex (reads `AGENTS.md`) — block isolation is installed for both.
 
-## Что внутри
+## What's inside
 
-| Файл | Платформа | Как запускается |
+| File | Platform | How it runs |
 |---|---|---|
-| `raif-workshop-setup.applescript` | macOS | Дабл-клик → Script Editor → Run (Cmd+R) → выбор команды и блока, ввод имени → автоматически открывается Terminal с bootstrap-скриптом. |
-| `raif-workshop-setup.cmd` | Windows 10/11 | Дабл-клик → SmartScreen «Подробнее → Выполнить в любом случае» → выбор команды и блока и ввод имени в WinForms-окне → всё крутится в одном консольном окне. |
-| `raif-workshop-setup-board.*` | macOS / Windows | То же самое, но с заранее зашитым составом правления (выбор из списка из 7 человек). Раздаётся только членам правления. |
+| `raif-workshop-setup.applescript` | macOS | Double-click → Script Editor → Run (Cmd+R) → pick team and block, type your name → Terminal opens automatically with the bootstrap script. |
+| `raif-workshop-setup.cmd` | Windows 10/11 | Double-click → SmartScreen "More info → Run anyway" → pick team, block and type your name in the WinForms window → everything happens in one console window. |
+| `raif-workshop-setup-board.{applescript,cmd}` | macOS / Windows | Byte-identical copies of the files above, distributed only to board members through the private channel that ships the deploy SSH key. |
 
-Скрипт делает:
+There is no hard-coded roster anywhere in these scripts: each participant
+picks team (`team_a` or `team_b`) and block (`retail` / `cib` / `backend`)
+themselves and types their name. The slug used for the git email and the
+participant id is derived from the typed name (lowercased ASCII letters,
+digits and dashes); for non-ASCII input the slug is roughly transliterated.
 
-1. Кладёт встроенный SSH-ключ в `~/.ssh/raif_workshop` с правами только текущего пользователя.
-2. Дописывает блок в `~/.ssh/config` с маркером `# raif-workshop-2026`, чтобы GitHub использовал этот ключ и ходил через порт 443 (`HostName ssh.github.com`, `Port 443`) — в корпоративной сети банка обычный SSH-порт 22 закрыт, иначе push/pull висли бы по таймауту.
-3. Прописывает `git config --global user.name` и `user.email` под выбранного участника.
-4. Стучится `ssh -T git@github.com` и ждёт `successfully authenticated`.
-5. Клонирует или ребейзит `~/AI-Workshop` (или `%USERPROFILE%\AI-Workshop`).
-6. Копирует ключ в `.git/raif-workshop-key` и пишет `.git/raif-workshop-info` с `WORKSHOP_PARTICIPANT/TEAM/BLOCK/GIT_NAME/GIT_EMAIL` — это то, что подцепит Claude в Cowork при первом сообщении.
-7. Ставит защиту блока для обоих агентов: копирует `.claude/templates/settings-<команда>-<блок>.json` → `.claude/settings.local.json` (Claude) и `.codex/templates/config-<команда>-<блок>.toml` → `.codex/config.toml` (Codex), а также отмечает папку репозитория доверенной в `~/.codex/config.toml` — иначе Codex не читает проектный конфиг. Организатору (`host`) защита не ставится.
+The "Workshop host" checkbox (Windows) and choosing the host option in the
+AppleScript skip block isolation entirely — used by the workshop organiser.
 
-## Кто в какой команде
+The script:
 
-Привязки людей к командам и блокам в основных скриптах нет: участник сам
-выбирает команду (`team_a` или `team_b`) и блок (`retail` / `cib` / `backend`)
-и вводит имя. Скрипт пишет выбор в `.git/raif-workshop-info`
-(`WORKSHOP_TEAM`, `WORKSHOP_BLOCK`, `WORKSHOP_PARTICIPANT`), а email и slug
-участника выводит из имени (транслитерация кириллицы).
+1. Drops the embedded SSH key into `~/.ssh/raif_workshop` with current-user-only permissions.
+2. Appends a block to `~/.ssh/config` (marker `# raif-workshop-2026`) so GitHub uses this key and routes through port 443 (`HostName ssh.github.com`, `Port 443`) — the corporate network blocks plain SSH port 22, otherwise push/pull would hang on a timeout.
+3. Sets `git config --global user.name` and `user.email` to the picked participant.
+4. Calls `ssh -T git@github.com` and waits for `successfully authenticated`.
+5. Clones or rebases `~/AI-Workshop` (or `%USERPROFILE%\AI-Workshop`).
+6. Copies the key into `.git/raif-workshop-key` and writes `.git/raif-workshop-info` with `WORKSHOP_PARTICIPANT/TEAM/BLOCK/GIT_NAME/GIT_EMAIL` — this is what Claude picks up in Cowork on the first message.
+7. Installs block isolation for both agents: copies `.claude/templates/settings-<team>-<block>.json` → `.claude/settings.local.json` (Claude) and `.codex/templates/config-<team>-<block>.toml` → `.codex/config.toml` (Codex), and also marks the repo folder as trusted in `~/.codex/config.toml` — otherwise Codex won't load the project config. Host mode (`host`) skips isolation.
 
-Версия с заранее зашитым составом правления — отдельные файлы
-`raif-workshop-setup-board.applescript` и `raif-workshop-setup-board.cmd`
-(там список из 7 человек в `$Members` / меню). Их раздают членам правления,
-а generic-версию выше — на тест-прогонах.
+## Tool dependencies on the participant's laptop
 
-## Зависимости на ноутбуке участника
+The script installs everything itself, with no admin rights and no
+Artifactory — only public sources:
 
-**Generic-сценарий (тест-прогон)** — git+ssh ставит сам пользователь:
-- macOS: Xcode Command Line Tools (`xcode-select --install`).
-- Windows: Git for Windows + OpenSSH Client.
+- **macOS**: if `git` is missing — calls `xcode-select --install` (Apple's GUI popup). If `node` is missing — downloads the Node 22 LTS tarball from nodejs.org into `~/.raif-workshop/tools/` and appends the PATH update to `~/.zshenv`.
+- **Windows**: if `git`/`ssh` are missing — downloads the MinGit 2.54.0 zip from github.com. If `node` is missing — Node 22 LTS zip from nodejs.org. If `python` is missing — Python 3.12.7 embeddable zip from python.org (plus a copy `python.exe` → `python3.exe`). Everything lands in `%LOCALAPPDATA%\raif-workshop\tools\`, User-PATH is updated via `[Environment]::SetEnvironmentVariable(...)`.
 
-**Board-сценарий (раздаётся правлению)** — `raif-workshop-setup-board.*` ставит всё сам с публичных источников, без админа и без Artifactory:
-- macOS: если нет `git` — сам зовёт `xcode-select --install` (GUI-попап Apple). Если нет `node` — скачивает Node 22 LTS tarball с nodejs.org в `~/.raif-workshop/tools/`, прописывает PATH через `~/.zshenv`.
-- Windows: если нет `git`/`ssh` — качает MinGit 2.54.0 zip с github.com. Если нет `node` — Node 22 LTS zip с nodejs.org. Если нет `python` — Python 3.12.7 embeddable zip с python.org (плюс копия `python.exe` → `python3.exe`). Всё в `%LOCALAPPDATA%\raif-workshop\tools\`, User-PATH через `[Environment]::SetEnvironmentVariable(...)`.
+After running the bootstrap on Windows, **Claude Code App must be fully
+restarted** (including the tray) for the new PATH to be picked up.
 
-После запуска board-скрипта **Claude Code App нужно полностью перезапустить** (включая трэй на Win), чтобы он подцепил новый PATH.
+## How to distribute
 
-## Как раздавать
+- On Mac, AirDrop is most convenient. The participant catches the file in Downloads and double-clicks it.
+- On Windows — corporate messenger / OneDrive / USB drive. Double-click from Downloads.
 
-- На Mac удобнее всего через AirDrop. Топ ловит файл в Downloads и сразу дабл-кликает.
-- На Windows — через корпоративный мессенджер / OneDrive / флешку. Двойной клик из Downloads.
+## After the workshop
 
-## Что делать после воркшопа
-
-Удалить deploy key на GitHub:
+Delete the deploy key on GitHub:
 
 ```
 Repo → Settings → Deploy keys → "raif-workshop-2026" → Delete
 ```
 
-После этого встроенные в скрипты ключи становятся бесполезными — что и нужно.
+Once that's done the keys embedded in the scripts are useless — which is the point.
 
-## Если скрипт упал
+## If the script fails
 
-`tools/cowork-onboard.py` умеет работать и без bootstrap-файлов (старая схема через имя в `TEAM.md`). Так что в крайнем случае участник всё равно сможет работать — просто без подписи коммитов от своего имени и без push в общий GitHub.
+`tools/cowork-onboard.py` can also work without the bootstrap files (the
+older flow via the name in `TEAM.md`). So in the worst case the participant
+will still be able to work — just without their commits being signed with
+their own name and without pushing to the shared GitHub.
+
+## NOTE — security
+
+These scripts embed a private SSH key (in the `WORKSHOP_PRIVATE_KEY_EOF` heredoc
+on macOS, in `$PrivateKeyB64` on Windows). Distribute only via private
+channels: AirDrop, direct message, USB hand-to-hand. Do not push them to a
+public repo and do not post them in shared chats. The current repo copy
+includes a key only for the duration of the workshop and is deleted right
+after — see "After the workshop" above.
