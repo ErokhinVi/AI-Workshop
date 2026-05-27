@@ -1,68 +1,70 @@
-# ORGANIZER.md — brief для организатора воркшопа
+# ORGANIZER.md — brief for the workshop organiser
 
-> Этот файл — для **Виталия Ерохина** и **Нерсеса Багияна** (организаторы).
-> Если ты Claude Code и пользователь представился одним из них — читай этот
-> файл, а не сценарий онбординга участника из корневого `CLAUDE.md`.
-> С организаторами говорим технически, без упрощений.
+> This file is for **Vitaly Erokhin** and **Nerses Bagiyan** (the organisers).
+> If you are Claude Code and the user introduced themselves as one of them —
+> read this file, not the participant onboarding in the root `CLAUDE.md`.
+> With organisers we talk technically, no simplifications.
 
-## Формат воркшопа
+## Workshop format
 
-AI-воркшоп правления Райффайзен банка. Шесть членов правления делятся на
-**две команды по три человека**. Команда — это не один банк, а **три
-блока-сервиса**: `retail` (клиентский мобильный банк), `cib` (корпоратив и
-бизнес-логика), `backend` (ядро данных). Один участник — один блок. Обе
-команды получают **идентичный набор блоков** и **параллельно, независимо**
-решают **одну и ту же задачу**: сначала «добавить вкладку Кредиты», затем
-«добавить вкладку Инвестиции».
+AI workshop for the Raiffeisen bank board. Six board members are split into
+**two teams of three**. A team is not one bank — it is **three service
+blocks**: `retail` (the customer-facing mobile bank), `cib` (corporate and
+business logic), `backend` (the data core). One participant — one block.
+Both teams receive an **identical set of blocks** and **in parallel,
+independently** solve the **same task** announced by the host out loud.
 
-Фича готова, только когда все три блока команды сделали свою часть и
-состыковались. Связи блоков: retail → backend (данные), retail → cib
-(решение), cib → backend (данные клиента). Внутри команды три участника
-договариваются офлайн. Между командами связи нет — в этом смысл соревнования.
+A feature is done only when all three blocks of the team have done their
+part and connected. Block links: retail → backend (data),
+retail → cib (decision), cib → backend (customer data). Inside the team
+the three participants agree out loud. There is no link between teams —
+that is the point of the competition.
 
-В банке симулируются клиенты. После деплоя симулятор оценивает все три блока
-команды интегрально и двигает её клиентскую базу вверх или вниз — с
-человеческим обоснованием. Табло показывает счёт двух команд лицом к лицу.
+Customers are simulated against the bank. After a deploy the simulator
+scores all three blocks of the team together and moves the customer base
+up or down — with a human-readable rationale. The leaderboard shows the
+two teams' score head to head.
 
-## Структура репозитория
+## Repository layout
 
-| Папка / файл | Назначение |
+| Folder / file | Purpose |
 |---|---|
-| `team_a/{retail,cib,backend}/`, `team_b/...` | Шесть блоков-сервисов команд — идентичные на старте копии (FastAPI, Docker) |
-| `simulator/` | Симулятор клиентов + табло (FastAPI, Postgres) |
-| `seed/` | 500 клиентов, транзакции, кредитная история |
-| `tasks/` | Брифы задач для команд (нетехнический язык) |
-| `.claude/templates/settings-team_*-*.json` | Permissions Claude: участник правит свой блок, читает свою команду, чужую не видит |
-| `.codex/templates/config-team_*-*.toml` | То же для Codex: permission-профиль на (команда, блок). Bootstrap копирует в `.codex/config.toml` |
-| `AGENTS.md` | Онбординг для Codex (аналог `CLAUDE.md`): тонкая обёртка, отсылает к `CLAUDE.md` + Codex-специфика |
-| `tools/cowork-onboard.py` | Sandbox-onboarding агента: SSH-ключ, git, `WORKSHOP_TEAM`, `WORKSHOP_BLOCK` (агенто-нейтрален) |
-| `docs/superpowers/specs/` , `docs/superpowers/plans/` | Спека дизайна и план реализации редизайна |
+| `team_a/{retail,cib,backend}/`, `team_b/...` | The six team service blocks — identical copies at the starting line (FastAPI, Docker). Each block has its own `CONTRACT.md` describing the endpoints it exposes |
+| `simulator/` | Customer simulator + leaderboard (FastAPI, Postgres) |
+| `seed/` | 500 customers, transactions, credit history |
+| `tasks/` | Task briefs for teams (non-technical wording) |
+| `.claude/templates/settings-team_*-*.json` | Claude permissions: a participant edits their own block, sees the neighbours' `CONTRACT.md` only, the other team isn't visible at all |
+| `.codex/templates/config-team_*-*.toml` | Same for Codex: a permission profile per (team, block). Bootstrap copies it into `.codex/config.toml` |
+| `AGENTS.md` | Onboarding for Codex (analogue of `CLAUDE.md`): a thin wrapper, defers to `CLAUDE.md` plus Codex-specific bits |
+| `tools/cowork-onboard.py` | Sandbox onboarding for the agent: SSH key, git, `WORKSHOP_TEAM`, `WORKSHOP_BLOCK` (agent-neutral) |
+| `docs/superpowers/specs/`, `docs/superpowers/plans/` | Design spec and implementation plan |
 
-## Как работает симулятор клиентов
+## How the customer simulator works
 
-1. **Триггер — pull-модель.** Симулятор раз в ~30 секунд опрашивает `/health`
-   всех шести банк-блоков и читает git-коммиты. Новый коммит любого блока
-   команды → раунд оценки.
-2. **Probe.** Закрытый список HTTP-проверок по трём блокам: backend (отдаёт
-   клиента, принимает и листит заявки), cib (кредитный продукт в каталоге,
-   ручка решения, разделение сильный/слабый заявитель), retail (вкладка
-   кредитов в UI, сквозная заявка, человеческое объяснение отказа, регрессия
-   переводов).
-3. **Судья — рубрика + формула.** Снапшоты трёх блоков обеих команд уходят в
-   LLM **одним вызовом** (относительная оценка честнее), `temperature=0`. LLM
-   ставит баллы по **10 критериям** (3 backend + 3 cib + 4 retail); число
-   клиентов считает детерминированная формула в коде (`B0=500`, `GAIN=0.6`,
-   `RUBRIC_MAX=20`). При недоступности LLM — скриптовый fallback по тем же
-   checks. Симулятор не встаёт никогда.
-4. **Табло** встроено в симулятор: две клиентские базы и лента событий
-   с обоснованиями.
+1. **Trigger — pull model.** Roughly every 30 seconds the simulator polls
+   `/health` of all six bank blocks and reads git commits. A new commit on
+   any block of a team → an evaluation round.
+2. **Probe.** A closed set of HTTP checks across three blocks: backend
+   (exposes a customer, accepts and lists applications), cib (a credit
+   product in the catalogue, a decision endpoint, separation of strong vs
+   weak applicants), retail (a credit tab in the UI, an end-to-end
+   application, a human-readable decline rationale, a transfer regression).
+3. **Judge — rubric + formula.** Snapshots of three blocks of both teams
+   go to the LLM in **one call** (relative scoring is fairer),
+   `temperature=0`. The LLM scores against **10 criteria** (3 backend +
+   3 cib + 4 retail); the customer count is computed by a deterministic
+   formula in code (`B0=500`, `GAIN=0.6`, `RUBRIC_MAX=20`). If the LLM is
+   unavailable — scripted fallback over the same checks. The simulator
+   never stalls.
+4. **Leaderboard** is built into the simulator: the two customer bases and
+   an event feed with rationales.
 
-Ручное управление: `POST /admin/evaluate` (раунд по кнопке) и
-`POST /admin/reset` (сброс к baseline) — с заголовком `X-Admin-Token`.
+Manual control: `POST /admin/evaluate` (round on demand) and
+`POST /admin/reset` (reset to baseline) — with an `X-Admin-Token` header.
 
-## Render — семь сервисов
+## Render — seven services
 
-| Сервис | Папка | URL |
+| Service | Folder | URL |
 |---|---|---|
 | `raif-a-backend` | `team_a/backend/` | `https://raif-a-backend.onrender.com` |
 | `raif-a-cib` | `team_a/cib/` | `https://raif-a-cib.onrender.com` |
@@ -70,96 +72,105 @@ AI-воркшоп правления Райффайзен банка. Шесть
 | `raif-b-backend` | `team_b/backend/` | `https://raif-b-backend.onrender.com` |
 | `raif-b-cib` | `team_b/cib/` | `https://raif-b-cib.onrender.com` |
 | `raif-b-retail` | `team_b/retail/` | `https://raif-b-retail.onrender.com` |
-| `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` (табло) |
+| `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` (leaderboard) |
 
-Подробности деплоя — `DEPLOY.md`.
+Deployment details — `DEPLOY.md`.
 
-## Два агента: Claude Code и Codex
+## Two agents: Claude Code and Codex
 
-Участник может работать либо в Claude Code, либо в Codex — на выбор. Защита
-блока одинакова по сути в обоих, но реализована разными механизмами:
+A participant can work in either Claude Code or Codex — their choice. Block
+isolation is the same in spirit for both, but implemented with different
+mechanisms:
 
-- **Claude** читает `CLAUDE.md`, защита — `.claude/settings.local.json`
-  (deny/allow по путям). Bootstrap копирует её из `.claude/templates/`.
-- **Codex** читает `AGENTS.md` (тонкая обёртка, отсылает к `CLAUDE.md`),
-  защита — permission-профиль в `.codex/config.toml` (`default_permissions` +
-  `[permissions.*]`). Bootstrap копирует её из `.codex/templates/` и отмечает
-  папку репозитория доверенной в `~/.codex/config.toml` (иначе Codex не читает
-  проектный конфиг). Enforcement — ОС-песочница Codex (Seatbelt/ACL), как у
-  Claude: запись вне своего блока не проходит, чужая команда закрыта на чтение
-  через `deny`.
+- **Claude** reads `CLAUDE.md`, isolation lives in `.claude/settings.local.json`
+  (deny/allow by path). Bootstrap copies it from `.claude/templates/`.
+- **Codex** reads `AGENTS.md` (a thin wrapper that defers to `CLAUDE.md`),
+  isolation is a permission profile in `.codex/config.toml`
+  (`default_permissions` + `[permissions.*]`). Bootstrap copies it from
+  `.codex/templates/` and marks the repo folder as trusted in
+  `~/.codex/config.toml` (otherwise Codex doesn't load the project config).
+  Enforcement is the Codex OS sandbox (Seatbelt / ACL), same idea as
+  Claude: writes outside your block don't go through, the other team is
+  blocked on read via `deny`.
 
-Шаблоны Claude и Codex — близнецы; правишь доступ для блока — меняй оба.
+Claude and Codex templates are twins — when you edit block access, edit
+both.
 
-Две настройки профиля Codex критичны (без них Codex ломается) — менять
-осторожно:
+Two Codex profile settings are critical (without them Codex breaks) — be
+careful when changing:
 
-- База чтения — `":root" = "read"` (НЕ `:minimal`). Песочница Codex действует
-  на уровне ОС; с узкой базой `:minimal` агент не находит даже `git` в
-  `/usr/bin`. `:root` открывает чтение всей ФС (системные инструменты), но на
-  запись прав не даёт.
-- Запись в `.git` — `".git" = "write"`. Без неё `git commit` падает на
-  `.git/index.lock` (песочница защищает `.git`). С этим правилом сохранение в
-  копилку работает прямо из песочницы. Изоляцию это не размывает: запись
-  остаётся только в своём блоке и `.git`, чужая команда закрыта.
+- The read base is `":root" = "read"` (NOT `:minimal`). The Codex sandbox
+  enforces at the OS level; with the narrow `:minimal` base the agent
+  cannot even find `git` in `/usr/bin`. `:root` opens read of the whole FS
+  (system tools), but grants no write.
+- Write into `.git` — `".git" = "write"`. Without it `git commit` fails on
+  `.git/index.lock` (the sandbox guards `.git`). With this rule, saving to
+  the shared pile works straight from the sandbox. Isolation isn't blurred:
+  writes are still limited to the participant's block plus `.git`, the
+  other team stays closed.
 
-Сеть для push включена в профиле (`[permissions.*.network] enabled = true`).
+Network for push is enabled in the profile
+(`[permissions.*.network] enabled = true`).
 
-**Статус проверки:** на macOS прогон сделан — Codex видит git, пишет только в
-свой блок, чужую команду не читает, сохранение в общую копилку работает.
-**На Windows ещё не проверялось** — прогнать перед воркшопом (там песочница
-Codex на ACL/restricted tokens, поведение может отличаться). Быстрый чек на
-новой машине:
+**Verification status:** on macOS a full run has been done — Codex sees
+git, writes only into its block, doesn't read the other team, and saving
+to the shared pile works.
+**On Windows it hasn't been verified yet** — run it before the workshop
+(there the Codex sandbox uses ACLs / restricted tokens, behaviour may
+differ). Quick check on a fresh machine:
 
-1. Установщик → выбрать блок → `cat .codex/config.toml` показывает нужный
-   `default_permissions` и правила (`:root` read, свой блок + `.git` write,
-   чужая команда deny).
-2. В `~/.codex/config.toml` есть `[projects."…/AI-Workshop"]` с
+1. Installer → pick team and block → `cat .codex/config.toml` shows the
+   right `default_permissions` and rules (`:root` read, own block + `.git`
+   write, other team deny).
+2. `~/.codex/config.toml` has `[projects."…/AI-Workshop"]` with
    `trust_level = "trusted"`.
-3. Codex: `git --version` находит git; правка в своём блоке проходит; запись в
-   чужой блок и чтение чужой команды — отказ; «сохранить в копилку» (add →
-   commit → pull → push) отрабатывает.
+3. In Codex: `git --version` finds git; an edit in the own block goes
+   through; writing into a sibling block and reading the other team are
+   refused; "save to the pile" (add → commit → pull → push) works.
 
-Отдельно для push в корпоративной сети: GitHub доступен по SSH только через
-порт 443 (`ssh.github.com`), порт 22 закрыт. Это канал ssh, не зависит от
-агента. Установщики уже прописывают доступ через 443 (`HostName ssh.github.com`,
-`Port 443` в `~/.ssh/config`), поэтому push с нуля идёт без заминок. На случай
-ручной настройки или старого конфига диагностика и починка описаны в `CLAUDE.md`
-(раздел «Git и общая копилка»).
+Separately for push on the corporate network: GitHub is reachable via SSH
+only on port 443 (`ssh.github.com`), port 22 is closed. That is an ssh
+channel thing, agent-independent. Installers already wire access via 443
+(`HostName ssh.github.com`, `Port 443` in `~/.ssh/config`), so push from a
+clean setup goes through without hiccups. For manual setup or a stale
+config, diagnostics and fix are in `CLAUDE.md` (section "Git and the
+shared pile").
 
-## Ручные шаги организатора
+## Manual steps for the organiser
 
-1. **Render.** Удалить старые сервисы. Применить новый Blueprint
-   (`render.yaml`): 7 web-сервисов + Postgres `raif-workshop-db`. В env-группе
-   `ai-workshop-shared` задать `OPENAI_API_KEY` и `ADMIN_TOKEN`. Завести в
-   GitHub семь секретов деплой-хуков: `RENDER_HOOK_A_BACKEND`,
+1. **Render.** Delete the old services. Apply the new Blueprint
+   (`render.yaml`): 7 web services + Postgres `raif-workshop-db`. In the
+   env group `ai-workshop-shared` set `OPENAI_API_KEY` and `ADMIN_TOKEN`.
+   Add seven deploy-hook secrets in GitHub: `RENDER_HOOK_A_BACKEND`,
    `RENDER_HOOK_A_CIB`, `RENDER_HOOK_A_RETAIL`, `RENDER_HOOK_B_BACKEND`,
    `RENDER_HOOK_B_CIB`, `RENDER_HOOK_B_RETAIL`, `RENDER_HOOK_SIMULATOR`.
-2. **Команды.** Распределить 6 членов правления по парам (команда, блок) —
-   вписать в `TEAM.md` и в `$Members` (`Team` + `Block`) в
-   `tools/bootstrap/raif-workshop-setup.cmd`.
-3. **Ноутбуки.** Прогнать обновлённый bootstrap на машинах участников, чтобы
-   `.git/raif-workshop-info` содержал `WORKSHOP_TEAM` и `WORKSHOP_BLOCK`.
+2. **Teams.** There is no longer a hard-coded roster: the bootstrap script
+   asks each participant for team and block themselves. The organiser only
+   announces the assignment in the room. See `tools/bootstrap/README.md`
+   for the participant flow.
+3. **Laptops.** Run the bootstrap on every participant's machine so that
+   `.git/raif-workshop-info` contains `WORKSHOP_TEAM` and `WORKSHOP_BLOCK`.
 
-## Риск Render free-плана
+## Render free-plan risk
 
-Семь web-сервисов одновременно — у free-плана Render есть лимит на число
-одновременных web-сервисов в аккаунте. Если упрётесь в лимит — запасной
-вариант: объединить `cib` и `backend` одного участника в один сервис (тогда
-6 сервисов вместо 7) либо завести второй аккаунт под одну из команд. Проверьте
-лимит до воркшопа.
+Seven web services at once — the Render free plan has a cap on the number
+of concurrent web services per account. If you hit the limit, a fallback
+is to merge one participant's `cib` and `backend` into a single service
+(6 services instead of 7), or use a second account for one of the teams.
+Verify the limit before the workshop.
 
-## Что НЕ делать
+## What NOT to do
 
-- Не давать командам подсматривать друг за другом — слепота зашита в
-  `settings-team_*-*.json` (`Read` чужой команды запрещён).
-- Не давать участнику править чужой блок своей команды — тоже зашито в
-  permissions; читать соседние блоки можно (нужно знать их API).
-- Не подсказывать командам реализацию — задача выдаётся брифом, решают сами
-  с агентом.
+- Don't let the teams peek at each other — blindness is wired into
+  `settings-team_*-*.json` (`Read` of the other team is denied).
+- Don't let a participant edit a sibling block of their own team — also
+  wired into permissions; only their `CONTRACT.md` is readable for
+  sibling blocks.
+- Don't hand teams the implementation — the task arrives as a brief, they
+  solve it with the agent themselves.
 
-## Ссылки
+## Links
 
-- Полный дизайн: `docs/superpowers/specs/2026-05-17-three-block-teams-design.md`
-- План реализации: `docs/superpowers/plans/2026-05-17-three-block-teams.md`
-- Деплой: `DEPLOY.md`
+- Full design: `docs/superpowers/specs/2026-05-17-three-block-teams-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-05-17-three-block-teams.md`
+- Deployment: `DEPLOY.md`

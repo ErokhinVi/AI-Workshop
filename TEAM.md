@@ -1,61 +1,64 @@
-# TEAM.md — кто в какой команде и в каком блоке
+# TEAM.md — who is in which team and which block
 
-> Справочник для агентов. Используется при онбординге, чтобы сопоставить
-> участника с парой (команда, блок).
+> Reference for agents. Used during onboarding to map a participant to a
+> (team, block) pair.
 
-## Состав команд
+## Team composition
 
-Воркшоп — две команды по три человека. Каждая команда — это три блока-сервиса
-(`retail`, `cib`, `backend`), по одному участнику на блок. Обе команды решают
-одну и ту же задачу, параллельно и независимо друг от друга.
+The workshop is two teams of three. Each team is three service blocks
+(`retail`, `cib`, `backend`), one participant per block. Both teams solve
+the same task, in parallel and independently.
 
-Фиксированного ростера «кто в какой команде и блоке» здесь нет намеренно.
-Каждый участник сам выбирает команду (A или B) и блок (retail / cib / backend)
-и вводит своё имя при настройке ноутбука — в
-`tools/bootstrap/raif-workshop-setup.applescript` (macOS) или
-`raif-workshop-setup.cmd` (Windows). Выбор записывается в
+There is no fixed roster of "who is in which team and block" here, on
+purpose. Each participant picks team (A or B) and block
+(retail / cib / backend) themselves and types their name when setting the
+laptop up — in `tools/bootstrap/raif-workshop-setup.applescript` (macOS)
+or `raif-workshop-setup.cmd` (Windows). The choice is written into
 `.git/raif-workshop-info` (`WORKSHOP_TEAM`, `WORKSHOP_BLOCK`,
-`WORKSHOP_PARTICIPANT`), откуда его читает `tools/cowork-onboard.py` при старте
-агента.
+`WORKSHOP_PARTICIPANT`), where `tools/cowork-onboard.py` reads it when the
+agent starts.
 
-> Единственное место с заранее зашитым распределением — отдельные файлы
-> `tools/bootstrap/raif-workshop-setup-board.*` (версия для членов правления).
-> Их трогает только организатор.
+> The only place that ships a pre-baked assignment is the separate file
+> `tools/bootstrap/raif-workshop-setup-board.*` (the version handed to
+> board members). Only the organiser touches that one.
 
-## Что делает каждый блок
+## What each block does
 
-- **retail** — клиентский мобильный банк: интерфейс и тонкий слой. За данными
-  ходит в backend, за решением по заявке — в cib. Своих данных не держит.
-- **cib** — корпоратив и бизнес-логика: каталог продуктов и логика решений.
-  За данными клиента ходит в backend.
-- **backend** — ядро данных: хранит клиентов, транзакции, балансы; отдаёт
-  базовый API. Интерфейса нет.
+- **retail** — the customer-facing mobile bank: UI and a thin layer. Asks
+  backend for data, asks cib for the decision on a request. Holds no data
+  of its own.
+- **cib** — corporate and business logic: product catalogue and decision
+  logic. Asks backend for customer data.
+- **backend** — data core: stores customers, transactions, balances;
+  exposes the basic API. No UI.
 
-Связи блоков: retail → backend, retail → cib, cib → backend. Фича готова,
-только когда все три блока команды сделали свою часть и состыковались.
+Block links: retail → backend, retail → cib, cib → backend. A feature is
+done only when all three blocks of the team have done their part and
+connected.
 
-## Как агент узнаёт команду и блок
+## How the agent learns the team and block
 
-Команда и блок участника приходят из `.git/raif-workshop-info` — его пишет
-bootstrap по выбору самого участника, а агент читает через
-`tools/cowork-onboard.py` (строки `WORKSHOP_TEAM` / `WORKSHOP_BLOCK`). Угадывать
-по имени не нужно. Если info-файла нет (bootstrap не запускали) — спроси у
-участника команду (A или B), блок (retail / cib / backend) и имя, не угадывай.
+The participant's team and block come from `.git/raif-workshop-info` —
+written by the bootstrap based on the participant's own choice, and read
+by the agent through `tools/cowork-onboard.py` (lines `WORKSHOP_TEAM` /
+`WORKSHOP_BLOCK`). Don't guess from the name. If the info file is missing
+(bootstrap wasn't run) — ask the participant for team (A or B), block
+(retail / cib / backend) and name, don't guess.
 
-## Организаторы (не участники команд)
+## Organisers (not team participants)
 
-| Имя | Роль |
+| Name | Role |
 |---|---|
-| Виталий Ерохин | Организатор воркшопа, GitHub @ErokhinVi |
-| Нерсес Багиян | Со-организатор, CDO Total Bank |
+| Vitaly Erokhin | Workshop organiser, GitHub @ErokhinVi |
+| Nerses Bagiyan | Co-organiser, CDO Total Bank |
 
-Если пользователь представился одним из них — это не сценарий участника:
-читай `ORGANIZER.md`. Алиасы: «Виталий», «Ерохин», «организатор», «ведущий»,
-«Нерсес», «Багиян», «CDO» → организатор.
+If the user introduces themselves as one of them — that's not the
+participant scenario: read `ORGANIZER.md`. Aliases: "Vitaly", "Erokhin",
+"organiser", "host", "Nerses", "Bagiyan", "CDO" → organiser.
 
-## Сервисы и порты
+## Services and ports
 
-| Что | Локально | На Render |
+| Block | Local | On Render |
 |---|---|---|
 | A · retail | `http://localhost:8001` | `https://raif-a-retail.onrender.com` |
 | A · cib | `http://localhost:8002` | `https://raif-a-cib.onrender.com` |
@@ -63,7 +66,7 @@ bootstrap по выбору самого участника, а агент чи�
 | B · retail | `http://localhost:8011` | `https://raif-b-retail.onrender.com` |
 | B · cib | `http://localhost:8012` | `https://raif-b-cib.onrender.com` |
 | B · backend | `http://localhost:8013` | `https://raif-b-backend.onrender.com` |
-| Табло (симулятор) | `http://localhost:8000` | `https://raif-simulator.onrender.com` |
+| Leaderboard (simulator) | `http://localhost:8000` | `https://raif-simulator.onrender.com` |
 
-Клиенту своей команды показывай его блок retail — это банк, который видит
-клиент. Табло показывает счёт двух команд лицом к лицу.
+Show the participant their team's retail block — that's the bank the
+customer sees. The leaderboard shows the two teams' score head to head.

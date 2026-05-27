@@ -1,59 +1,65 @@
-# RULES.md — правила игры
+# RULES.md — workshop rules
 
-> Прочитай один раз в начале дня. Все агенты следуют этим правилам.
+> Read once at the start of the day. All agents follow these rules.
 
-## Главное
+## The headline
 
-Воркшоп — две команды по три человека. Каждая команда — три блока-сервиса
-(`retail`, `cib`, `backend`), по одному участнику на блок. Обе команды решают
-одну и ту же задачу — параллельно, независимо друг от друга.
+The workshop is two teams of three. Each team is three service blocks
+(`retail`, `cib`, `backend`), one participant per block. Both teams solve
+the same task — in parallel, independently of one another.
 
-## Три блока команды
+## The three team blocks
 
-- **retail** — клиентский мобильный банк: интерфейс и тонкий слой.
-- **cib** — корпоратив и бизнес-логика: каталог продуктов и логика решений.
-- **backend** — ядро данных: клиенты, транзакции, балансы, базовый API.
+- **retail** — customer-facing mobile bank: UI and a thin layer.
+- **cib** — corporate and business logic: product catalogue and decision logic.
+- **backend** — data core: customers, transactions, balances, the base API.
 
-Связи блоков: retail → backend (данные), retail → cib (решение),
-cib → backend (данные клиента). Фича готова, только когда все три блока
-сделали свою часть и состыковались. Внутри команды три участника
-договариваются между собой офлайн — как блоки общаются по API.
+Block links: retail → backend (data), retail → cib (decisions),
+cib → backend (customer data). A feature is done only when all three blocks
+have done their part and connected. Inside a team the three participants
+agree among themselves out loud — how the blocks talk to each other via API.
 
-## Зоны репозитория
+## Repo zones
 
-- Свой блок (`team_<X>/<блок>/`) — твоя территория, меняй свободно.
-- Два других блока своей команды — только чтение: нужно знать их API, чтобы
-  состыковаться, но править их — дело их владельцев.
-- Папка другой команды — закрыта целиком: не читать и не править. Это защита
-  соревнования: если команды подсмотрят решения друг друга, оба банка станут
-  одинаковыми и смысл сравнения потеряется.
-- `simulator/`, `seed/`, `render.yaml`, `.github/` — не трогать. `simulator/` —
-  инструмент организатора: оценивает банки и ведёт табло.
-- `tasks/` — брифы задач, read-only.
+- Your block (`team_<X>/<block>/`) — your territory, edit freely.
+- The two other blocks of your team — visible **only** through their
+  `CONTRACT.md`: the neighbour writes the endpoints they expose into that
+  file. The neighbour's actual code (`src/`, `pyproject.toml`, `Dockerfile`)
+  is denied — connect via the contract, not by peeking at internals.
+- The other team's folder — completely closed: don't read, don't edit. This
+  protects the competition: if the teams peek at each other's solutions,
+  both banks become the same and the comparison loses its point.
+- `simulator/`, `seed/`, `render.yaml`, `.github/` — don't touch.
+  `simulator/` is the organiser's tool: it scores the banks and runs the
+  leaderboard.
+- `tasks/` — task briefs, read-only.
 
-Защита прописана в `.claude/settings.local.json` (копируется из шаблона
-`settings-<команда>-<блок>.json` на онбординге). Если попросить агента залезть
-в чужой блок или чужую команду — система откажет. Это правильно.
+Isolation is wired into `.claude/settings.local.json` (copied from the
+template `settings-<team>-<block>.json` during onboarding). If the agent is
+asked to climb into a sibling block or the other team, the system will
+refuse. That's correct.
 
-## Между командами связи нет
+## No link between the teams
 
-INBOX и contracts из прошлого формата убраны. Команды независимы. Внутри
-команды три человека договариваются между собой офлайн.
+INBOX and inter-team contracts from the previous format have been removed.
+Teams are independent. Inside a team, three people agree among themselves
+out loud.
 
-## Симулятор клиентов и табло
+## Customer simulator and the leaderboard
 
-В банке симулируются клиенты. Когда команда выкатывает изменение, симулятор
-снимает состояние всех трёх блоков команды, оценивает их интегрально по 10
-критериям (по блокам) и двигает клиентскую базу: клиенты приходят или уходят —
-с обоснованием. Табло показывает счёт двух команд лицом к лицу.
+Customers are simulated against the bank. When a team ships a change, the
+simulator snapshots the state of all three of the team's blocks, scores
+them together against 10 criteria (per block) and moves the customer base:
+customers arrive or leave — with a rationale. The leaderboard shows the two
+teams' score head to head.
 
-## Общая ветка
+## Shared branch
 
-Обе команды коммитят в одну общую ветку. Конфликтов нет — у каждого участника
-свой блок. Перед отправкой работы агент обязательно подтягивает свежие коммиты
-(`git pull --rebase --autostash`).
+Both teams commit to the same shared branch. There are no conflicts — every
+participant has their own block. Before sending work up, the agent always
+pulls the fresh commits in (`git pull --rebase --autostash`).
 
-## С пользователем
+## With the user
 
-Пользователь — нетехнический член правления. Никакого жаргона без бизнес-
-аналогии. В чате — живой текст без markdown-форматирования. На русском.
+The user is a non-technical board member. No jargon without a business
+analogue. In chat — live prose without markdown formatting. English.

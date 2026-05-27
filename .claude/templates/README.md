@@ -1,86 +1,90 @@
 # .claude/templates/
 
-Заготовки `settings.local.json` для каждой пары (команда, блок). Имена:
+Templates of `settings.local.json` for every (team, block) pair. Names:
 `settings-team_<a|b>-<retail|cib|backend>.json`.
 
-## Зачем
+## Why
 
-Это **жёсткая защита** — Claude Code физически не может редактировать
-файлы вне твоего блока. Ошибку возвращает встроенный механизм permissions,
-а не моя инструкция, поэтому её нельзя «уговорить» обойти.
+This is **hard isolation** — Claude Code physically cannot edit files
+outside your block. The error comes from the built-in permissions engine,
+not my instructions, so it cannot be "talked into" bypassing it.
 
-## Когда применять
+## When to apply it
 
-Шаблон ставит bootstrap-скрипт ноутбука (`tools/bootstrap/raif-workshop-setup-board.{applescript,cmd}`)
-в `.claude/settings.local.json`. Если он почему-то не сработал, агент при
-онбординге сам скопирует нужный шаблон.
+The template is installed by the laptop bootstrap script
+(`tools/bootstrap/raif-workshop-setup-board.{applescript,cmd}`)
+into `.claude/settings.local.json`. If that somehow did not run, the agent
+copies the right template itself during onboarding.
 
-Вручную (на всякий случай):
+Manually (just in case):
 
 ```bash
-# для розницы команды A
+# for team A retail
 cp .claude/templates/settings-team_a-retail.json .claude/settings.local.json
 ```
 
-После замены — перезапусти Claude Code App, иначе он не перечитает permissions.
+After the swap — restart Claude Code App, otherwise it won't re-read the
+permissions.
 
-## Что внутри каждого шаблона
+## What's inside each template
 
-Разрешено для участника:
-- редактировать и читать **только свой блок** (`team_<X>/<свой блок>/**`);
-- читать `CONTRACT.md` двух других блоков своей команды — это «витрина»
-  соседа, где он описывает свои ручки;
-- читать `tasks/` и `seed/`;
-- запускать `docker`, `docker-compose`, `git`, `python`, `curl`, `ls`,
+Allowed for the participant:
+- edit and read **only their own block** (`team_<X>/<own block>/**`);
+- read the `CONTRACT.md` of the two other blocks in their team — the
+  neighbour's storefront listing their endpoints;
+- read `tasks/` and `seed/`;
+- run `docker`, `docker-compose`, `git`, `python`, `curl`, `ls`,
   `cat`, `grep`, `find`.
 
-Запрещено:
-- редактировать или читать `src/`, `pyproject.toml`, `Dockerfile` соседних
-  блоков своей команды — стыковка идёт **только через `CONTRACT.md`**;
-- любое касание чужой команды (`team_<другая>/**` — даже read);
-- редактировать `simulator/`, `seed/`, `render.yaml`, `.github/`.
+Denied:
+- edit or read `src/`, `pyproject.toml`, `Dockerfile` of neighbouring
+  blocks of the team — the seam goes **through `CONTRACT.md` only**;
+- any contact with the other team (`team_<other>/**` — even read);
+- edit `simulator/`, `seed/`, `render.yaml`, `.github/`.
 
-## Зачем именно `CONTRACT.md`
+## Why `CONTRACT.md` specifically
 
-Раньше участник видел весь код своей команды на чтение — это удобно
-агенту (можно посмотреть, как у соседа устроена ручка), но смазывает
-границу ответственности и педагогически проигрывает. Сейчас каждый блок
-сам публикует свою витрину в `team_<X>/<блок>/CONTRACT.md`, и соседи
-читают только её. Получается, что:
+Earlier the participant could read all of their team's code — handy for
+the agent (you can see how a neighbour built an endpoint) but it blurs the
+ownership boundary and is pedagogically weaker. Now every block publishes
+its own storefront in `team_<X>/<block>/CONTRACT.md`, and neighbours read
+only that. The result:
 
-- агент розничного блока физически не может «подсмотреть» в код cib —
-  только в `team_<X>/cib/CONTRACT.md`;
-- если CIB добавил ручку и не обновил CONTRACT.md, retail про неё
-  не узнает — это правильное давление в сторону аккуратного контракта.
+- the retail block agent physically cannot "peek" into cib's code — only
+  into `team_<X>/cib/CONTRACT.md`;
+- if CIB added an endpoint and didn't update its CONTRACT.md, retail
+  doesn't learn about it — the right pressure toward a careful contract.
 
-Если соседский `CONTRACT.md` отсутствует или пуст — это сигнал, что
-сосед ещё не зафиксировал свой API. Договоритесь голосом и впишите.
+If a neighbour's `CONTRACT.md` is missing or empty — that's a signal the
+neighbour hasn't fixed their API yet. Agree out loud and write it in.
 
-## Что НЕ закрывают шаблоны (известное)
+## What the templates do NOT close (known)
 
-**Bash-обход сужен до своего блока**: `Bash(cat:team_<X>/<блок>/**)`,
-`Bash(grep:team_<X>/<блок>/**)`, `Bash(find:team_<X>/<блок>/**)`. Через эти
-команды агент не может прочитать ни код соседа, ни CONTRACT.md соседа (для
-CONTRACT.md соседа — есть отдельный Read-allow и Read-tool). `Bash(ls:*)`
-оставлен широким — структуру папок видеть можно, но содержимое — нельзя.
-Если что-то всё-таки сломает воркфлоу (например, агенту нужен `cat tasks/...`),
-свободнее всего расширить через Read tool, а не через Bash.
+**Bash bypass is scoped to the own block**: `Bash(cat:team_<X>/<block>/**)`,
+`Bash(grep:team_<X>/<block>/**)`, `Bash(find:team_<X>/<block>/**)`. Via
+these the agent cannot read either the neighbour's code or the neighbour's
+CONTRACT.md (for the neighbour's CONTRACT.md there is a separate Read-allow
+and the Read tool). `Bash(ls:*)` is left wide — folder structure is
+visible, content is not. If something breaks the workflow (say, the agent
+needs `cat tasks/...`), the cleanest expansion is via the Read tool, not
+Bash.
 
-**Файлы соседа вне `src/`**: deny на чтение соседних блоков сейчас
-перечислен точечно — `Read(team_a/cib/src/**)`, `Read(team_a/cib/pyproject.toml)`,
-`Read(team_a/cib/Dockerfile)`. Если кто-то положит в `team_a/cib/` файл, не
-покрытый этим списком (например `notes.md` или `config.yaml`), он попадёт
-в режим ask — Claude спросит у пользователя разрешение прочитать, и
-нетехнарь скорее всего согласится. Если в блок добавляют новый тип
-файла рядом со `src/`, его имя или расширение нужно добавить в deny.
+**Files of a neighbour outside `src/`**: the read-deny on neighbouring
+blocks is currently enumerated explicitly — `Read(team_a/cib/src/**)`,
+`Read(team_a/cib/pyproject.toml)`, `Read(team_a/cib/Dockerfile)`. If
+someone drops a file into `team_a/cib/` that isn't covered (e.g.
+`notes.md` or `config.yaml`), it falls into ask mode — Claude will ask
+the user for permission to read, and a non-technical user will probably
+agree. If a new file type lands next to `src/`, add its name or extension
+to deny.
 
-**Эмпирическая проверка модели CONTRACT.md**: схема «folder-deny + точечный
-file-allow на CONTRACT.md» опирается на правило «deny matches → блок, allow
-matches → пуск, иначе ask». Это уже стандартное поведение Claude Code, но в
-новой комбинации правил проверять стоит. Тест после очередной замены
-шаблонов: в новой сессии под профилем участника (`cp templates/... settings.local.json`
-+ рестарт приложения) попробуй прочитать `team_<своя>/<сосед>/CONTRACT.md`
-(должен открыться) и `team_<своя>/<сосед>/src/main.py` (должен денаться).
-Если CONTRACT.md тоже денается — нужно переходить к другой схеме (например,
-держать витрины в отдельной папке `team_<X>/contracts/`, к которой
-permissions проще).
+**Empirical check of the CONTRACT.md model**: the "folder-deny + targeted
+file-allow on CONTRACT.md" scheme relies on the rule "deny matches → block,
+allow matches → pass, otherwise ask". That's the standard Claude Code
+behaviour, but it's worth verifying in this new combination of rules. Test
+after each template swap: in a fresh session under the participant profile
+(`cp templates/... settings.local.json` + restart the app) try to read
+`team_<own>/<neighbour>/CONTRACT.md` (should open) and
+`team_<own>/<neighbour>/src/main.py` (should deny). If CONTRACT.md is
+denied too — move to a different scheme (for example, keep the storefronts
+in a separate folder `team_<X>/contracts/`, where permissions are simpler).

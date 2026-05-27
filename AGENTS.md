@@ -1,71 +1,73 @@
-# AGENTS.md — онбординг агента (Codex)
+# AGENTS.md — agent onboarding (Codex)
 
-> Этот файл Codex читает автоматически при старте.
-> Он короткий нарочно: твой полный сценарий — в `CLAUDE.md`.
+> Codex reads this file automatically on start.
+> It's short on purpose: your full scenario lives in `CLAUDE.md`.
 
-## Шаг 0 (сделай сразу). Прочитай `CLAUDE.md` целиком и следуй ему
+## Step 0 (do this first). Read `CLAUDE.md` in full and follow it
 
-`CLAUDE.md` — основной сценарий воркшопа: кто перед тобой, как с ним
-говорить, что за задача, как устроены команды и блоки, как сохранять работу.
-Он написан для другого агента (Claude Code), но сценарий, тон и правила —
-общие. **Прочитай его полностью и работай по нему.** Ниже — только отличия,
-которые касаются тебя как Codex.
+`CLAUDE.md` is the workshop's main scenario: who's in front of you, how to
+talk to them, what the task is, how teams and blocks are arranged, how to
+save your work. It's written for another agent (Claude Code), but the
+scenario, tone and rules are shared. **Read it in full and work by it.**
+What follows below are only the differences that affect you as Codex.
 
-## Кто перед тобой (кратко, детали в `CLAUDE.md`)
+## Who's in front of you (briefly, details in `CLAUDE.md`)
 
-Нетехнический топ-менеджер банка на AI-воркшопе, либо организатор. Признак
-организатора: `tools/cowork-onboard.py` напечатал `WORKSHOP_TEAM=host`, либо
-пользователь сам говорит про подготовку воркшопа. Организатор → читай
-`ORGANIZER.md`, говори технически. Иначе → сценарий участника из `CLAUDE.md`:
-по-русски, без жаргона, живым текстом без markdown, празднуй маленькие победы,
-никогда не оставляй в тупике.
+A non-technical senior bank executive at the AI workshop, or an organiser.
+Signs of an organiser: `tools/cowork-onboard.py` printed
+`WORKSHOP_TEAM=host`, or the user themselves talks about workshop prep.
+Organiser → read `ORGANIZER.md`, talk technically. Otherwise → the
+participant scenario from `CLAUDE.md`: English, no jargon, plain live
+prose without markdown, celebrate small wins, never leave them stuck.
 
-## Отличие 1. Твоя защита блока живёт в другом файле
+## Difference 1. Your block isolation lives in a different file
 
-У Claude защита — `.claude/settings.local.json`. У тебя — **профиль прав в
-`.codex/config.toml`** (в корне репозитория). Он разрешает писать только в
-папку твоего блока, читать — все три блока твоей команды, а чужую команду
-закрывает совсем. Это ограничение ОС-песочницы Codex, не моя инструкция:
-запись вне своего блока физически не пройдёт.
+For Claude, isolation is `.claude/settings.local.json`. For you it's a
+**permissions profile in `.codex/config.toml`** (at the repo root). It
+allows writes only into your block's folder, read of the two neighbouring
+blocks of your team is limited to their `CONTRACT.md`, and the other team
+is closed entirely. This is an OS-sandbox constraint of Codex, not my
+instruction: writes outside your block physically won't go through.
 
-Проверь, что файл на месте: `ls .codex/config.toml`. Если его нет (bootstrap
-не отработал) — скопируй нужный шаблон и попроси пользователя перезапустить
-Codex:
+Check the file is there: `ls .codex/config.toml`. If it's missing
+(bootstrap didn't run) — copy the right template and ask the user to
+restart Codex:
 
 ```
-cp .codex/templates/config-<команда>-<блок>.toml .codex/config.toml
+cp .codex/templates/config-<team>-<block>.toml .codex/config.toml
 ```
 
-где `<команда>` = `team_a` или `team_b`, `<блок>` = `retail`, `cib` или
-`backend`. Команду и блок берёшь из вывода `tools/cowork-onboard.py`
-(строки `WORKSHOP_TEAM` / `WORKSHOP_BLOCK`).
+where `<team>` = `team_a` or `team_b`, `<block>` = `retail`, `cib` or
+`backend`. Take the team and block from the output of
+`tools/cowork-onboard.py` (lines `WORKSHOP_TEAM` / `WORKSHOP_BLOCK`).
 
-Ещё одно условие: папка репозитория должна быть отмечена доверенной в личном
-`~/.codex/config.toml` (`trust_level = "trusted"`), иначе Codex не прочитает
-проектный конфиг. Это тоже делает bootstrap; если защита будто не действует —
-проверь это в первую очередь.
+One more condition: the repo folder must be marked as trusted in your
+personal `~/.codex/config.toml` (`trust_level = "trusted"`), otherwise
+Codex won't read the project config. The bootstrap does this too; if
+isolation appears not to apply — check this first.
 
-## Отличие 2. Запускайся из папки репозитория
+## Difference 2. Launch from the repo folder
 
-Профиль прав привязан к корню репозитория (Codex находит его по `.git`).
-Работай внутри `~/AI-Workshop` — тогда защита активна автоматически, откуда
-бы внутри неё ты ни стартовал.
+The permissions profile is bound to the repo root (Codex finds it via
+`.git`). Work inside `~/AI-Workshop` — then isolation is active
+automatically, no matter where within it you started.
 
-## Отличие 3. «Копилка» (сохранение работы)
+## Difference 3. "Pile" (saving work)
 
-Твой профиль уже даёт всё нужное для сохранения: запись в служебную папку
-`.git` и доступ в сеть. Поэтому сохранение в общую копилку работает прямо из
-песочницы; Codex может попросить подтверждение на git-команды или выход в сеть
-— это нормально, соглашайся. Сами шаги сохранения — те же, что в `CLAUDE.md`
-(раздел «Git и общая копилка»), включая важное про порт 443: в корпоративной
-сети GitHub доступен только через `ssh.github.com:443`. Пользователю про git,
-коммиты и прочее не говори: для него это «сохранить работу в общую копилку
-команды».
+Your profile already gives everything needed to save: write into the
+`.git` service folder and network access. So saving to the shared pile
+works straight from the sandbox; Codex may ask for confirmation on git
+commands or network access — that's normal, agree. The save steps
+themselves are the same as in `CLAUDE.md` (section "Git and the shared
+pile"), including the important port 443 note: on the corporate network,
+GitHub is only reachable via `ssh.github.com:443`. Don't mention git,
+commits and so on to the user: for them it's "save your work to the
+team's shared pile".
 
-## Всё остальное — как в `CLAUDE.md`
+## Everything else — as in `CLAUDE.md`
 
-Границы блоков, интеграция трёх блоков, петля обратной связи с табло, запрет
-произносить технический жаргон при пользователе, URL блоков и табло в
-`TEAM.md` — всё оттуда. Если что-то здесь и в `CLAUDE.md` расходится по
-поведению с пользователем — слушай `CLAUDE.md`; этот файл только про
-Codex-специфику.
+Block boundaries, three-block integration, the feedback loop with the
+leaderboard, the ban on technical jargon when talking to the user, the
+URLs of blocks and the leaderboard in `TEAM.md` — all of that lives there.
+If anything here diverges from `CLAUDE.md` in user-facing behaviour — go
+with `CLAUDE.md`; this file is only about Codex specifics.

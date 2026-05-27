@@ -1,11 +1,11 @@
-# Деплой на Render
+# Deploying to Render
 
-Как код попадает в продакшен после `git push`. Документ для организаторов
-и для агентов команд.
+How code reaches production after `git push`. For organisers and team
+agents.
 
-## Семь сервисов
+## Seven services
 
-| Сервис | Папка в репо | URL |
+| Service | Repo folder | URL |
 |---|---|---|
 | `raif-a-backend` | `team_a/backend/` | `https://raif-a-backend.onrender.com` |
 | `raif-a-cib` | `team_a/cib/` | `https://raif-a-cib.onrender.com` |
@@ -15,24 +15,24 @@
 | `raif-b-retail` | `team_b/retail/` | `https://raif-b-retail.onrender.com` |
 | `raif-simulator` | `simulator/` | `https://raif-simulator.onrender.com` |
 
-Плюс Postgres `raif-workshop-db` (free) — им пользуется только симулятор:
-хранит клиентскую базу команд и журнал событий.
+Plus Postgres `raif-workshop-db` (free) — used only by the simulator: it
+stores the teams' customer base and the event log.
 
-## Как работает деплой
+## How deployment works
 
 ```
 git push origin main
         ↓
 GitHub Action "Deploy services via Render Deploy Hooks"
         ↓
-        git diff → какие папки тронуты
+        git diff → which folders changed
         ↓
-        curl POST на Render Deploy Hook тронутого сервиса
+        curl POST to the Render Deploy Hook of the touched service
         ↓
-Render собирает Docker-образ из изменённой папки (~2-4 минуты)
+Render builds a Docker image from the changed folder (~2-4 minutes)
 ```
 
-| Изменения в | Деплоится |
+| Change in | Deploys |
 |---|---|
 | `team_a/backend/**` | `raif-a-backend` |
 | `team_a/cib/**` | `raif-a-cib` |
@@ -41,15 +41,16 @@ Render собирает Docker-образ из изменённой папки (
 | `team_b/cib/**` | `raif-b-cib` |
 | `team_b/retail/**` | `raif-b-retail` |
 | `simulator/**` | `raif-simulator` |
-| `seed/**` | оба backend-блока |
-| `render.yaml` | все семь |
-| `tasks/`, `docs/`, `.github/` | ничего |
+| `seed/**` | both backend blocks |
+| `render.yaml` | all seven |
+| `tasks/`, `docs/`, `.github/` | nothing |
 
-## Деплой-хуки
+## Deploy hooks
 
-Action — `.github/workflows/deploy-render.yml`. Триггеры: `push` в `main`
-и ручной `workflow_dispatch` (выбор сервисов через запятую или `all`).
-В GitHub нужны семь секретов (Settings → Secrets and variables → Actions):
+The Action is `.github/workflows/deploy-render.yml`. Triggers: `push` to
+`main` and manual `workflow_dispatch` (services chosen via comma-separated
+list or `all`). Seven secrets are required in GitHub (Settings → Secrets
+and variables → Actions):
 
 - `RENDER_HOOK_A_BACKEND`
 - `RENDER_HOOK_A_CIB`
@@ -59,49 +60,52 @@ Action — `.github/workflows/deploy-render.yml`. Триггеры: `push` в `m
 - `RENDER_HOOK_B_RETAIL`
 - `RENDER_HOOK_SIMULATOR`
 
-URL хука каждого сервиса: Render → сервис → Settings → Deploy Hook.
-Если секрет не задан — Action печатает warning и пропускает сервис, не падая.
+The hook URL for each service: Render → service → Settings → Deploy Hook.
+If a secret isn't set — the Action prints a warning and skips the service
+without failing.
 
-## Переменные окружения
+## Environment variables
 
-Env-группа `ai-workshop-shared` (задаётся один раз в Render UI):
+Env group `ai-workshop-shared` (set once in the Render UI):
 
-- `OPENAI_API_KEY` — ключ для LLM (cib — объяснение отказа по кредиту,
-  симулятору — судья). `OPENAI_BASE_URL`, `OPENAI_MODEL` — со значениями
-  по умолчанию в `render.yaml`.
-- `ADMIN_TOKEN` — токен для `/admin/*` симулятора.
+- `OPENAI_API_KEY` — key for the LLM (cib — credit decline explanation;
+  simulator — judge). `OPENAI_BASE_URL`, `OPENAI_MODEL` — defaults are in
+  `render.yaml`.
+- `ADMIN_TOKEN` — token for the simulator's `/admin/*`.
 
-Пер-сервис (в `render.yaml`):
+Per service (in `render.yaml`):
 
-- `backend`-блоки — `TEAM_NAME` (`team_a` / `team_b`);
-- `cib`-блоки — `TEAM_NAME` и `BACKEND_URL` (адрес backend своей команды);
-- `retail`-блоки — `TEAM_NAME`, `BACKEND_URL` и `CIB_URL`;
-- симулятор — шесть `*_URL` (`A_BACKEND_URL`, `A_CIB_URL`, `A_RETAIL_URL`
-  и три для команды B), `ACTIVE_TASK`, `DATABASE_URL` (из БД
+- `backend` blocks — `TEAM_NAME` (`team_a` / `team_b`);
+- `cib` blocks — `TEAM_NAME` and `BACKEND_URL` (their team's backend);
+- `retail` blocks — `TEAM_NAME`, `BACKEND_URL` and `CIB_URL`;
+- simulator — six `*_URL`s (`A_BACKEND_URL`, `A_CIB_URL`, `A_RETAIL_URL`
+  and the three for team B), `ACTIVE_TASK`, `DATABASE_URL` (from the DB
   `raif-workshop-db`).
 
-`RENDER_GIT_COMMIT` Render подставляет сам — блок отдаёт его в `/health`,
-по нему симулятор ловит факт деплоя.
+`RENDER_GIT_COMMIT` is filled in by Render itself — the block returns it
+from `/health`, and the simulator uses it to catch deploys.
 
-## Переоценка после деплоя
+## Re-evaluation after deploy
 
-Симулятор **не дёргается** из GitHub Action. Он сам, pull-моделью, раз в
-~30 секунд опрашивает `/health` всех шести блоков; увидел новый git-коммит
-любого блока команды → снимает probe трёх блоков и пересчитывает клиентскую
-базу команды. Так надёжнее: free-инстансы Render просыпаются с холодного
-старта 20-30 секунд, и push-триггер ловил бы старую версию.
+The simulator is **not** poked by the GitHub Action. It pulls — every
+~30 seconds it polls `/health` of all six blocks; once it sees a new git
+commit on any of a team's blocks → it probes the three blocks and
+recomputes the team's customer base. This is more robust: Render free
+instances take 20-30 seconds to wake from a cold start, and a push trigger
+would catch the old version.
 
-## Если деплой не подхватился
+## If a deploy didn't pick up
 
-1. GitHub → Actions → последний прогон → нет ли warning о незаданном секрете.
-2. Render → сервис → Events → зафиксирован ли новый build; если нет —
+1. GitHub → Actions → last run → is there a warning about a missing secret.
+2. Render → service → Events → is a new build recorded; if not —
    Manual Deploy → Deploy latest commit.
-3. Упала сборка — Events покажет stack trace (частые причины: синтаксис
-   в `main.py`, пакет не нашёлся).
+3. Build failed — Events shows the stack trace (common causes: syntax
+   in `main.py`, a package not found).
 
-## Free-план
+## Free plan
 
-Все сервисы и Postgres — free. Инстансы засыпают после 15 минут простоя
-(первый запрос +20-30 секунд). Free Postgres живёт 90 дней — создавать
-свежим перед воркшопом. Семь web-сервисов могут упереться в лимит free-плана
-по числу одновременных web-сервисов — см. раздел про риск в `ORGANIZER.md`.
+All services and Postgres are free. Instances sleep after 15 minutes idle
+(first request +20-30 seconds). The free Postgres lives for 90 days —
+create a fresh one before the workshop. Seven web services may hit the
+free-plan concurrent web service cap — see the risk note in
+`ORGANIZER.md`.

@@ -1,18 +1,21 @@
-# Райффайзен Bank — AI-воркшоп правления
+# Raiffeisen Bank — AI workshop for the board
 
-AI-воркшоп для правления Райффайзен банка. Формат — vibe-coding с Claude Code.
+An AI workshop for the Raiffeisen bank board. The format is vibe-coding
+with Claude Code.
 
-Шесть членов правления делятся на две команды по три человека. Каждая команда
-получает свой банк — одинаковый на старте — и собственного AI-помощника. За день
-команды своими руками, через AI, дорабатывают банк: добавляют новые возможности
-для клиентов.
+Six board members split into two teams of three. Each team gets its own
+bank — identical at the starting line — and its own AI assistant. Over the
+day the teams, with their own hands and through the AI, extend the bank:
+they add new capabilities for customers.
 
-Обе команды решают одну и ту же задачу, параллельно и независимо. В банке живут
-симулированные клиенты: каждое улучшение или поломка отражается на них — клиенты
-приходят или уходят. Табло в зале показывает счёт двух команд.
+Both teams solve the same task in parallel and independently. The bank is
+populated with simulated customers: every improvement or breakage shows up
+in them — customers arrive or leave. A leaderboard in the room shows the
+two teams' score.
 
-Главный приз воркшопа — не код, а впечатление: как AI меняет работу команды и
-как быстрая обратная связь от «клиентов» подсвечивает каждое решение.
+The headline prize of the workshop is not the code — it's the impression:
+how AI changes the way a team works and how the fast feedback from
+"customers" lights up every decision.
 
-Роли и команды — в `TEAM.md`, правила — в `RULES.md`. Для организаторов —
-`ORGANIZER.md`. Как код попадает в продакшен — `DEPLOY.md`.
+Roles and teams — see `TEAM.md`, rules — `RULES.md`. For organisers — see
+`ORGANIZER.md`. How code reaches production — `DEPLOY.md`.

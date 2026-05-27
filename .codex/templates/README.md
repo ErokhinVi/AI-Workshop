@@ -1,71 +1,76 @@
 # .codex/templates/
 
-Заготовки `.codex/config.toml` для каждого блока — для участников, которые
-работают в **Codex** вместо Claude Code.
+Templates of `.codex/config.toml` for every block — for participants who
+work in **Codex** instead of Claude Code.
 
-## Зачем
+## Why
 
-Это **жёсткая защита** того же типа, что `.claude/templates/` даёт для Claude:
-Codex физически не сможет писать вне папки твоего блока и не увидит чужую
-команду. Ограничение применяет ОС-песочница Codex (Seatbelt на macOS, ACL на
-Windows), а не инструкция агенту.
+This is **hard isolation** of the same kind that `.claude/templates/`
+provides for Claude: Codex physically cannot write outside your block's
+folder and will not see the other team. Enforcement is done by Codex's OS
+sandbox (Seatbelt on macOS, ACL on Windows), not by an instruction to the
+agent.
 
-## Что внутри
+## What's inside
 
-Каждый файл — permission-профиль Codex (ключ `default_permissions` +
-секция `[permissions.raif-<команда>-<блок>]`), который:
+Each file is a Codex permission profile (a `default_permissions` key and
+a `[permissions.raif-<team>-<block>]` section) that:
 
-- разрешает **чтение** всей файловой системы (база `":root" = "read"`) —
-  это нужно, чтобы Codex в песочнице видел системные инструменты вне
-  репозитория (`git`, `bash` и т.п.); на запись `:root` прав не даёт;
-- разрешает **запись** только в папку своего блока (`team_X/<блок>`) и в
-  служебную папку `.git` (без неё git не может сохранить работу в копилку);
-- закрывает **папки двух других блоков своей команды** через `deny`
-  (ни чтения, ни записи), но открывает на чтение только их `CONTRACT.md` —
-  это «витрина», через которую блоки стыкуются по API;
-- закрывает чужую команду через `deny` (ни чтения, ни записи);
-- включает сеть, чтобы работала «копилка» (git push/pull).
+- allows **reading** the whole filesystem (base `":root" = "read"`) — this
+  is needed so Codex inside the sandbox can see system tools outside the
+  repo (`git`, `bash`, etc.); `:root` grants no write;
+- allows **writing** only into the participant's own block folder
+  (`team_X/<block>`) and into the service folder `.git` (without it git
+  cannot save the work into the shared pile);
+- closes the **folders of the two other blocks in your team** via `deny`
+  (no read, no write), but opens read on only their `CONTRACT.md` — this is
+  the storefront through which blocks connect over the API;
+- closes the other team via `deny` (no read, no write);
+- enables network so the "pile" (git push/pull) works.
 
-Точечный read на `team_X/<сосед>/CONTRACT.md` должен побеждать общий
-`deny` на папку соседа за счёт правила «более конкретный путь побеждает
-общий», документированного в верхнем комментарии каждого `.toml`-файла
-(`# Более конкретный путь побеждает общий; приоритет deny > write > read`).
-Это поведение пока **не проверено эмпирически** в актуальной версии Codex —
-после изменений в шаблонах прогони ручной тест из новой сессии Codex под
-профилем участника: попробуй прочитать `team_<своя>/<сосед>/CONTRACT.md`
-(должен открыться) и `team_<своя>/<сосед>/src/main.py` (должен денаться).
-Если CONTRACT.md тоже денается — file-level allow внутри folder-deny в
-Codex не поддерживается, и надо переходить к другой схеме (например,
-держать витрины в отдельной папке `team_<X>/contracts/`, к которой
-permissions проще).
+The targeted read on `team_X/<neighbour>/CONTRACT.md` is expected to win
+against the wide `deny` on the neighbour's folder thanks to the
+"more-specific path wins" rule documented in the top comment of each
+`.toml` file (`# More specific path wins; priority deny > write > read`).
+This behaviour has **not been empirically verified** in the current Codex
+version yet — after template edits, run a manual test from a fresh Codex
+session under the participant profile: try to read
+`team_<own>/<neighbour>/CONTRACT.md` (should open) and
+`team_<own>/<neighbour>/src/main.py` (should deny). If CONTRACT.md is
+denied too — file-level allow inside folder-deny is not supported by Codex
+and you need a different scheme (for example, keep storefronts in a
+separate folder `team_<X>/contracts/`, where permissions are simpler).
 
-Почему `":root" = "read"` и `.git = "write"` обязательны: песочница Codex
-действует на уровне ОС и применяется к каждому процессу. С узкой базой
-(`:minimal`) агент не находит `git` вообще; без записи в `.git` — `git commit`
-падает на `.git/index.lock`. Изоляцию это не размывает: запись остаётся только
-в своём блоке и `.git`, чужая команда невидима.
+Why `":root" = "read"` and `.git = "write"` are mandatory: Codex's sandbox
+enforces at the OS level and applies to every process. With a narrow base
+(`:minimal`) the agent cannot find `git` at all; without write into `.git`
+— `git commit` fails on `.git/index.lock`. Isolation isn't blurred by
+this: writes are limited to the participant's block plus `.git`, the other
+team stays invisible.
 
-Профиль привязан к корню репозитория автоматически: Codex находит корень по
-`.git`, поэтому хардкодить путь не нужно — шаблоны одинаковы на любой машине.
+The profile is bound to the repo root automatically: Codex finds the root
+via `.git`, so the path doesn't need to be hard-coded — templates are
+identical on every machine.
 
-## Когда применять
+## When to apply
 
-**Bootstrap применяет автоматически** при настройке ноутбука: копирует нужный
-файл в `.codex/config.toml` и отмечает папку репозитория доверенной в
-`~/.codex/config.toml`.
+**Bootstrap applies it automatically** during laptop setup: copies the
+right file into `.codex/config.toml` and marks the repo folder as trusted
+in `~/.codex/config.toml`.
 
-Вручную, если bootstrap не сработал:
+Manually, if bootstrap didn't run:
 
 ```bash
-# для блока CIB команды A
+# for the CIB block of team A
 cp .codex/templates/config-team_a-cib.toml .codex/config.toml
 ```
 
-После этого перезапусти Codex — он подхватит профиль. Если защита будто не
-действует, проверь, что папка репозитория помечена `trust_level = "trusted"`
-в `~/.codex/config.toml`.
+After that — restart Codex so it picks up the profile. If isolation
+appears not to apply, check that the repo folder is marked
+`trust_level = "trusted"` in `~/.codex/config.toml`.
 
-## Связь с Claude
+## Relation to Claude
 
-Это близнецы файлов из `.claude/templates/`. Правишь правила доступа для блока
-— меняй оба, чтобы Claude и Codex давали одинаковую защиту.
+These are twin files of those in `.claude/templates/`. When you edit
+access rules for a block — edit both, so Claude and Codex give the same
+isolation.

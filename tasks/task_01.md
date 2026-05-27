@@ -1,26 +1,28 @@
-# Задача воркшопа
+# Workshop task
 
-Конкретную задачу — что именно ваша команда добавляет в банк — **озвучивает
-ведущий вслух** в начале воркшопа. Здесь её нет намеренно.
+The specific task — what exactly your team adds to the bank — is **announced
+by the host out loud** at the start of the workshop. It isn't written here
+on purpose.
 
-## Общая рамка
+## The shared frame
 
-Ваша команда — это три блока, по человеку на блок: **retail** (мобильный банк
-клиента), **cib** (бизнес-логика и решения) и **backend** (ядро данных).
-Команда добавляет в банк новую функцию для клиентов. Фича готова только тогда,
-когда **все три блока** сделали свою часть и состыковались между собой:
+Your team is three blocks, one person per block: **retail** (the customer's
+mobile bank), **cib** (business logic and decisions) and **backend** (the
+data core). The team adds a new feature to the bank for customers. The
+feature is done only when **all three blocks** have done their part and
+connected:
 
-- retail ходит за данными в backend, а за решением — в cib;
-- cib ходит за данными клиента в backend.
+- retail asks backend for data, and asks cib for the decision;
+- cib asks backend for customer data.
 
-Внутри команды договоритесь офлайн, кто какой кусок API отдаёт. Окно
-стыковки между блоками — файл `CONTRACT.md` в каждом блоке: туда вписывают
-свои ручки и формат запроса/ответа. Соседи смотрят именно туда — кода
-друг друга они не читают, защита блокирует. Появилась новая ручка —
-обнови свой `CONTRACT.md`, иначе сосед о ней не узнает.
+Inside the team, agree out loud who exposes which slice of the API. The
+seam between blocks is the `CONTRACT.md` file in each block: you write your
+endpoints and the request/response shape into it. Neighbours look there —
+they don't read each other's code, isolation blocks that. A new endpoint
+appeared — update your `CONTRACT.md`, otherwise the neighbour won't know.
 
-## Можно отклоняться
+## Deviation is fine
 
-Это не экзамен. Никто не мешает вам отойти от поставленной задачи и делать то,
-что вам интереснее, — экспериментируйте. Помощник-ИИ следует за вами, а не
-загоняет обратно в рамки.
+This isn't an exam. Nothing stops you from drifting away from the assigned
+task and doing whatever is more interesting — experiment. The AI helper
+follows you, it does not herd you back into the frame.
