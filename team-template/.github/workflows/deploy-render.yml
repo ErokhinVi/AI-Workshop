@@ -1,0 +1,74 @@
+name: Deploy services via Render Deploy Hooks
+
+# Дёргаем Deploy Hook сервиса, чья папка менялась. Секреты в GitHub →
+# Settings → Secrets and variables → Actions данного репозитория команды:
+#   RENDER_HOOK_BACKEND, RENDER_HOOK_CIB, RENDER_HOOK_RETAIL.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Что передеплоить (через запятую: backend,cib,retail или 'all')"
+        required: false
+        default: "all"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect and deploy
+        env:
+          MANUAL: ${{ inputs.services }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          HOOK_BACKEND: ${{ secrets.RENDER_HOOK_BACKEND }}
+          HOOK_CIB: ${{ secrets.RENDER_HOOK_CIB }}
+          HOOK_RETAIL: ${{ secrets.RENDER_HOOK_RETAIL }}
+        run: |
+          set -e
+          # имя → "путь-папки:переменная-хука"
+          MAP="backend:backend:HOOK_BACKEND
+          cib:cib:HOOK_CIB
+          retail:retail:HOOK_RETAIL"
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            CHANGED="__manual__"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(git ls-files)
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" || true)
+          fi
+          RENDER_ALL=no
+          echo "$CHANGED" | grep -qE "^(render\.yaml|seed/)" && RENDER_ALL=yes
+
+          echo "$MAP" | while IFS=: read -r NAME PATHPREFIX HOOKVAR; do
+            [ -z "$NAME" ] && continue
+            HIT=no
+            if [ "$EVENT" = "workflow_dispatch" ]; then
+              REQ="${MANUAL:-all}"
+              { [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$NAME,"; } && HIT=yes
+            else
+              echo "$CHANGED" | grep -qE "^${PATHPREFIX}/" && HIT=yes
+              [ "$RENDER_ALL" = "yes" ] && HIT=yes
+            fi
+            [ "$HIT" != "yes" ] && { echo "skip $NAME"; continue; }
+            HOOK=$(eval echo "\$$HOOKVAR")
+            if [ -z "$HOOK" ]; then
+              echo "::warning::секрет для $NAME не задан — пропуск"
+            else
+              curl -fsS -X POST "$HOOK" && echo " → triggered $NAME"
+            fi
+          done

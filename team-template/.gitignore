@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Локальные настройки Claude Code — у каждого топа свои
+.claude/settings.local.json
+
+# Локальные настройки Codex — у каждого топа свои (шаблоны в .codex/templates/ коммитятся)
+.codex/config.toml
+
+# Worktree-копии сессий Claude Code App — служебные, в общую ветку не идут
+.claude/worktrees/
+
+# SESSION.md в каждой папке — это локальный контекст, не делимый
+*/SESSION.md
+PUSH_TO_GITHUB.md

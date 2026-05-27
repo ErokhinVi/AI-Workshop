@@ -1,6 +1,10 @@
-# Render Blueprint: 2 команды × 3 блока + симулятор.
+# Render Blueprint организаторского репозитория — только симулятор + Postgres.
 #
-# Однократно в UI Render: New → Blueprint → Connect repo → Apply.
+# Командные банки (4 × 3 блока) деплоятся из СВОИХ репозиториев (по одному
+# render.yaml у каждой команды). Симулятор знает их URL-ы через env-перемен-
+# ные A_*/B_*/C_*/D_* и ходит к ним по сети.
+#
+# Однократно в UI Render: New → Blueprint → Connect this repo → Apply.
 # В env-группе ai-workshop-shared задать OPENAI_API_KEY и ADMIN_TOKEN.
 
 databases:
@@ -22,120 +26,6 @@ envVarGroups:
 
 services:
   - type: web
-    name: raif-a-backend
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_a/backend/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_a/backend/**, seed/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_a
-
-  - type: web
-    name: raif-a-cib
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_a/cib/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_a/cib/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_a
-      - key: BACKEND_URL
-        value: https://raif-a-backend.onrender.com
-
-  - type: web
-    name: raif-a-retail
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_a/retail/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_a/retail/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_a
-      - key: BACKEND_URL
-        value: https://raif-a-backend.onrender.com
-      - key: CIB_URL
-        value: https://raif-a-cib.onrender.com
-
-  - type: web
-    name: raif-b-backend
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_b/backend/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_b/backend/**, seed/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_b
-
-  - type: web
-    name: raif-b-cib
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_b/cib/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_b/cib/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_b
-      - key: BACKEND_URL
-        value: https://raif-b-backend.onrender.com
-
-  - type: web
-    name: raif-b-retail
-    runtime: docker
-    plan: free
-    region: oregon
-    branch: main
-    autoDeploy: true
-    dockerfilePath: ./team_b/retail/Dockerfile
-    dockerContext: .
-    rootDir: .
-    buildFilter:
-      paths: [team_b/retail/**, render.yaml]
-    envVars:
-      - fromGroup: ai-workshop-shared
-      - key: TEAM_NAME
-        value: team_b
-      - key: BACKEND_URL
-        value: https://raif-b-backend.onrender.com
-      - key: CIB_URL
-        value: https://raif-b-cib.onrender.com
-
-  - type: web
     name: raif-simulator
     runtime: docker
     plan: free
@@ -151,6 +41,10 @@ services:
       - fromGroup: ai-workshop-shared
       - key: ACTIVE_TASK
         value: credit
+      - key: TEAM_NAMES
+        value: team_a,team_b,team_c,team_d
+      # 12 URL-ов командных банков. Заполняй после деплоя командных репо.
+      # Шаблон: https://raif-<a|b|c|d>-<retail|cib|backend>.onrender.com
       - key: A_BACKEND_URL
         value: https://raif-a-backend.onrender.com
       - key: A_CIB_URL
@@ -163,6 +57,18 @@ services:
         value: https://raif-b-cib.onrender.com
       - key: B_RETAIL_URL
         value: https://raif-b-retail.onrender.com
+      - key: C_BACKEND_URL
+        value: https://raif-c-backend.onrender.com
+      - key: C_CIB_URL
+        value: https://raif-c-cib.onrender.com
+      - key: C_RETAIL_URL
+        value: https://raif-c-retail.onrender.com
+      - key: D_BACKEND_URL
+        value: https://raif-d-backend.onrender.com
+      - key: D_CIB_URL
+        value: https://raif-d-cib.onrender.com
+      - key: D_RETAIL_URL
+        value: https://raif-d-retail.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: raif-workshop-db

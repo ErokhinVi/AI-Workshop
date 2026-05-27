@@ -285,10 +285,16 @@ async def judge_team(snap: dict) -> dict:
         return _fallback_block(snap)
 
 
-async def judge_round(snap_a: dict, snap_b: dict) -> dict:
-    """Оценить обе команды двумя НЕЗАВИСИМЫМИ параллельными LLM-вызовами.
+async def judge_round(snapshots: dict[str, dict]) -> dict:
+    """Оценить N команд N НЕЗАВИСИМЫМИ параллельными LLM-вызовами.
 
-    На команду возвращает {scores, convenience, feature_state, reason, judge}.
+    Принимает словарь {имя_команды: probe-снапшот}, возвращает словарь
+    {имя_команды: {scores, convenience, feature_state, reason, judge}}.
+
+    На воркшопе команды живут в отдельных GitHub-репозиториях и судятся
+    независимо: судья никогда не сравнивает «А с Б», а только оценивает
+    конкретный банк глазами клиента.
     """
-    a, b = await asyncio.gather(judge_team(snap_a), judge_team(snap_b))
-    return {"team_a": a, "team_b": b}
+    names = list(snapshots.keys())
+    verdicts = await asyncio.gather(*(judge_team(snapshots[n]) for n in names))
+    return dict(zip(names, verdicts))

@@ -1,0 +1,41 @@
+# .gitattributes — нормализация line-endings для воркшопа.
+#
+# Зачем. Репо клонируется на Windows участником через raif-workshop-setup.cmd,
+# а агент Claude в Cowork mode гоняет git из Linux-sandbox через virtiofs-mount.
+# Без явного контроля над EOL мы получаем шторм «85 files changed,
+# 15787/15785» на ПЕРВЫЙ же коммит каждого участника — git заново стейджит
+# всё, потому что Windows-чекаут с CRLF, а sandbox-git видит LF.
+# Этот файл фиксирует LF для всех текстовых файлов независимо от того,
+# на какой стороне их трогают.
+
+# По умолчанию: всё текстовое → LF, бинарь — оставить как есть.
+* text=auto eol=lf
+
+# Файлы, которые ДОЛЖНЫ оставаться CRLF (запускаются только на Windows).
+*.cmd        binary
+*.bat        binary
+*.ps1        binary
+*.psm1       text eol=crlf
+
+# Явные binary-метки — git их не трогает.
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
+*.zip        binary
+*.tar.gz     binary
+*.exe        binary
+*.dll        binary
+*.so         binary
+*.dylib      binary
+*.woff       binary
+*.woff2      binary
+*.ttf        binary
+*.otf        binary
+
+# Lockfile-ы инструментов — оставить как есть (часто LF, регенерируются tool-ом).
+package-lock.json   text eol=lf
+poetry.lock         text eol=lf
+uv.lock             text eol=lf

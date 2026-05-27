@@ -36,24 +36,55 @@ from src.scoring import (
     rubric_total,
 )
 
-BANK_URLS = {
-    "team_a": {
-        "retail": os.environ.get("A_RETAIL_URL", "http://localhost:8001").rstrip("/"),
-        "cib": os.environ.get("A_CIB_URL", "http://localhost:8002").rstrip("/"),
-        "backend": os.environ.get("A_BACKEND_URL", "http://localhost:8003").rstrip("/"),
-    },
-    "team_b": {
-        "retail": os.environ.get("B_RETAIL_URL", "http://localhost:8011").rstrip("/"),
-        "cib": os.environ.get("B_CIB_URL", "http://localhost:8012").rstrip("/"),
-        "backend": os.environ.get("B_BACKEND_URL", "http://localhost:8013").rstrip("/"),
-    },
-}
+# Команды и их URL-ы строятся из ENV. На воркшопе каждая команда живёт в
+# своём GitHub-репозитории и деплоится своими тремя Render-сервисами;
+# симулятор знает только URL-ы трёх блоков на команду.
+#
+# TEAM_NAMES — список через запятую. Для каждого имени берётся первая буква
+# суффикса после "team_" в верхнем регистре (team_a → "A", team_c → "C") и
+# по ней читаются три URL: <P>_RETAIL_URL, <P>_CIB_URL, <P>_BACKEND_URL.
+# Дефолтные локальные порты разнесены по командам, чтобы docker-compose
+# мог поднять все четыре без коллизий.
+def _team_prefix(name: str) -> str:
+    suffix = name.split("_", 1)[1] if "_" in name else name
+    return suffix[0].upper() if suffix else "X"
+
+
+def _default_port(team: str, block: str, *, base: int) -> int:
+    # team_a → 0, team_b → 10, team_c → 20, team_d → 30; retail=+1, cib=+2, backend=+3
+    offset = (ord(_team_prefix(team).lower()) - ord("a")) * 10
+    block_offset = {"retail": 1, "cib": 2, "backend": 3}[block]
+    return base + offset + block_offset
+
+
+_BASE_PORT = int(os.environ.get("LOCAL_BANK_BASE_PORT", "8000"))
+
+TEAMS: tuple[str, ...] = tuple(
+    t.strip() for t in os.environ.get(
+        "TEAM_NAMES", "team_a,team_b,team_c,team_d"
+    ).split(",") if t.strip()
+)
+
+
+def _bank_urls() -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for team in TEAMS:
+        p = _team_prefix(team)
+        out[team] = {
+            block: os.environ.get(
+                f"{p}_{block.upper()}_URL",
+                f"http://localhost:{_default_port(team, block, base=_BASE_PORT)}",
+            ).rstrip("/")
+            for block in ("retail", "cib", "backend")
+        }
+    return out
+
+
+BANK_URLS = _bank_urls()
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 POLL_INTERVAL_S = float(os.environ.get("POLL_INTERVAL_S", "30"))
 # Событие застоя в ленту — не на каждый тик, а когда накопилось столько утечки.
 DECAY_EVENT_THRESHOLD = float(os.environ.get("DECAY_EVENT_THRESHOLD", "25"))
-
-TEAMS = ("team_a", "team_b")
 
 
 def _now() -> datetime:
@@ -166,12 +197,15 @@ async def _emit_event(team: str, commit: str, delta: float, scores: list[int],
 
 
 async def _baseline() -> None:
-    """Замерить стартовое состояние обеих команд по нетронутым блокам."""
+    """Замерить стартовое состояние всех команд по нетронутым блокам."""
     now = _now()
-    snap_a = await probe_team("team_a", BANK_URLS["team_a"])
-    snap_b = await probe_team("team_b", BANK_URLS["team_b"])
-    verdict = await judge_round(snap_a, snap_b)
-    for team, snap in (("team_a", snap_a), ("team_b", snap_b)):
+    snaps = dict(zip(
+        TEAMS,
+        await asyncio.gather(*(probe_team(t, BANK_URLS[t]) for t in TEAMS)),
+    ))
+    verdict = await judge_round(snaps)
+    for team in TEAMS:
+        snap = snaps[team]
         v = verdict[team]
         st = _fresh_state()
         st["last_commit"] = _commit_fingerprint(snap)
@@ -186,27 +220,29 @@ async def _baseline() -> None:
         await _save_state(team)
 
 
-async def evaluate_round(snap_a: dict | None = None, snap_b: dict | None = None,
+async def evaluate_round(snapshots: dict[str, dict] | None = None,
                          committed: set | None = None) -> dict:
-    """Коммит-раунд: probe + один вызов судьи + сдвиг базы команд.
+    """Коммит-раунд: probe + один параллельный вызов судьи + сдвиг базы команд.
 
-    `committed` — какие команды двигать (по их новому коммиту); None — обе
-    (ручной /admin/evaluate). Снапшоты можно передать готовыми, чтобы не
-    снимать probe дважды за тик опроса.
+    `committed` — какие команды двигать (по их новому коммиту); None — все
+    (ручной /admin/evaluate). Снапшоты можно передать готовыми (dict
+    {team_name: snap}), чтобы не снимать probe дважды за тик опроса.
     """
     async with _get_lock():
-        if snap_a is None:
-            snap_a = await probe_team("team_a", BANK_URLS["team_a"])
-        if snap_b is None:
-            snap_b = await probe_team("team_b", BANK_URLS["team_b"])
+        if snapshots is None:
+            snapshots = {}
+        for team in TEAMS:
+            if team not in snapshots:
+                snapshots[team] = await probe_team(team, BANK_URLS[team])
         if committed is None:
             committed = set(TEAMS)
-        verdict = await judge_round(snap_a, snap_b)
+        verdict = await judge_round({t: snapshots[t] for t in TEAMS})
         now = _now()
         out: dict[str, dict] = {}
-        for team, snap in (("team_a", snap_a), ("team_b", snap_b)):
+        for team in TEAMS:
             if team not in committed:
                 continue
+            snap = snapshots[team]
             st = _state[team]
             v = verdict[team]
             scores = v["scores"]
@@ -295,7 +331,7 @@ async def _poll_loop() -> None:
                         and fp != _state[team]["last_commit"]:
                     committed.add(team)
             if committed:
-                await evaluate_round(snaps["team_a"], snaps["team_b"], committed)
+                await evaluate_round(snaps, committed)
             for team in TEAMS:
                 if team not in committed:
                     await _decay_tick(team, now)
@@ -315,7 +351,7 @@ async def lifespan(app: FastAPI):
         # Baseline-замер делаем только если воркшоп уже шёл и почему-то нет
         # снимка стартовых баллов. Если организатор ещё не нажал «Начать
         # воркшоп», ничего не трогаем — фон вхолостую крутится.
-        if _workshop_started and _state["team_a"]["baseline_score"] is None:
+        if _workshop_started and _state[TEAMS[0]]["baseline_score"] is None:
             await _baseline()
     except Exception as exc:  # noqa: BLE001
         print(f"[simulator] init error: {exc!r}")

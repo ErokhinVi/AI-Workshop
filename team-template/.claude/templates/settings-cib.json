@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(retail/src/**)",
+      "Read(retail/pyproject.toml)",
+      "Read(retail/Dockerfile)",
+      "Edit(retail/**)",
+      "Write(retail/**)",
+      "Read(backend/src/**)",
+      "Read(backend/pyproject.toml)",
+      "Read(backend/Dockerfile)",
+      "Edit(backend/**)",
+      "Write(backend/**)",
+      "Edit(seed/**)",
+      "Write(seed/**)",
+      "Edit(render.yaml)",
+      "Write(render.yaml)",
+      "Edit(.github/**)",
+      "Write(.github/**)"
+    ],
+    "allow": [
+      "Edit(cib/**)",
+      "Write(cib/**)",
+      "Read(cib/**)",
+      "Read(retail/CONTRACT.md)",
+      "Read(backend/CONTRACT.md)",
+      "Read(tasks/**)",
+      "Read(seed/**)",
+      "Bash(docker-compose:*)",
+      "Bash(docker:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(ls:*)",
+      "Bash(cat:cib/**)",
+      "Bash(grep:cib/**)",
+      "Bash(find:cib/**)"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+# Сабмодули организаторского репо: четыре командных репозитория.
+# Эти строки появляются ПОСЛЕ того, как ты создашь команды-репо на GitHub
+# и запустишь tools/setup/add-submodules.sh — он сам пропишет нужные блоки
+# и добавит сабмодули в team_a/, team_b/, team_c/, team_d/.
+#
+# Пока репо команд не созданы, .gitmodules можно оставить пустым —
+# здесь только подсказка по форме.
+#
+# [submodule "team_a"]
+#     path = team_a
+#     url = git@github.com:erokhinvi/ai-workshop-team-a.git
+#     branch = main
+# [submodule "team_b"]
+#     path = team_b
+#     url = git@github.com:erokhinvi/ai-workshop-team-b.git
+#     branch = main
+# [submodule "team_c"]
+#     path = team_c
+#     url = git@github.com:erokhinvi/ai-workshop-team-c.git
+#     branch = main
+# [submodule "team_d"]
+#     path = team_d
+#     url = git@github.com:erokhinvi/ai-workshop-team-d.git
+#     branch = main

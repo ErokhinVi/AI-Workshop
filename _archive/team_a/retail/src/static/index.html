@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=414,initial-scale=1" />
+  <title>Райф · мобильный банк · проверка связи</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #f6f3ec;
+      --surface:   #ffffff;
+      --rule:      #e3ddcc;
+      --text:      #1f1d18;
+      --text-2:    #5a564c;
+      --muted:     #8a857a;
+      --raiff:     #FFE600;
+      --raiff-soft:#fff7a0;
+      --good:      #2f7a3a;
+      --warn:      #a4662d;
+      --bad:       #b14b32;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Geist", -apple-system, system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+    .phone {
+      max-width: 420px; margin: 0 auto;
+      background: var(--surface);
+      min-height: 100vh;
+      box-shadow: 0 0 60px rgba(60,52,40,0.08);
+    }
+    .topbar {
+      background: var(--text); color: var(--bg);
+      padding: 28px 22px 16px;
+    }
+    .topbar .logo {
+      width: 26px; height: 26px;
+      background: var(--raiff); display: inline-block;
+      border-radius: 4px; vertical-align: middle;
+      margin-right: 10px;
+    }
+    .topbar .name {
+      font-weight: 500; font-size: 16px; vertical-align: middle;
+    }
+    .topbar .who {
+      font-size: 12px; color: rgba(255,255,255,0.6);
+      margin-top: 4px;
+    }
+
+    .balance {
+      padding: 26px 22px 22px;
+      background: linear-gradient(180deg, var(--text) 0%, #2c2823 100%);
+      color: var(--bg);
+    }
+    .balance .l {
+      font-size: 11px; opacity: 0.6;
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .balance .v {
+      font-size: 32px; font-weight: 500; margin-top: 6px;
+      letter-spacing: -0.01em;
+    }
+    .balance .v .cur { font-size: 18px; opacity: 0.7; margin-left: 4px; }
+
+    .tabs {
+      display: flex; gap: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--rule);
+      position: sticky; top: 0; z-index: 5;
+    }
+    .tabs button {
+      flex: 1;
+      padding: 14px 8px;
+      background: transparent; border: 0;
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      color: var(--text-2);
+      cursor: pointer; position: relative;
+      transition: color 160ms;
+    }
+    .tabs button.active { color: var(--text); }
+    .tabs button.active::after {
+      content: ""; position: absolute;
+      left: 24%; right: 24%; bottom: 0;
+      height: 2px; background: var(--text);
+    }
+
+    .tab-pane { display: none; padding: 22px; }
+    .tab-pane.show { display: block; }
+
+    .section-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--muted); margin: 6px 0 10px;
+    }
+
+    .form-row { margin-bottom: 14px; }
+    .form-row label {
+      display: block; font-size: 12px;
+      color: var(--text-2); margin-bottom: 4px;
+    }
+    .form-row input, .form-row select {
+      width: 100%; padding: 10px 12px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--rule); border-radius: 6px;
+      font-family: inherit; font-size: 14px;
+      transition: border-color 160ms;
+    }
+    .form-row input:focus, .form-row select:focus {
+      outline: 0; border-color: var(--text);
+    }
+
+    .btn {
+      width: 100%; padding: 13px;
+      background: var(--text); color: var(--bg);
+      border: 0; border-radius: 8px;
+      font-family: inherit; font-weight: 500; font-size: 14px;
+      letter-spacing: 0.01em; cursor: pointer;
+      transition: background 160ms;
+    }
+    .btn:hover { background: #2c2823; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary {
+      background: var(--raiff); color: var(--text);
+    }
+    .btn.primary:hover { background: #fff04a; }
+
+    .tx-list { display: flex; flex-direction: column; gap: 0; }
+    .tx-row {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--rule);
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    .tx-row:last-child { border-bottom: 0; }
+    .tx-row .desc { font-size: 13px; }
+    .tx-row .ts { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .tx-row .amt { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+    .tx-row .amt.minus { color: var(--text); }
+    .tx-row .amt.plus  { color: var(--good); }
+
+    .empty {
+      text-align: center; padding: 60px 0;
+      color: var(--muted); font-size: 13px;
+    }
+
+    .alert {
+      margin-top: 18px; padding: 12px 14px;
+      border-radius: 6px;
+      font-size: 13px; line-height: 1.5;
+    }
+    .alert.ok    { background: #e8f0e2; color: var(--good); }
+    .alert.info  { background: #f0e8d0; color: var(--warn); }
+    .alert.error { background: #f4dfd6; color: var(--bad); }
+
+    .client-picker { padding: 14px 22px; border-bottom: 1px solid var(--rule); }
+    .client-picker label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .client-picker select { width: 100%; margin-top: 4px; padding: 8px 10px;
+      border: 1px solid var(--rule); background: var(--surface); border-radius: 6px;
+      font-family: inherit; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="topbar">
+      <div><span class="logo"></span><span class="name">Райф</span></div>
+      <div class="who" id="topbar-who"></div>
+    </div>
+
+    <div class="balance">
+      <div class="l">остаток на счёте</div>
+      <div class="v"><span id="balance-v">—</span><span class="cur">₽</span></div>
+    </div>
+
+    <div class="client-picker">
+      <label>Профиль</label>
+      <select id="client-select"></select>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="transfers">Переводы</button>
+    </div>
+
+    <div class="tab-pane show" data-pane="transfers">
+      <div class="section-title">Перевести</div>
+      <form id="transfer-form" autocomplete="off">
+        <div class="form-row">
+          <label>Кому</label>
+          <input name="to" placeholder="имя или ID получателя" />
+        </div>
+        <div class="form-row">
+          <label>Сумма, ₽</label>
+          <input name="amount" type="number" min="1" placeholder="0" />
+        </div>
+        <button class="btn primary" type="submit">Перевести</button>
+      </form>
+      <div id="transfer-result"></div>
+
+      <div class="section-title" style="margin-top:24px">Последние операции</div>
+      <div id="tx-list" class="tx-list"></div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    "use strict";
+    const fmt = new Intl.NumberFormat("ru-RU");
+    const sel = document.getElementById("client-select");
+    const balanceV = document.getElementById("balance-v");
+    const topbarWho = document.getElementById("topbar-who");
+    const txList = document.getElementById("tx-list");
+    const transferResult = document.getElementById("transfer-result");
+
+    // ---- табы ----
+    document.querySelectorAll(".tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("show"));
+        btn.classList.add("active");
+        document.querySelector(`[data-pane="${btn.dataset.tab}"]`).classList.add("show");
+      });
+    });
+
+    // ---- загрузка списка клиентов в селект ----
+    async function loadClients() {
+      try {
+        const r = await fetch("/clients?limit=200");
+        const d = await r.json();
+        const items = (d.items || []).slice(0, 80);
+        sel.innerHTML = items.map(c =>
+          `<option value="${c.id}" data-balance="${c.balance_rub}" data-name="${c.name}" data-segment="${c.segment}">
+            ${c.name}
+          </option>`
+        ).join("");
+        if (items.length) onPickClient();
+      } catch(e) { console.error(e); }
+    }
+
+    function onPickClient() {
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      balanceV.textContent = fmt.format(+opt.dataset.balance || 0);
+      topbarWho.textContent = opt.dataset.name;
+      loadTx(opt.value);
+    }
+    sel.addEventListener("change", onPickClient);
+
+    // ---- последние операции ----
+    async function loadTx(clientId) {
+      try {
+        const r = await fetch(`/transactions/${clientId}?limit=10`);
+        const d = await r.json();
+        const items = d.items || [];
+        if (!items.length) {
+          txList.innerHTML = `<div class="empty">Операций пока нет</div>`;
+          return;
+        }
+        txList.innerHTML = items.map(t => {
+          const sign = t.amount_rub >= 0 ? "plus" : "minus";
+          const amt = (t.amount_rub >= 0 ? "+" : "−") + fmt.format(Math.abs(t.amount_rub));
+          const niceTs = t.ts.replace("T", " ").slice(0, 16);
+          return `<div class="tx-row">
+            <div>
+              <div class="desc">${typeLabel(t.type)}</div>
+              <div class="ts">${niceTs}</div>
+            </div>
+            <div class="amt ${sign}">${amt} ₽</div>
+          </div>`;
+        }).join("");
+      } catch(e) {
+        txList.innerHTML = `<div class="empty">Не удалось загрузить операции</div>`;
+      }
+    }
+
+    function typeLabel(t) {
+      return ({
+        transfer_in:    "Перевод входящий",
+        transfer_out:   "Перевод исходящий",
+        card_purchase:  "Оплата картой",
+        atm_withdraw:   "Снятие в банкомате",
+        salary:         "Зарплата",
+        utility_payment:"Коммунальные",
+      })[t] || t;
+    }
+
+    function setBalance(newAmount) {
+      balanceV.textContent = fmt.format(newAmount);
+      const opt = sel.selectedOptions[0];
+      if (opt) opt.dataset.balance = newAmount;
+    }
+
+    // ---- форма перевода ----
+    const transferForm = document.getElementById("transfer-form");
+    transferForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      transferResult.innerHTML = "";
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      const data = new FormData(ev.target);
+      const to = (data.get("to") || "").trim();
+      const amount = +data.get("amount");
+      if (!to || amount <= 0) {
+        transferResult.innerHTML = `<div class="alert error">введи получателя и сумму</div>`;
+        return;
+      }
+
+      const payload = {
+        from_client_id: opt.value,
+        to: to,
+        amount_rub: amount,
+      };
+      try {
+        const r = await fetch("/api/transfer", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          const kindLabel = d.kind === "internal"
+            ? `${d.to} (клиент банка)`
+            : `${d.to} (внешний счёт)`;
+          transferResult.innerHTML =
+            `<div class="alert ok">Отправлено ${fmt.format(d.amount_rub)} ₽<br/>
+             получатель: ${kindLabel}</div>`;
+          setBalance(d.new_balance_rub);
+          transferForm.reset();
+          loadTx(opt.value);
+        } else {
+          transferResult.innerHTML =
+            `<div class="alert error">${d.detail || "ошибка"}</div>`;
+        }
+      } catch(e) {
+        transferResult.innerHTML =
+          `<div class="alert error">сервер не ответил</div>`;
+      }
+    });
+
+    loadClients();
+  })();
+  </script>
+</body>
+</html>

@@ -1,61 +1,14 @@
-# AI-воркшоп — локальный запуск: docker-compose up --build
-# Команда A: retail 8001, cib 8002, backend 8003
-# Команда B: retail 8011, cib 8012, backend 8013
-# Табло: 8000
+# AI-воркшоп — локальный запуск ОРГАНИЗАТОРСКОЙ части.
+#
+# Поднимает только симулятор + Postgres. Командные банки запускаются из
+# своих репозиториев — каждый со своим docker-compose внутри team-template.
+# Поэтому *_URL по умолчанию указывают на хост-машину (host.docker.internal):
+# если ты локально поднял командные репо на портах 8001..8033, симулятор
+# увидит их через эти адреса.
+#
+# Табло: http://localhost:8000
 
 services:
-  a_backend:
-    build: { context: ., dockerfile: team_a/backend/Dockerfile }
-    container_name: raif-a-backend
-    environment: { TEAM_NAME: team_a }
-    ports: ["8003:8020"]
-    networks: [raif]
-
-  a_cib:
-    build: { context: ., dockerfile: team_a/cib/Dockerfile }
-    container_name: raif-a-cib
-    environment:
-      TEAM_NAME: team_a
-      BACKEND_URL: http://a_backend:8020
-    ports: ["8002:8020"]
-    networks: [raif]
-
-  a_retail:
-    build: { context: ., dockerfile: team_a/retail/Dockerfile }
-    container_name: raif-a-retail
-    environment:
-      TEAM_NAME: team_a
-      BACKEND_URL: http://a_backend:8020
-      CIB_URL: http://a_cib:8020
-    ports: ["8001:8020"]
-    networks: [raif]
-
-  b_backend:
-    build: { context: ., dockerfile: team_b/backend/Dockerfile }
-    container_name: raif-b-backend
-    environment: { TEAM_NAME: team_b }
-    ports: ["8013:8020"]
-    networks: [raif]
-
-  b_cib:
-    build: { context: ., dockerfile: team_b/cib/Dockerfile }
-    container_name: raif-b-cib
-    environment:
-      TEAM_NAME: team_b
-      BACKEND_URL: http://b_backend:8020
-    ports: ["8012:8020"]
-    networks: [raif]
-
-  b_retail:
-    build: { context: ., dockerfile: team_b/retail/Dockerfile }
-    container_name: raif-b-retail
-    environment:
-      TEAM_NAME: team_b
-      BACKEND_URL: http://b_backend:8020
-      CIB_URL: http://b_cib:8020
-    ports: ["8011:8020"]
-    networks: [raif]
-
   postgres:
     image: postgres:16-alpine
     container_name: raif-postgres
@@ -70,17 +23,26 @@ services:
     build: { context: ., dockerfile: simulator/Dockerfile }
     container_name: raif-simulator
     environment:
-      A_BACKEND_URL: http://a_backend:8020
-      A_CIB_URL: http://a_cib:8020
-      A_RETAIL_URL: http://a_retail:8020
-      B_BACKEND_URL: http://b_backend:8020
-      B_CIB_URL: http://b_cib:8020
-      B_RETAIL_URL: http://b_retail:8020
+      TEAM_NAMES: team_a,team_b,team_c,team_d
+      A_RETAIL_URL: http://host.docker.internal:8001
+      A_CIB_URL: http://host.docker.internal:8002
+      A_BACKEND_URL: http://host.docker.internal:8003
+      B_RETAIL_URL: http://host.docker.internal:8011
+      B_CIB_URL: http://host.docker.internal:8012
+      B_BACKEND_URL: http://host.docker.internal:8013
+      C_RETAIL_URL: http://host.docker.internal:8021
+      C_CIB_URL: http://host.docker.internal:8022
+      C_BACKEND_URL: http://host.docker.internal:8023
+      D_RETAIL_URL: http://host.docker.internal:8031
+      D_CIB_URL: http://host.docker.internal:8032
+      D_BACKEND_URL: http://host.docker.internal:8033
       DATABASE_URL: postgres://sim:sim@postgres:5432/simulator
       ADMIN_TOKEN: localdev
       POLL_INTERVAL_S: "30"
-    depends_on: [a_backend, a_cib, a_retail, b_backend, b_cib, b_retail, postgres]
+    depends_on: [postgres]
     ports: ["8000:8000"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [raif]
 
 networks:

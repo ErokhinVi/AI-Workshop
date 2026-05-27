@@ -1,0 +1,38 @@
+# Codex-защита блока retail для AI-воркшопа.
+# Близнец .claude/templates/settings-retail.json, но для Codex.
+#
+# Применяется так же, как у Claude: bootstrap копирует этот файл в
+# .codex/config.toml в корне репозитория. Codex подхватывает его
+# автоматически при запуске из корня (корень он определяет по .git).
+#
+# ВАЖНО: чтобы Codex вообще прочитал проектный конфиг, папку репозитория
+# нужно один раз отметить как доверенную в ~/.codex/config.toml
+# (trust_level = "trusted"). Это делает bootstrap.
+
+default_permissions = "raif-retail"
+
+# ":workspace_roots" = корень репозитория (определяется автоматически).
+# Более конкретный путь побеждает общий; приоритет deny > write > read.
+# ":root" = чтение всей ФС (чтобы Codex видел git, bash и системные
+# инструменты вне репозитория); на запись это прав НЕ даёт.
+[permissions.raif-retail.filesystem]
+":root" = "read"
+
+# Модель «свой блок + витрины соседей»:
+# - читаем корень репозитория (tasks/, seed/, корневые md),
+# - пишем только в свой блок,
+# - папки соседей по команде закрыты полностью,
+# - но CONTRACT.md соседей разрешён на чтение — это точка стыковки.
+# Чужая команда живёт в отдельном репозитории, её здесь нет в принципе.
+[permissions.raif-retail.filesystem.":workspace_roots"]
+"." = "read"
+"retail" = "write"
+".git" = "write"
+"cib" = "deny"
+"backend" = "deny"
+"cib/CONTRACT.md" = "read"
+"backend/CONTRACT.md" = "read"
+
+# Сеть нужна, чтобы сохранять работу в общую копилку.
+[permissions.raif-retail.network]
+enabled = true

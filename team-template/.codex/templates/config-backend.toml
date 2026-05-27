@@ -1,0 +1,27 @@
+# Codex-защита блока backend для AI-воркшопа.
+# Близнец .claude/templates/settings-backend.json, но для Codex.
+#
+# Применяется так же, как у Claude: bootstrap копирует этот файл в
+# .codex/config.toml в корне репозитория.
+#
+# ВАЖНО: чтобы Codex вообще прочитал проектный конфиг, папку репозитория
+# нужно один раз отметить как доверенную в ~/.codex/config.toml
+# (trust_level = "trusted"). Это делает bootstrap.
+
+default_permissions = "raif-backend"
+
+[permissions.raif-backend.filesystem]
+":root" = "read"
+
+[permissions.raif-backend.filesystem.":workspace_roots"]
+"." = "read"
+"backend" = "write"
+"seed" = "write"
+".git" = "write"
+"retail" = "deny"
+"cib" = "deny"
+"retail/CONTRACT.md" = "read"
+"cib/CONTRACT.md" = "read"
+
+[permissions.raif-backend.network]
+enabled = true

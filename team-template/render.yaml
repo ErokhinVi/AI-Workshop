@@ -1,0 +1,80 @@
+# Render Blueprint: один командный репозиторий — 3 блока банка.
+#
+# Однократно в UI Render: New → Blueprint → Connect this repo → Apply.
+# В env-группе ai-workshop-shared (создаётся один раз на аккаунт) уже должны
+# быть заданы OPENAI_API_KEY и ADMIN_TOKEN (см. ORGANIZER.md в
+# организаторском репо).
+#
+# ВНИМАНИЕ: значения <TEAM_SLUG>, <BACKEND_URL>, <CIB_URL> подставляются под
+# конкретную команду при заведении репозитория (см. SETUP.md в
+# организаторском репо). Пока стоят плейсхолдеры — не оставляй так на проде.
+
+envVarGroups:
+  - name: ai-workshop-shared
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: ADMIN_TOKEN
+        sync: false
+
+services:
+  - type: web
+    name: raif-<TEAM_SLUG>-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    rootDir: .
+    buildFilter:
+      paths: [backend/**, seed/**, render.yaml]
+    envVars:
+      - fromGroup: ai-workshop-shared
+      - key: TEAM_NAME
+        value: <TEAM_SLUG>
+
+  - type: web
+    name: raif-<TEAM_SLUG>-cib
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./cib/Dockerfile
+    dockerContext: .
+    rootDir: .
+    buildFilter:
+      paths: [cib/**, render.yaml]
+    envVars:
+      - fromGroup: ai-workshop-shared
+      - key: TEAM_NAME
+        value: <TEAM_SLUG>
+      - key: BACKEND_URL
+        value: https://raif-<TEAM_SLUG>-backend.onrender.com
+
+  - type: web
+    name: raif-<TEAM_SLUG>-retail
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./retail/Dockerfile
+    dockerContext: .
+    rootDir: .
+    buildFilter:
+      paths: [retail/**, render.yaml]
+    envVars:
+      - fromGroup: ai-workshop-shared
+      - key: TEAM_NAME
+        value: <TEAM_SLUG>
+      - key: BACKEND_URL
+        value: https://raif-<TEAM_SLUG>-backend.onrender.com
+      - key: CIB_URL
+        value: https://raif-<TEAM_SLUG>-cib.onrender.com

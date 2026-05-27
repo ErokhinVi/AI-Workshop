@@ -1,0 +1,26 @@
+# Codex-защита блока cib для AI-воркшопа.
+# Близнец .claude/templates/settings-cib.json, но для Codex.
+#
+# Применяется так же, как у Claude: bootstrap копирует этот файл в
+# .codex/config.toml в корне репозитория.
+#
+# ВАЖНО: чтобы Codex вообще прочитал проектный конфиг, папку репозитория
+# нужно один раз отметить как доверенную в ~/.codex/config.toml
+# (trust_level = "trusted"). Это делает bootstrap.
+
+default_permissions = "raif-cib"
+
+[permissions.raif-cib.filesystem]
+":root" = "read"
+
+[permissions.raif-cib.filesystem.":workspace_roots"]
+"." = "read"
+"cib" = "write"
+".git" = "write"
+"retail" = "deny"
+"backend" = "deny"
+"retail/CONTRACT.md" = "read"
+"backend/CONTRACT.md" = "read"
+
+[permissions.raif-cib.network]
+enabled = true

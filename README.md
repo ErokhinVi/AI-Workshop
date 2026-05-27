@@ -1,21 +1,28 @@
-# Raiffeisen Bank — AI workshop for the board
+# Raiffeisen Bank — AI workshop, organiser orchestrator
 
-An AI workshop for the Raiffeisen bank board. The format is vibe-coding
-with Claude Code.
+This is the **organiser** repository for the Raiffeisen AI workshop. It
+orchestrates four independent team repos via git submodules, hosts the
+customer simulator + leaderboard and the workshop documentation.
 
-Six board members split into two teams of three. Each team gets its own
-bank — identical at the starting line — and its own AI assistant. Over the
-day the teams, with their own hands and through the AI, extend the bank:
-they add new capabilities for customers.
+Repository layout
 
-Both teams solve the same task in parallel and independently. The bank is
-populated with simulated customers: every improvement or breakage shows up
-in them — customers arrive or leave. A leaderboard in the room shows the
-two teams' score.
+| Path | What it is |
+|---|---|
+| `team_a/`, `team_b/`, `team_c/`, `team_d/` | submodules pointing to each team's GitHub repository (see `.gitmodules`) |
+| `simulator/` | customer simulator + leaderboard (FastAPI + Postgres) |
+| `seed/` | 500 customers, transactions, credit history (shared seed for all four teams) |
+| `tasks/` | task briefs (read-only reference) |
+| `docs/` | full design specs and implementation plans |
+| `team-template/` | canonical contents of one team repo — what gets pushed to each of the four team GitHub repos |
+| `tools/setup/` | helper scripts for the organiser to set up the four team repos |
+| `_archive/` | the old two-team layout, preserved as reference |
 
-The headline prize of the workshop is not the code — it's the impression:
-how AI changes the way a team works and how the fast feedback from
-"customers" lights up every decision.
+The workshop format and the participant scenario live in the team repos
+(see `team-template/` for the canonical version). The organiser-facing
+documentation is in this repo:
 
-Roles and teams — see `TEAM.md`, rules — `RULES.md`. For organisers — see
-`ORGANIZER.md`. How code reaches production — `DEPLOY.md`.
+- `ORGANIZER.md` — workshop format, four teams, multi-repo layout
+- `DEPLOY.md` — how code reaches Render (per-team-repo deploy hooks + simulator)
+- `SETUP.md` — the one-off manual steps to set up the four team repos and the orchestrator before the workshop
+
+For organisers — start with `SETUP.md`.

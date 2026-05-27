@@ -44,17 +44,17 @@ def _patch_judge(monkeypatch, feature_state: str, convenience: int,
                  scores: list) -> None:
     block = {"scores": scores, "convenience": convenience,
              "feature_state": feature_state, "reason": "тест", "judge": "llm"}
-    verdict = {"team_a": dict(block), "team_b": dict(block)}
+    verdict = {team: dict(block) for team in m.TEAMS}
 
-    async def fake_judge(_a, _b):
+    async def fake_judge(_snaps):
         return verdict
 
     monkeypatch.setattr(m, "judge_round", fake_judge)
 
 
 def _run_commit(team: str = "team_a") -> dict:
-    out = asyncio.run(m.evaluate_round(
-        _mock_snap("team_a"), _mock_snap("team_b"), {team}))
+    snaps = {t: _mock_snap(t) for t in m.TEAMS}
+    out = asyncio.run(m.evaluate_round(snaps, {team}))
     return out[team]
 
 
@@ -152,10 +152,18 @@ def test_fallback_path_covers_all_four_rules(monkeypatch):
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "")   # без LLM — только fallback
     now = datetime.now(timezone.utc)
 
+    def _snaps_for(team_a_snap):
+        out = {team_a_snap["team"]: team_a_snap}
+        for t in m.TEAMS:
+            if t == team_a_snap["team"]:
+                continue
+            out[t] = _real_snap(t)
+        return out
+
     # Правило 1: только витрина (вкладка есть, апишек нет) — база не двигается
     _reset(now)
     fo = _real_snap("team_a", credit_in_ui=True)
-    out = asyncio.run(m.evaluate_round(fo, _real_snap("team_b"), {"team_a"}))
+    out = asyncio.run(m.evaluate_round(_snaps_for(fo), {"team_a"}))
     assert out["team_a"]["judge"] == "fallback"
     assert out["team_a"]["feature_state"] == "frontend_only"
     assert out["team_a"]["delta"] == 0
@@ -164,7 +172,7 @@ def test_fallback_path_covers_all_four_rules(monkeypatch):
     _reset(now)
     good = _real_snap("team_a", credit_in_ui=True, e2e=True, backend_api=True,
                       explained=True, discriminating=True, latency=700)
-    out = asyncio.run(m.evaluate_round(good, _real_snap("team_b"), {"team_a"}))
+    out = asyncio.run(m.evaluate_round(_snaps_for(good), {"team_a"}))
     assert out["team_a"]["feature_state"] == "working"
     assert out["team_a"]["delta"] > 0
 
@@ -172,7 +180,7 @@ def test_fallback_path_covers_all_four_rules(monkeypatch):
     _reset(now)
     bad = _real_snap("team_a", credit_in_ui=True, e2e=True, backend_api=True,
                      explained=False, discriminating=False, latency=9000)
-    out = asyncio.run(m.evaluate_round(bad, _real_snap("team_b"), {"team_a"}))
+    out = asyncio.run(m.evaluate_round(_snaps_for(bad), {"team_a"}))
     assert out["team_a"]["feature_state"] == "working"
     assert out["team_a"]["delta"] < 0
 

@@ -132,7 +132,8 @@ def test_parse_judge_response_garbage_raises():
 def test_judge_round_fallback_without_llm(monkeypatch):
     # без OPENAI_API_KEY весь раунд считается скриптовым fallback
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
-    verdict = asyncio.run(judge_round(_done_team(), _baseline_team()))
+    verdict = asyncio.run(judge_round({
+        "team_a": _done_team(), "team_b": _baseline_team()}))
     a, b = verdict["team_a"], verdict["team_b"]
     assert a["judge"] == "fallback"
     assert len(a["scores"]) == 10
@@ -140,3 +141,16 @@ def test_judge_round_fallback_without_llm(monkeypatch):
     assert a["feature_state"] == "working"
     assert b["feature_state"] == "absent"
     assert isinstance(a["reason"], str) and a["reason"]
+
+
+def test_judge_round_handles_four_teams(monkeypatch):
+    # с появлением четырёх команд judge_round должен принимать любой набор
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
+    snapshots = {
+        "team_a": _done_team(), "team_b": _baseline_team(),
+        "team_c": _frontend_only_team(), "team_d": _partial_team(),
+    }
+    verdict = asyncio.run(judge_round(snapshots))
+    assert set(verdict.keys()) == set(snapshots.keys())
+    assert verdict["team_c"]["feature_state"] == "frontend_only"
+    assert verdict["team_d"]["feature_state"] == "partial"

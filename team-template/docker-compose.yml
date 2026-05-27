@@ -1,0 +1,41 @@
+# AI-воркшоп — локальный запуск трёх блоков одной команды.
+# docker-compose up --build
+#
+# retail  → http://localhost:8001
+# cib     → http://localhost:8002
+# backend → http://localhost:8003
+#
+# Симулятор и табло лидеров живут в организаторском репо и здесь не
+# поднимаются — на воркшопе их деплоит организатор, локально их обычно
+# не нужно.
+
+services:
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    container_name: raif-backend
+    environment: { TEAM_NAME: team }
+    ports: ["8003:8020"]
+    networks: [raif]
+
+  cib:
+    build: { context: ., dockerfile: cib/Dockerfile }
+    container_name: raif-cib
+    environment:
+      TEAM_NAME: team
+      BACKEND_URL: http://backend:8020
+    ports: ["8002:8020"]
+    networks: [raif]
+
+  retail:
+    build: { context: ., dockerfile: retail/Dockerfile }
+    container_name: raif-retail
+    environment:
+      TEAM_NAME: team
+      BACKEND_URL: http://backend:8020
+      CIB_URL: http://cib:8020
+    ports: ["8001:8020"]
+    networks: [raif]
+
+networks:
+  raif:
+    driver: bridge
