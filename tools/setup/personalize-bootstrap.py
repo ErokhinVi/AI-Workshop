@@ -55,6 +55,13 @@ def patch_bash(bash: str, team_code: str, team_repo: str, team_human: str) -> st
         f'REPO_URL="{url}"',
     )
 
+    if 'REPO_DIR="${HOME}/AI-Workshop"' not in out:
+        raise SystemExit("bash master: REPO_DIR anchor not found")
+    out = out.replace(
+        'REPO_DIR="${HOME}/AI-Workshop"',
+        f'REPO_DIR="${{HOME}}/{team_repo}"',
+    )
+
     if "settings-${TEAM}-${BLOCK}.json" not in out:
         raise SystemExit("bash master: template-path anchor not found")
     out = out.replace(
@@ -132,6 +139,13 @@ def patch_cmd(text: str, team_code: str, team_repo: str, team_human: str) -> str
         raise SystemExit(".cmd master: REPO_URL anchor not found")
     out = out.replace("git@github.com:ErokhinVi/AI-Workshop.git", url)
 
+    if "Join-Path $env:USERPROFILE 'AI-Workshop'" not in out:
+        raise SystemExit(".cmd master: $RepoDir anchor not found")
+    out = out.replace(
+        "Join-Path $env:USERPROFILE 'AI-Workshop'",
+        f"Join-Path $env:USERPROFILE '{team_repo}'",
+    )
+
     teamA_block = re.compile(
         r"  \$teamA = New-Object Windows\.Forms\.RadioButton\n"
         r"(?:  \$teamA\..+\n){4}"
@@ -197,6 +211,53 @@ def patch_cmd(text: str, team_code: str, team_repo: str, team_human: str) -> str
     return out
 
 
+def patch_host_applescript(text: str, bash_b64_new: str) -> str:
+    """Strip both team and block pickers; hardcode 'host'/'host'."""
+    out, n = re.compile(r"\t-- 1\. Team\n.*?end if\n", re.DOTALL).subn(
+        '\t-- 1. Team (hardcoded — organiser script)\n'
+        '\tset teamCode to "host"\n',
+        text,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("applescript master: team picker block not found (host)")
+
+    out, n = re.compile(r"\t-- 2\. Block\n.*?end if\n", re.DOTALL).subn(
+        '\t-- 2. Block (hardcoded — organiser has full repo access)\n'
+        '\tset blockCode to "host"\n',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("applescript master: block picker block not found (host)")
+
+    out, n = re.subn(
+        r'set bashB64 to "[^"]+"',
+        f'set bashB64 to "{bash_b64_new}"',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("applescript master: bashB64 anchor not found (host)")
+    return out
+
+
+def patch_host_cmd(text: str) -> str:
+    """Pre-check $hostBox; the form's host branch overrides team/block."""
+    anchor = (
+        "  $hostBox.Size     = New-Object Drawing.Size(460, 24)\n"
+        "  $form.Controls.Add($hostBox)"
+    )
+    if anchor not in text:
+        raise SystemExit(".cmd master: hostBox anchor not found (host)")
+    replacement = (
+        "  $hostBox.Size     = New-Object Drawing.Size(460, 24)\n"
+        "  $hostBox.Checked  = $true\n"
+        "  $form.Controls.Add($hostBox)"
+    )
+    return text.replace(anchor, replacement)
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -223,7 +284,17 @@ def main() -> int:
         (out_dir / "raif-workshop-setup.cmd").write_bytes(
             cmd_patched.encode("utf-8")
         )
-        print(f"  + {out_dir.relative_to(ROOT)}/  →  {team_repo}.git")
+        print(f"  + {out_dir.relative_to(ROOT)}/  →  {team_repo}.git → ~/{team_repo}")
+
+    # Organiser (host) variant — clones AI-Workshop, skips isolation, lands in ~/AI-Workshop.
+    bash_h_b64 = base64.b64encode(bash_master.encode("utf-8")).decode("ascii")
+    asc_h = patch_host_applescript(asc_master, bash_h_b64)
+    cmd_h = patch_host_cmd(cmd_master)
+    host_dir = OUT / "host"
+    host_dir.mkdir(parents=True, exist_ok=True)
+    (host_dir / "raif-workshop-setup.applescript").write_bytes(asc_h.encode("utf-16"))
+    (host_dir / "raif-workshop-setup.cmd").write_bytes(cmd_h.encode("utf-8"))
+    print(f"  + {host_dir.relative_to(ROOT)}/  →  AI-Workshop.git → ~/AI-Workshop (organiser)")
 
     print()
     print("Distribute each pair via private channel to the matching team.")
