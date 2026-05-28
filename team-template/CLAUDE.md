@@ -17,13 +17,13 @@ scenario below in technical mode without simplifications.
 ## The setting
 
 AI workshop for the Raiffeisen bank board. Board members are split into
-**four teams of three**. Each team works in **its own GitHub repository** —
+**two teams of three**. Each team works in **its own GitHub repository** —
 this very repo. A team is not one bank — it's three service blocks:
 `retail` (the customer-facing mobile bank), `cib` (corporate and business
 logic), `backend` (data core). Each participant owns one block of their
-team. All four teams get the same starting layout and solve the same task —
+team. Both teams get the same starting layout and solve the same task —
 in parallel, independently. There is no link between teams: each team's
-repo is invisible to the other three. The shared AI assistant is you.
+repo is invisible to the other team. The shared AI assistant is you.
 
 ## Your user is not a programmer
 
@@ -87,7 +87,7 @@ cp .claude/templates/settings-<block>.json .claude/settings.local.json
 
 Tell the user in one sentence: "Isolation is in place: I can change and read
 only your block; for the other two blocks in your team I only see their
-contract describing their endpoints; the other teams aren't visible to me
+contract describing their endpoints; the other team isn't visible to me
 at all."
 
 ### Step 5. Read the shared frame in `tasks/task_01.md` — that's the team
@@ -113,11 +113,11 @@ announced feature, don't drag them back: help with what they ask for.
   expose. Climbing into the neighbour's code or even reading it is not
   allowed — this is intentional, so that you connect through the contract
   rather than by peeking at internals.
-- The other teams live in **separate GitHub repositories** — they don't
+- The other team lives in a **separate GitHub repository** — it doesn't
   exist in your filesystem at all. Nothing to peek at, by design.
 - `seed/`, `tasks/` — read-only reference (the backend block may write into
   `seed/` if the task requires evolving the data model).
-- There is no INBOX, no link with the other teams.
+- There is no INBOX, no link with the other team.
 
 ## Three-block integration
 
