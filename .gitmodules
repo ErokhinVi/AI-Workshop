@@ -30,11 +30,3 @@
 	path = team_b
 	url = git@github.com:ErokhinVi/team_2.git
 	branch = main
-[submodule "team_c"]
-	path = team_c
-	url = git@github.com:ErokhinVi/team_3.git
-	branch = main
-[submodule "team_d"]
-	path = team_d
-	url = git@github.com:ErokhinVi/team_4.git
-	branch = main

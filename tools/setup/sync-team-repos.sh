@@ -37,7 +37,7 @@ if [ ! -d "$TEMPLATE" ]; then
   exit 1
 fi
 
-LABELS=("team_a" "team_b" "team_c" "team_d")
+LABELS=("team_a" "team_b")
 URLS=("$@")
 
 WORK="$(mktemp -d)"

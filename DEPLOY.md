@@ -90,13 +90,13 @@ be reused across all five Blueprints):
 
 Per team service (in each team repo's `render.yaml`):
 
-- `backend` block — `TEAM_NAME` (`team_a` / `team_b` / `team_c` / `team_d`);
+- `backend` block — `TEAM_NAME` (`team_a` / `team_b`);
 - `cib` block — `TEAM_NAME` and `BACKEND_URL` (the team's own backend);
 - `retail` block — `TEAM_NAME`, `BACKEND_URL` and `CIB_URL`.
 
 Simulator (in the orchestrator's `render.yaml`):
 
-- `TEAM_NAMES=team_a,team_b,team_c,team_d`
+- `TEAM_NAMES=team_a,team_b`
 - 12 URLs: `A_BACKEND_URL`, `A_CIB_URL`, `A_RETAIL_URL`, … `D_RETAIL_URL`
 - `ACTIVE_TASK=credit`
 - `DATABASE_URL` (from the Postgres `raif-workshop-db`)

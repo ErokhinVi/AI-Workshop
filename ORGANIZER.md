@@ -36,8 +36,6 @@ whole thing from this repo:
 ai-workshop                       (this orchestrator repo)
 ├── team_a/        submodule → ai-workshop-team-a
 ├── team_b/        submodule → ai-workshop-team-b
-├── team_c/        submodule → ai-workshop-team-c
-├── team_d/        submodule → ai-workshop-team-d
 ├── simulator/     customer simulator + leaderboard (deployed from here)
 ├── seed/          shared customer base for all four teams
 ├── tasks/         task briefs (the host announces which one)

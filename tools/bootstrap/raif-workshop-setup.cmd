@@ -61,8 +61,9 @@ $ErrorActionPreference = 'Stop'
 $OutputEncoding         = [System.Text.UTF8Encoding]::new()
 
 # ── parameters ───────────────────────────────────────────────────────────────
-$RepoUrl          = 'git@github.com:ErokhinVi/AI-Workshop.git'
-$RepoDir          = Join-Path $env:USERPROFILE 'AI-Workshop'
+# $RepoUrl/$RepoDir are assigned after the participant picks the team
+$RepoUrl = $null
+$RepoDir = $null
 $SshDir           = Join-Path $env:USERPROFILE '.ssh'
 $SshKeyPath       = Join-Path $SshDir   'raif_workshop'
 $SshConfig        = Join-Path $SshDir   'config'
@@ -424,8 +425,8 @@ Info ('OS:        ' + [System.Environment]::OSVersion.VersionString + $(if ($osC
 Info ('arch:      ' + $env:PROCESSOR_ARCHITECTURE)
 Info ('user:      ' + $env:USERNAME)
 Info ('HOME:      ' + $env:USERPROFILE)
-Info ('REPO_DIR:  ' + $RepoDir)
 Info ('TOOLS:     ' + $ToolsRoot)
+# REPO_DIR printed later, once team selection is known
 
 function Show-Tool($name, $hint) {
   $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -523,7 +524,6 @@ function Show-WorkshopPicker {
   $hostBox.Text     = "I'm the workshop host (full repo access, no block isolation)"
   $hostBox.Location = New-Object Drawing.Point(28, 280)
   $hostBox.Size     = New-Object Drawing.Size(460, 24)
-  $hostBox.Checked  = $true
   $form.Controls.Add($hostBox)
 
   $ok = New-Object Windows.Forms.Button
@@ -582,6 +582,13 @@ $cfg = @{
   Participant = $slugRaw
 }
 
+switch ($cfg.Team) {
+  'team_a' { $RepoUrl = 'git@github.com:ErokhinVi/team_1.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_1' }
+  'team_b' { $RepoUrl = 'git@github.com:ErokhinVi/team_2.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_2' }
+  'host'   { $RepoUrl = 'git@github.com:ErokhinVi/AI-Workshop.git'; $RepoDir = Join-Path $env:USERPROFILE 'AI-Workshop' }
+}
+Info ('REPO_URL:  ' + $RepoUrl)
+Info ('REPO_DIR:  ' + $RepoDir)
 $teamHuman  = @{ 'team_a' = 'Team A'; 'team_b' = 'Team B'; 'host' = 'Host' }[$cfg.Team]
 $blockHuman = @{ 'retail' = 'Retail — customer mobile bank'; 'cib' = 'CIB — corporate and business logic'; 'backend' = 'Backend — bank data core'; 'host' = '—' }[$cfg.Block]
 Ok ('Participant: ' + $cfg.Name + '  (' + $teamHuman + ' · ' + $blockHuman + ')')
@@ -644,7 +651,7 @@ Info ('Participant: ' + $cfg.Name)
 Info ('Email:       ' + $cfg.Email)
 Info ('Team:        ' + $teamHuman + ' (' + $cfg.Team + ')')
 Info ('Block:       ' + $blockHuman)
-if ($cfg.Team -ne 'host') { Info ('Block folder: ' + $cfg.Team + '\' + $cfg.Block + '\') }
+if ($cfg.Team -ne 'host') { Info ('Block folder: ' + $cfg.Block + '\') }
 
 & git config --global user.name  $cfg.Name  | Out-Null
 & git config --global user.email $cfg.Email | Out-Null
@@ -702,32 +709,31 @@ Note ('HEAD:   ' + $headLine)
 # ── 7b. team isolation: settings.local.json per (team, block) ────────────────
 Step 'Installing block isolation — edits restricted to your block'
 $claudeDir = Join-Path $RepoDir '.claude'
-$tpl = Join-Path $claudeDir ('templates\settings-' + $cfg.Team + '-' + $cfg.Block + '.json')
+$tpl = Join-Path $claudeDir ('templates\settings-' + $cfg.Block + '.json')
 if ($cfg.Team -eq 'host') {
   Info 'Host mode — no isolation installed'
   Ok 'Full access to the whole repository'
 } elseif (Test-Path $tpl) {
-  Copy-Item -LiteralPath $tpl -Destination (Join-Path $claudeDir 'settings.local.json') -Force
-  Ok 'Isolation active: .claude\settings.local.json'
-  Note ('template: settings-' + $cfg.Team + '-' + $cfg.Block + '.json')
-  Note 'you edit only your block; the other team is not visible at all'
+  Ok ('Template found: settings-' + $cfg.Block + '.json')
+  Note 'Claude will copy it into .claude\settings.local.json'
+  Note 'right after you say hi to Claude on first launch (Step 4 of CLAUDE.md)'
 } else {
   Warn ('Template not found: ' + $tpl)
-  Note 'Claude will install isolation itself during onboarding'
+  Note 'Claude will warn about this during onboarding'
 }
 
 # ── 7c. Codex isolation: .codex/config.toml per (team, block) ────────────────
 # Same block protection for participants who use Codex instead of Claude.
 Step 'Installing Codex isolation (if anyone uses Codex instead of Claude)'
 $codexDir = Join-Path $RepoDir '.codex'
-$codexTpl = Join-Path $codexDir ('templates\config-' + $cfg.Team + '-' + $cfg.Block + '.toml')
+$codexTpl = Join-Path $codexDir ('templates\config-' + $cfg.Block + '.toml')
 if ($cfg.Team -eq 'host') {
   Info 'Host mode — no Codex isolation installed'
   Ok 'Full access to the whole repository'
 } elseif (Test-Path $codexTpl) {
   Copy-Item -LiteralPath $codexTpl -Destination (Join-Path $codexDir 'config.toml') -Force
   Ok 'Codex isolation active: .codex\config.toml'
-  Note ('template: config-' + $cfg.Team + '-' + $cfg.Block + '.toml')
+  Note ('template: config-' + $cfg.Block + '.toml')
   Add-CodexTrust -RepoDir $RepoDir
 } else {
   Warn ('Codex template not found: ' + $codexTpl)
@@ -822,7 +828,7 @@ Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (local signature + co
 if ($cfg.Team -eq 'host') {
   Write-Host '    · no block isolation installed (host)'
 } else {
-  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (Claude block isolation)')
+  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'templates\settings-' + $cfg.Block + '.json') + '  (Claude block isolation template — Claude will copy it on first launch)')
   Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (Codex block isolation)')
 }
 Write-Host ''

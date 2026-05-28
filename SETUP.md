@@ -87,7 +87,7 @@ git push origin HEAD:main
 ```
 
 `.gitmodules` will be populated with the four submodule entries; the
-four directories `team_a/`, `team_b/`, `team_c/`, `team_d/` will appear
+two directories `team_a/`, `team_b/` will appear
 at the orchestrator root.
 
 ## Step 5 — Personalise and distribute the laptop bootstrap (manual)

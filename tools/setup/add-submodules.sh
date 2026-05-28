@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/setup/add-submodules.sh — wire the four team repos into this
-# orchestrator as submodules at team_a/, team_b/, team_c/, team_d/.
+# orchestrator as submodules at team_a/, team_b/.
 #
 # Usage:
 #   tools/setup/add-submodules.sh URL_A URL_B URL_C URL_D
@@ -18,7 +18,7 @@ fi
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-LABELS=("team_a" "team_b" "team_c" "team_d")
+LABELS=("team_a" "team_b")
 URLS=("$@")
 
 for i in 0 1 2 3; do
@@ -43,7 +43,7 @@ for i in 0 1 2 3; do
 done
 
 # Refresh .gitmodules formatting and stage
-git add .gitmodules team_a team_b team_c team_d
+git add .gitmodules team_a team_b
 
 echo
 echo "Submodules added. Review with 'git status' and commit when satisfied:"

@@ -29,4 +29,3 @@ _site/
 dashboard/events.jsonl
 
 # Personalized bootstrap scripts (contain embedded private SSH key — distribute via private channel)
-tools/setup/personalized/

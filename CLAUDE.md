@@ -8,7 +8,7 @@
 
 The orchestrator for the Raiffeisen AI workshop:
 
-- four team submodules at `team_a/`, `team_b/`, `team_c/`, `team_d/` —
+- two team submodules at `team_a/`, `team_b/` —
   each pointing to a separate GitHub repository of one team;
 - the customer simulator + leaderboard in `simulator/`;
 - the seed dataset and the task briefs;
@@ -45,7 +45,7 @@ in this orchestrator repo, point them at their team's repo.
 ```
 git submodule update --init --recursive    # first init after clone
 git submodule update --remote              # pull latest team commits
-git add team_a team_b team_c team_d && git commit -m "bump team submodules"
+git add team_a team_b && git commit -m "bump team submodules"
 ```
 
 The simulator is **not** dependent on the submodule state being current

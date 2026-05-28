@@ -8,7 +8,7 @@ Repository layout
 
 | Path | What it is |
 |---|---|
-| `team_a/`, `team_b/`, `team_c/`, `team_d/` | submodules pointing to each team's GitHub repository (see `.gitmodules`) |
+| `team_a/`, `team_b/` | submodules pointing to each team's GitHub repository (see `.gitmodules`) |
 | `simulator/` | customer simulator + leaderboard (FastAPI + Postgres) |
 | `seed/` | 500 customers, transactions, credit history (shared seed for all four teams) |
 | `tasks/` | task briefs (read-only reference) |
