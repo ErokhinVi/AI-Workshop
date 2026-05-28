@@ -714,9 +714,9 @@ if ($cfg.Team -eq 'host') {
   Info 'Host mode — no isolation installed'
   Ok 'Full access to the whole repository'
 } elseif (Test-Path $tpl) {
-  Ok ('Template found: settings-' + $cfg.Block + '.json')
-  Note 'Claude will copy it into .claude\settings.local.json'
-  Note 'right after you say hi to Claude on first launch (Step 4 of CLAUDE.md)'
+  Copy-Item -LiteralPath $tpl -Destination (Join-Path $claudeDir 'settings.local.json') -Force
+  Ok 'Claude isolation active: .claude\settings.local.json'
+  Note ('template: settings-' + $cfg.Block + '.json')
 } else {
   Warn ('Template not found: ' + $tpl)
   Note 'Claude will warn about this during onboarding'
@@ -828,7 +828,7 @@ Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (local signature + co
 if ($cfg.Team -eq 'host') {
   Write-Host '    · no block isolation installed (host)'
 } else {
-  Write-Host ('    ✓ ' + (Join-Path $claudeDir ('templates\settings-' + $cfg.Block + '.json')) + '  (Claude block isolation template — Claude will copy it on first launch)')
+  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (Claude block isolation)')
   Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (Codex block isolation)')
 }
 Write-Host ''
