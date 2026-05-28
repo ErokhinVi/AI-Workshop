@@ -828,7 +828,7 @@ Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (local signature + co
 if ($cfg.Team -eq 'host') {
   Write-Host '    · no block isolation installed (host)'
 } else {
-  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'templates\settings-' + $cfg.Block + '.json') + '  (Claude block isolation template — Claude will copy it on first launch)')
+  Write-Host ('    ✓ ' + (Join-Path $claudeDir ('templates\settings-' + $cfg.Block + '.json')) + '  (Claude block isolation template — Claude will copy it on first launch)')
   Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (Codex block isolation)')
 }
 Write-Host ''
