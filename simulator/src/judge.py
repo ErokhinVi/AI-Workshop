@@ -74,6 +74,58 @@ def classify_feature(team_snapshot: dict) -> str:
     return "absent"
 
 
+def assess_outages(team_snapshot: dict) -> dict:
+    """Что в банке СЛОМАНО на этом коммите — детерминированно из probe, без LLM.
+
+    Различаем «сломано» и «ещё не сделано»:
+
+    * сломано — выкаченная ручка падает с 5xx, базовый эндпоинт перестал
+      отвечать, блок недоступен, переводы не работают. За это клиенты уходят.
+    * не сделано — ручки нет (404) или запрос не дошёл (status 0). Это
+      недоделанная фича: клиент её просто не видит, штрафа нет.
+
+    Возвращает ``{"unreachable_blocks", "broken_endpoints", "transfers_broken",
+    "labels"}``: первые два — количества для `scoring.outage_cost` (переводы
+    туда НЕ входят — их цену несёт `REGRESSION_COST`), `labels` — человеческие
+    ярлыки для обоснования. Базовый список проверок закрыт и совпадает с probe.
+    """
+    b, ci, r = _checks(team_snapshot)
+    blocks = team_snapshot.get("blocks", {})
+    labels: list[str] = []
+
+    unreachable = [name for name in ("backend", "cib", "retail")
+                   if not blocks.get(name, {}).get("reachable", False)]
+    labels += [f"блок {name} недоступен" for name in unreachable]
+
+    broken = 0
+    # Базовая ручка данных клиента: на старте отвечала, перестала — регрессия.
+    if blocks.get("backend", {}).get("reachable") and b.get("serves_client") is False:
+        labels.append("ручка данных клиента (/clients) не отвечает")
+        broken += 1
+    # Кредитное решение выкачено, но падает (5xx) — «сделано криво».
+    ds = ci.get("decide_status")
+    if isinstance(ds, int) and not isinstance(ds, bool) and ds >= 500:
+        labels.append("ручка решения /credit/decide падает с ошибкой (5xx)")
+        broken += 1
+    # Сквозная заявка выкачена, но падает (5xx).
+    cas = r.get("credit_apply_status")
+    if isinstance(cas, int) and not isinstance(cas, bool) and cas >= 500:
+        labels.append("сквозная заявка /api/credit-apply падает с ошибкой (5xx)")
+        broken += 1
+    # Переводы — базовая функция; их регрессию ценит REGRESSION_COST, здесь
+    # только ярлык для обоснования (в broken_endpoints не входит — не двоить).
+    transfers_broken = r.get("transfer_ok") is False
+    if transfers_broken:
+        labels.append("переводы (базовая функция) не работают")
+
+    return {
+        "unreachable_blocks": len(unreachable),
+        "broken_endpoints": broken,
+        "transfers_broken": transfers_broken,
+        "labels": labels,
+    }
+
+
 def fallback_rubric(team_snapshot: dict) -> tuple[list[int], str]:
     """Механически вывести 10 баллов из probe-снапшота команды, без LLM."""
     b, ci, r = _checks(team_snapshot)

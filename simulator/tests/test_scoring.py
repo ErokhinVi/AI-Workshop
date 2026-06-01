@@ -6,6 +6,7 @@ from src.scoring import (
     compute_decay,
     compute_unreachable,
     convenience_factor,
+    outage_cost,
     perceived_value,
     rubric_total,
 )
@@ -62,6 +63,38 @@ def test_regression_costs_clients_regardless_of_feature():
     assert perceived_value(BROKEN, "absent", 5) < 0
     assert perceived_value(BROKEN, "working", 9) < perceived_value(
         FULL_CREDIT, "working", 9)
+
+
+# --- outage_cost / штраф за сломанные ручки ----------------------------------
+
+def test_outage_cost_prices_blocks_and_endpoints():
+    assert outage_cost(0, 0) == 0.0
+    assert outage_cost(1, 0) == 90.0          # один недоступный блок
+    assert outage_cost(0, 2) == 120.0         # две падающие ручки
+    assert outage_cost(2, 1) == 2 * 90.0 + 60.0
+    assert outage_cost(-3, -3) == 0.0         # отрицательные зажаты в ноль
+
+
+def test_broken_endpoints_cost_clients_regardless_of_feature():
+    # фича ещё не работает (frontend_only), но выкаченная ручка падает — минус
+    base = perceived_value(NO_CREDIT, "frontend_only", 5)
+    broken = perceived_value(NO_CREDIT, "frontend_only", 5,
+                             outage_penalty=outage_cost(0, 1))
+    assert broken == base - 60.0 < base
+
+
+def test_outage_penalty_subtracts_even_from_working_feature():
+    clean = perceived_value(FULL_CREDIT, "working", 9)
+    with_outage = perceived_value(FULL_CREDIT, "working", 9,
+                                  outage_penalty=outage_cost(1, 0))
+    assert with_outage == clean - 90.0
+
+
+def test_commit_no_change_no_movement_by_default():
+    # дефолтный STATIONARY_FLOW=0 → коммит без изменения ценности не двигает базу
+    r = compute_commit_round(value_now=120.0, value_prev=120.0, client_base=640.0)
+    assert r["delta"] == 0.0
+    assert r["client_base"] == 640.0
 
 
 # --- compute_commit_round ----------------------------------------------------

@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import db as dbmod
-from src.judge import judge_round
+from src.judge import assess_outages, judge_round
 from src.probe import probe_team
 from src.scoring import (
     B0,
@@ -32,6 +32,7 @@ from src.scoring import (
     compute_commit_round,
     compute_decay,
     compute_unreachable,
+    outage_cost,
     perceived_value,
     rubric_total,
 )
@@ -133,6 +134,51 @@ def _commit_fingerprint(snapshot: dict) -> str:
     )
 
 
+# Порог «значимого» сдвига ценности в клиентах — ниже считаем коммит
+# функционально нейтральным и не выдумываем причину движения.
+_VALUE_EPS = 1.0
+
+
+def _compose_reason(*, prev_fs: str | None, cur_fs: str,
+                    value_prev: float, value_now: float,
+                    outage_labels: list[str], convenience: float) -> str:
+    """Собрать чёткое обоснование коммит-раунда из фактов, а не из фантазии LLM.
+
+    Текст всегда отражает РОВНО то, что изменилось на этом коммите и что в банке
+    не работает: смена стадии фичи / рост / падение ценности, список сломанных
+    ручек, оценка удобства. Это убирает повторяющиеся однотипные обоснования —
+    на пустом коммите так и пишем «ничего не изменилось», а не плюсуем клиентов.
+    """
+    if cur_fs == "working" and prev_fs != "working":
+        head = "Кредитная фича заработала сквозь все три блока."
+    elif prev_fs == "working" and cur_fs != "working":
+        head = "Кредитная фича перестала работать сквозь все три блока."
+    elif value_now > value_prev + _VALUE_EPS:
+        head = "Банк стал ценнее для клиента, чем на прошлом коммите."
+    elif value_now < value_prev - _VALUE_EPS:
+        head = "Банк стал хуже для клиента, чем на прошлом коммите."
+    else:
+        head = "Функционально с прошлого коммита ничего не изменилось."
+
+    parts = [head]
+    if outage_labels:
+        parts.append("Не работает: " + "; ".join(outage_labels) + ".")
+    if cur_fs == "working":
+        if convenience >= 7:
+            parts.append("Пользоваться удобно — клиенты приходят.")
+        elif convenience >= 4:
+            parts.append("Удобство среднее.")
+        else:
+            parts.append("Пользоваться неудобно — клиенты уходят.")
+    elif cur_fs == "frontend_only" and not outage_labels:
+        parts.append("Вкладка «Кредиты» есть, но за ней нет работающих ручек — "
+                     "клиенты функцию не видят.")
+    elif cur_fs == "partial" and not outage_labels:
+        parts.append("Кредитная фича собрана не до конца — "
+                     "сквозная заявка не проходит.")
+    return " ".join(parts)
+
+
 async def _load_state() -> None:
     global _workshop_started, _workshop_started_at
     pool = _pool()
@@ -213,8 +259,11 @@ async def _baseline() -> None:
         st["last_eval_ts"] = now
         st["baseline_score"] = rubric_total(v["scores"])
         st["last_score"] = st["baseline_score"]
-        st["last_value"] = perceived_value(v["scores"], v["feature_state"],
-                                           v["convenience"])
+        outages = assess_outages(snap)
+        st["last_value"] = perceived_value(
+            v["scores"], v["feature_state"], v["convenience"],
+            outage_penalty=outage_cost(outages["unreachable_blocks"],
+                                       outages["broken_endpoints"]))
         st["feature_state"] = v["feature_state"]
         _state[team] = st
         await _save_state(team)
@@ -246,8 +295,10 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
             st = _state[team]
             v = verdict[team]
             scores = v["scores"]
-            reason = v["reason"]
             judge = v["judge"]
+            # reason собираем ниже из фактов коммита (не из текста LLM):
+            # пустой коммит — «без изменений», иначе — что именно поменялось/сломалось.
+            reason = ""
             fp = _commit_fingerprint(snap)
             all_down = all(
                 not snap["blocks"].get(b, {}).get("reachable")
@@ -259,10 +310,25 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 judge = "unreachable"
                 # ценность не пересчитываем — измерить нечем
             else:
-                value_now = perceived_value(scores, v["feature_state"],
-                                            v["convenience"])
-                r = compute_commit_round(value_now, st["last_value"],
+                # Работоспособность ручек считаем детерминированно из probe —
+                # не доверяем это LLM: сломанное (5xx/недоступно) штрафуем,
+                # недоделанное (404) — нет.
+                outages = assess_outages(snap)
+                value_now = perceived_value(
+                    scores, v["feature_state"], v["convenience"],
+                    outage_penalty=outage_cost(outages["unreachable_blocks"],
+                                               outages["broken_endpoints"]))
+                value_prev = st["last_value"]
+                prev_fs = st["feature_state"]
+                r = compute_commit_round(value_now, value_prev,
                                          st["client_base"])
+                # Обоснование собираем из фактов коммита, а не из текста LLM —
+                # так оно чёткое и не повторяется раунд за раундом.
+                reason = _compose_reason(
+                    prev_fs=prev_fs, cur_fs=v["feature_state"],
+                    value_prev=value_prev, value_now=value_now,
+                    outage_labels=outages["labels"],
+                    convenience=v["convenience"])
                 st["last_value"] = value_now
                 st["last_score"] = rubric_total(scores)
                 st["feature_state"] = v["feature_state"]

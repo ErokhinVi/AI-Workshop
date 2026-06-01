@@ -84,6 +84,20 @@ def test_rule4_convenient_working_feature_gains_clients(monkeypatch):
     assert m._state["team_a"]["client_base"] > B0
 
 
+def test_unchanged_commit_does_not_spam_clients(monkeypatch):
+    # суть фикса: рабочую удобную фичу коммитят повторно без изменений —
+    # первый коммит приводит клиентов, а второй (та же ценность) НЕ двигает базу
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9, FULL)
+    first = _run_commit()
+    assert first["delta"] > 0
+    base_after_first = m._state["team_a"]["client_base"]
+    second = _run_commit()
+    assert second["delta"] == 0
+    assert m._state["team_a"]["client_base"] == base_after_first
+    assert "ничего не изменилось" in second["reason"]
+
+
 def test_rule2_stagnation_leaks_clients():
     now = datetime.now(timezone.utc)
     _reset(now)
@@ -191,3 +205,21 @@ def test_fallback_path_covers_all_four_rules(monkeypatch):
     before = m._state["team_a"]["client_base"]
     asyncio.run(m._decay_tick("team_a", now))
     assert m._state["team_a"]["client_base"] < before
+
+
+def test_broken_endpoint_loses_clients_even_without_working_feature(monkeypatch):
+    # команда выкатила вкладку и кнопку, но ручка заявки падает с 500 —
+    # сквозной фичи ещё нет (frontend_only), а клиенты уже уходят за «криво»
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")   # только fallback
+    now = datetime.now(timezone.utc)
+    _reset(now)
+    snap = _real_snap("team_a", credit_in_ui=True)
+    snap["blocks"]["retail"]["checks"]["credit_apply_status"] = 500   # 5xx, не 404
+    snaps = {"team_a": snap}
+    for t in m.TEAMS:
+        if t != "team_a":
+            snaps[t] = _real_snap(t)
+    out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
+    assert out["team_a"]["feature_state"] == "frontend_only"
+    assert out["team_a"]["delta"] < 0
+    assert "Не работает" in out["team_a"]["reason"]

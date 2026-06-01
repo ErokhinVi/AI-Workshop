@@ -3,6 +3,7 @@ import asyncio
 from src import llm
 from src.judge import (
     RUBRIC_CRITERIA,
+    assess_outages,
     classify_feature,
     fallback_convenience,
     fallback_rubric,
@@ -141,6 +142,53 @@ def test_judge_round_fallback_without_llm(monkeypatch):
     assert a["feature_state"] == "working"
     assert b["feature_state"] == "absent"
     assert isinstance(a["reason"], str) and a["reason"]
+
+
+def test_assess_outages_clean_baseline_has_nothing_broken():
+    o = assess_outages(_baseline_team())
+    assert o["unreachable_blocks"] == 0
+    assert o["broken_endpoints"] == 0
+    assert o["transfers_broken"] is False
+    assert o["labels"] == []
+
+
+def test_assess_outages_ignores_unbuilt_endpoints():
+    # ручки ещё нет (404) или запрос не дошёл (0) — это «не сделано», не штраф
+    snap = _baseline_team()
+    snap["blocks"]["retail"]["checks"]["credit_apply_status"] = 404
+    snap["blocks"]["cib"]["checks"]["decide_status"] = 0
+    o = assess_outages(snap)
+    assert o["broken_endpoints"] == 0
+    assert o["labels"] == []
+
+
+def test_assess_outages_flags_5xx_as_broken():
+    snap = _baseline_team()
+    snap["blocks"]["retail"]["checks"]["credit_apply_status"] = 500
+    snap["blocks"]["cib"]["checks"]["decide_status"] = 503
+    o = assess_outages(snap)
+    assert o["broken_endpoints"] == 2
+    assert any("credit/decide" in lbl for lbl in o["labels"])
+    assert any("credit-apply" in lbl for lbl in o["labels"])
+
+
+def test_assess_outages_counts_unreachable_block():
+    snap = _baseline_team()
+    snap["blocks"]["cib"]["reachable"] = False
+    snap["blocks"]["cib"]["checks"] = {}
+    o = assess_outages(snap)
+    assert o["unreachable_blocks"] == 1
+    assert any("cib" in lbl for lbl in o["labels"])
+
+
+def test_assess_outages_flags_broken_transfers_without_double_counting():
+    snap = _baseline_team()
+    snap["blocks"]["retail"]["checks"]["transfer_ok"] = False
+    o = assess_outages(snap)
+    assert o["transfers_broken"] is True
+    # переводы не входят в broken_endpoints — их цену несёт REGRESSION_COST
+    assert o["broken_endpoints"] == 0
+    assert any("перевод" in lbl.lower() for lbl in o["labels"])
 
 
 def test_judge_round_handles_four_teams(monkeypatch):
