@@ -4,9 +4,10 @@ REM How to run:
 REM   1. Double-click the file. A black window opens.
 REM   2. If SmartScreen warns, click "More info" then "Run anyway".
 REM   3. Pick your team and block, type your name in the dialog.
-REM Required tools (git, ssh, node, python) are installed automatically as
-REM portable copies under %LOCALAPPDATA%\raif-workshop\tools\ if they are
-REM missing on the machine. No admin rights required.
+REM Git and ssh are installed automatically as a portable copy (MinGit) under
+REM %LOCALAPPDATA%\raif-workshop\tools\ if they are missing. No admin rights.
+REM Node.js and Python are NOT installed: Claude Code App ships its own runtime
+REM and runs the agent inside its own sandbox, so the host needs neither.
 
 setlocal EnableExtensions
 chcp 65001 >nul 2>&1
@@ -130,19 +131,6 @@ $MinGitUrl     = 'https://github.com/git-for-windows/git/releases/download/v2.54
 $ToolsRoot     = Join-Path $env:LOCALAPPDATA 'raif-workshop\tools'
 $MinGitDir     = Join-Path $ToolsRoot 'MinGit'
 
-# Node LTS 22 — required by Claude Code App for MCP servers and slash commands.
-# Portable ZIP from nodejs.org, no admin, no installer.
-$NodeVersion   = '22.11.0'
-$NodeUrl       = 'https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip'
-$NodeDir       = Join-Path $ToolsRoot 'node'
-# Python embeddable 3.12 — required by the agent for `python3 tools/cowork-onboard.py`.
-# It's a zip package with python.exe and stdlib (no pip, no site-packages).
-# After unpacking we copy python.exe → python3.exe (CLAUDE.md calls `python3`
-# explicitly) and uncomment `import site` in ._pth.
-$PyVersion     = '3.12.7'
-$PyUrl         = 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-amd64.zip'
-$PyDir         = Join-Path $ToolsRoot 'python'
-
 function Test-CommandAvailable($name) {
   return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
@@ -222,138 +210,9 @@ function Install-MinGit {
   }
 }
 
-function Download-Portable($url, $outZip, $label) {
-  $prevPP = $ProgressPreference
-  $ProgressPreference = 'SilentlyContinue'
-  try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $outZip -UseBasicParsing -TimeoutSec 180
-  } catch {
-    Warn ('Could not download ' + $label + ' from the public source.')
-    Note ('Manual fallback:')
-    Note ('  1. Open in a browser: ' + $url)
-    Note ('  2. Download the zip into: ' + $ToolsRoot)
-    Note ('  3. Run this .cmd again — it will unpack the existing archive.')
-    throw
-  } finally {
-    $ProgressPreference = $prevPP
-  }
-}
-
-function Install-PortableNode {
-  if (-not (Test-Path $ToolsRoot)) { New-Item -ItemType Directory -Path $ToolsRoot -Force | Out-Null }
-  $nodeExe = Join-Path $NodeDir 'node.exe'
-  if (Test-Path $nodeExe) {
-    Info ('Portable node already unpacked: ' + $NodeDir)
-  } else {
-    $zipName = 'node-v' + $NodeVersion + '-win-x64.zip'
-    $zipPath = Join-Path $ToolsRoot $zipName
-    if (-not (Test-Path $zipPath)) {
-      Info ('Downloading Node ' + $NodeVersion + ' (~30 MB)')
-      Note ('  ' + $NodeUrl)
-      try { Download-Portable $NodeUrl $zipPath 'Node' } catch {
-        Warn ('Could not download Node — skipping (Claude may lose some MCP / commands)')
-        return
-      }
-    } else {
-      Info ('Using already downloaded archive: ' + $zipPath)
-    }
-    try { Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue } catch {}
-    Info 'Unpacking Node...'
-    $tmpDir = Join-Path $ToolsRoot ('node-tmp-' + [guid]::NewGuid().ToString('N'))
-    try {
-      Expand-Archive -LiteralPath $zipPath -DestinationPath $tmpDir -Force
-    } catch {
-      Warn ('Could not unpack Node: ' + $_.Exception.Message)
-      Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-      return
-    }
-    # The archive contains a single node-vXX.X.X-win-x64 folder — promote it
-    $inner = Get-ChildItem -Path $tmpDir -Directory | Select-Object -First 1
-    if ($null -eq $inner) {
-      Warn 'Node archive is empty — skipping'; Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue; return
-    }
-    if (Test-Path $NodeDir) { Remove-Item -LiteralPath $NodeDir -Recurse -Force }
-    Move-Item -LiteralPath $inner.FullName -Destination $NodeDir
-    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path $nodeExe)) { Warn ('Unpack succeeded, but node.exe not found at ' + $nodeExe); return }
-    Ok ('Node unpacked into ' + $NodeDir)
-  }
-  # Current session PATH + User-PATH
-  if (($env:PATH -split ';') -notcontains $NodeDir) { $env:PATH = $NodeDir + ';' + $env:PATH }
-  if (Add-ToUserPath $NodeDir) {
-    Ok 'Node added to persistent User-PATH'
-  } else {
-    Info 'Node was already in User-PATH'
-  }
-}
-
-function Install-PortablePython {
-  if (-not (Test-Path $ToolsRoot)) { New-Item -ItemType Directory -Path $ToolsRoot -Force | Out-Null }
-  $pyExe  = Join-Path $PyDir 'python.exe'
-  $py3Exe = Join-Path $PyDir 'python3.exe'
-  if (Test-Path $py3Exe) {
-    Info ('Portable python already unpacked: ' + $PyDir)
-  } else {
-    $zipName = 'python-' + $PyVersion + '-embed-amd64.zip'
-    $zipPath = Join-Path $ToolsRoot $zipName
-    if (-not (Test-Path $zipPath)) {
-      Info ('Downloading Python ' + $PyVersion + ' embeddable (~11 MB)')
-      Note ('  ' + $PyUrl)
-      try { Download-Portable $PyUrl $zipPath 'Python' } catch {
-        Warn ('Could not download Python — the agent will not be able to run cowork-onboard.py')
-        return
-      }
-    } else {
-      Info ('Using already downloaded archive: ' + $zipPath)
-    }
-    try { Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue } catch {}
-    Info 'Unpacking Python...'
-    if (Test-Path $PyDir) { Remove-Item -LiteralPath $PyDir -Recurse -Force }
-    try {
-      Expand-Archive -LiteralPath $zipPath -DestinationPath $PyDir -Force
-    } catch {
-      Warn ('Could not unpack Python: ' + $_.Exception.Message); return
-    }
-    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path $pyExe)) { Warn ('Unpack succeeded, but python.exe not found at ' + $pyExe); return }
-    # python3.exe — a copy of python.exe (CLAUDE.md calls `python3` explicitly)
-    Copy-Item -LiteralPath $pyExe -Destination $py3Exe -Force
-    # Duplicate _pth under the name python3._pth: the embeddable distro looks
-    # for _pth by exe basename (python3.exe → python3._pth). Without it there's
-    # a risk of `ModuleNotFoundError: os` in isolated mode. We also uncomment
-    # `import site` in both files as a stdlib safety net.
-    $pthFile = Get-ChildItem -Path $PyDir -Filter 'python*._pth' -File | Select-Object -First 1
-    if ($null -ne $pthFile) {
-      $py3Pth = Join-Path $PyDir 'python3._pth'
-      if (-not (Test-Path $py3Pth)) {
-        Copy-Item -LiteralPath $pthFile.FullName -Destination $py3Pth -Force
-      }
-      foreach ($pthPath in @($pthFile.FullName, $py3Pth)) {
-        $pth = Get-Content -LiteralPath $pthPath -Raw
-        $pthNew = $pth -replace '(?m)^\s*#\s*import\s+site\s*$', 'import site'
-        if ($pth -ne $pthNew) {
-          Set-Content -LiteralPath $pthPath -Value $pthNew -Encoding ASCII -NoNewline
-        }
-      }
-    }
-    Ok ('Python unpacked into ' + $PyDir + ' (python3.exe ready)')
-  }
-  # Current session PATH + User-PATH
-  if (($env:PATH -split ';') -notcontains $PyDir) { $env:PATH = $PyDir + ';' + $env:PATH }
-  if (Add-ToUserPath $PyDir) {
-    Ok 'Python added to persistent User-PATH'
-  } else {
-    Info 'Python was already in User-PATH'
-  }
-}
-
 function Ensure-PortableTools {
   $needGit  = -not (Test-CommandAvailable 'git')
   $needSsh  = -not (Test-CommandAvailable 'ssh')
-  $needNode = -not (Test-CommandAvailable 'node')
-  $needPy   = -not ((Test-CommandAvailable 'python3') -or (Test-CommandAvailable 'python'))
 
   if ($needGit) { Info 'git not on PATH — will install a portable copy (MinGit)' }
   if ($needSsh) { Info 'ssh not on PATH — will take ssh from portable MinGit' }
@@ -361,17 +220,11 @@ function Ensure-PortableTools {
   if (-not (Test-CommandAvailable 'git')) { Die 'After MinGit install git is still not available. Show the host the log above.' }
   if (-not (Test-CommandAvailable 'ssh')) { Die 'After MinGit install ssh is still not available. Show the host the log above.' }
 
-  if ($needNode) { Info 'node not on PATH — will install a portable copy (Node LTS)'; Install-PortableNode }
-  if ($needPy)   { Info 'python not on PATH — will install a portable copy (Python embeddable)'; Install-PortablePython }
-
   Ok ('git: ' + ((& git --version) | Out-String).Trim())
   $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
   try { $sshVer = ((& ssh -V 2>&1) | Out-String).Trim() } catch { $sshVer = '(version unavailable)' }
   $ErrorActionPreference = $prevEAP
   Ok ('ssh: ' + $sshVer)
-  if (Test-CommandAvailable 'node')    { Ok ('node: ' + ((& node --version) | Out-String).Trim()) }
-  if (Test-CommandAvailable 'python3') { Ok ('python3: ' + ((& python3 --version 2>&1) | Out-String).Trim()) }
-  elseif (Test-CommandAvailable 'python') { Ok ('python: ' + ((& python --version 2>&1) | Out-String).Trim()) }
 }
 
 function Write-FileNoBom($path, $text) {
