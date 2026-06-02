@@ -1,13 +1,17 @@
-"""Приёмочный тест симулятора — четыре правила правдоподобия клиентов:
+"""Приёмочный тест симулятора — правила правдоподобия клиентов (generic):
 
-1. фронтендер выкатил вкладку, апишек нет → база не двигается;
+1. пустой коммит (контракты не менялись) → база не двигается;
 2. команда давно не коммитит → клиенты утекают;
 3. фича работает, но сделана криво → клиенты уходят;
-4. фича работает и удобна → клиенты приходят.
+4. фича работает и удобна → клиенты приходят;
+5. регрессия базовой функции → клиенты уходят, даже без новой фичи.
 
 Проверяется и путь с LLM-судьёй (мок), и скриптовый fallback (без LLM) — чтобы
-воркшоп пережил отсутствующий или мёртвый OPENAI_API_KEY.
+воркшоп пережил отсутствующий или мёртвый OPENAI_API_KEY. Кредит больше не
+привилегирован: фича распознаётся по diff контрактов, не по кредитным ручкам.
 """
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -15,13 +19,24 @@ from src import llm
 from src import main as m
 from src.scoring import B0
 
-FULL = [2] * 10
+FULL_AXES = (2, 2, 2)
 
 
-def _reset(now: datetime) -> None:
-    """Обе команды — в стартовом состоянии, оценённом раунд назад."""
+def _baseline_snap(team: str, contract: str = "base") -> dict:
+    """Нулевая точка команды: одинаковый контракт во всех блоках."""
+    return {"team": team, "blocks": {
+        n: {"reachable": True, "commit": "c0", "contract": contract,
+            "checks": ({"transfer_ok": True} if n == "retail"
+                       else {"serves_client": True} if n == "backend" else {}),
+            **({"html": ""} if n == "retail" else {})}
+        for n in ("backend", "cib", "retail")}}
+
+
+def _reset(now: datetime, *, baseline_contract: str = "base") -> None:
+    """Все команды — в стартовом состоянии, оценённом раунд назад."""
     m._eval_lock = None          # пересоздать lock в loop текущего asyncio.run
     m._events.clear()
+    m._baselines.clear()
     for team in m.TEAMS:
         st = m._fresh_state()
         st["last_commit"] = "old"
@@ -31,38 +46,46 @@ def _reset(now: datetime) -> None:
         st["last_score"] = 4
         st["last_value"] = 0.0
         m._state[team] = st
+        m._baselines[team] = _baseline_snap(team, baseline_contract)
 
 
-def _mock_snap(team: str) -> dict:
-    """Достижимый снапшот; содержимое checks неважно — вердикт даёт мок судьи."""
+def _mock_snap(team: str, *, contract: str = "base",
+               transfer_ok: bool = True, serves_client: bool = True) -> dict:
+    """Достижимый снимок; вердикт даёт мок судьи, регрессия — из checks."""
     return {"team": team, "blocks": {
-        n: {"reachable": True, "commit": "c1", "checks": {}}
-        for n in ("backend", "cib", "retail")}}
+        "backend": {"reachable": True, "commit": "c1", "contract": contract,
+                    "checks": {"serves_client": serves_client}},
+        "cib": {"reachable": True, "commit": "c1", "contract": contract,
+                "checks": {}},
+        "retail": {"reachable": True, "commit": "c1", "contract": contract,
+                   "html": "", "checks": {"transfer_ok": transfer_ok}}},
+        "regression": {}}
 
 
 def _patch_judge(monkeypatch, feature_state: str, convenience: int,
-                 scores: list) -> None:
-    block = {"scores": scores, "convenience": convenience,
-             "feature_state": feature_state, "reason": "тест", "judge": "llm"}
-    verdict = {team: dict(block) for team in m.TEAMS}
+                 axes: tuple = FULL_AXES, cross_block: int = 2) -> None:
+    block = {"new_functionality": axes[0], "client_value": axes[1],
+             "completeness": axes[2], "cross_block": cross_block,
+             "convenience": convenience, "feature_state": feature_state,
+             "reason": "тест", "judge": "llm"}
 
-    async def fake_judge(_snaps):
-        return verdict
+    async def fake_judge(snaps, baselines=None, *, active_task=""):
+        return {team: dict(block) for team in m.TEAMS}
 
     monkeypatch.setattr(m, "judge_round", fake_judge)
 
 
-def _run_commit(team: str = "team_a") -> dict:
-    snaps = {t: _mock_snap(t) for t in m.TEAMS}
+def _run_commit(team: str = "team_a", **snap_kw) -> dict:
+    snaps = {t: _mock_snap(t, **snap_kw) for t in m.TEAMS}
     out = asyncio.run(m.evaluate_round(snaps, {team}))
     return out[team]
 
 
 # --- путь с LLM-судьёй (мок) -------------------------------------------------
 
-def test_rule1_frontend_only_no_movement(monkeypatch):
+def test_rule1_empty_commit_no_movement(monkeypatch):
     _reset(datetime.now(timezone.utc))
-    _patch_judge(monkeypatch, "frontend_only", 5, FULL)
+    _patch_judge(monkeypatch, "absent", 5, axes=(0, 0, 0), cross_block=0)
     res = _run_commit()
     assert res["delta"] == 0
     assert round(m._state["team_a"]["client_base"]) == B0
@@ -70,7 +93,7 @@ def test_rule1_frontend_only_no_movement(monkeypatch):
 
 def test_rule3_clunky_working_feature_loses_clients(monkeypatch):
     _reset(datetime.now(timezone.utc))
-    _patch_judge(monkeypatch, "working", 1, FULL)   # работает, но криво
+    _patch_judge(monkeypatch, "working", 1)   # работает, но криво
     res = _run_commit()
     assert res["delta"] < 0
     assert m._state["team_a"]["client_base"] < B0
@@ -78,17 +101,24 @@ def test_rule3_clunky_working_feature_loses_clients(monkeypatch):
 
 def test_rule4_convenient_working_feature_gains_clients(monkeypatch):
     _reset(datetime.now(timezone.utc))
-    _patch_judge(monkeypatch, "working", 9, FULL)   # работает и удобно
+    _patch_judge(monkeypatch, "working", 9)   # работает и удобно
     res = _run_commit()
     assert res["delta"] > 0
     assert m._state["team_a"]["client_base"] > B0
 
 
+def test_working_feature_gains_clients(monkeypatch):
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit()
+    assert res["delta"] > 0
+
+
 def test_unchanged_commit_does_not_spam_clients(monkeypatch):
-    # суть фикса: рабочую удобную фичу коммитят повторно без изменений —
+    # рабочую удобную фичу коммитят повторно без изменений ценности —
     # первый коммит приводит клиентов, а второй (та же ценность) НЕ двигает базу
     _reset(datetime.now(timezone.utc))
-    _patch_judge(monkeypatch, "working", 9, FULL)
+    _patch_judge(monkeypatch, "working", 9)
     first = _run_commit()
     assert first["delta"] > 0
     base_after_first = m._state["team_a"]["client_base"]
@@ -96,6 +126,18 @@ def test_unchanged_commit_does_not_spam_clients(monkeypatch):
     assert second["delta"] == 0
     assert m._state["team_a"]["client_base"] == base_after_first
     assert "ничего не изменилось" in second["reason"]
+
+
+def test_regression_penalizes_even_working_feature(monkeypatch):
+    # фича работает и удобна, но сломались переводы — регрессия бьёт по базе
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    clean = _run_commit(transfer_ok=True)
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    broken = _run_commit(transfer_ok=False)
+    assert broken["delta"] < clean["delta"]
+    assert "Регрессия базовой функции" in broken["reason"]
 
 
 def test_rule2_stagnation_leaks_clients():
@@ -137,68 +179,56 @@ def test_cold_start_guard_no_retroactive_dump():
 
 # --- скриптовый fallback (без LLM) -------------------------------------------
 
-def _real_snap(team: str, *, credit_in_ui: bool = False, e2e: bool = False,
-               backend_api: bool = False, explained: bool = False,
-               discriminating: bool = False, latency: int = None,
-               transfer_ok: bool = True) -> dict:
-    """Снапшот с настоящими probe-checks — feature_state и оценку выведут
-    judge.classify_feature / fallback_* без всякого LLM."""
-    retail = {
-        "credit_in_ui": credit_in_ui,
-        "credit_apply_status": 200 if e2e else 404,
-        "credit_apply_decision": "rejected" if e2e else None,
-        "credit_apply_explained": explained,
-        "transfer_ok": transfer_ok,
-    }
-    if latency is not None:
-        retail["credit_apply_latency_ms"] = latency
-    return {"team": team, "blocks": {
-        "backend": {"reachable": True, "commit": "c", "checks": {
-            "serves_client": True, "accepts_application": backend_api,
-            "lists_applications": backend_api}},
-        "cib": {"reachable": True, "commit": "c", "checks": {
-            "has_credit_product": e2e, "decide_status": 200 if e2e else 0,
-            "decision_is_discriminating": discriminating}},
-        "retail": {"reachable": True, "commit": "c", "checks": retail}}}
+def _changed_snap(team: str, *, blocks_changed: int = 3,
+                  transfer_ok: bool = True) -> dict:
+    """Снимок с изменёнными контрактами — generic_fallback выведет фичу из diff."""
+    snap = _mock_snap(team, transfer_ok=transfer_ok)
+    names = ("backend", "cib", "retail")
+    for name in names[:blocks_changed]:
+        snap["blocks"][name]["contract"] = f"NEW {name} ручка"
+    return snap
 
 
-def test_fallback_path_covers_all_four_rules(monkeypatch):
-    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")   # без LLM — только fallback
+def test_fallback_empty_commit_no_movement(monkeypatch):
+    # без LLM, контракты не менялись vs baseline → absent → база не двигается
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
     now = datetime.now(timezone.utc)
-
-    def _snaps_for(team_a_snap):
-        out = {team_a_snap["team"]: team_a_snap}
-        for t in m.TEAMS:
-            if t == team_a_snap["team"]:
-                continue
-            out[t] = _real_snap(t)
-        return out
-
-    # Правило 1: только витрина (вкладка есть, апишек нет) — база не двигается
     _reset(now)
-    fo = _real_snap("team_a", credit_in_ui=True)
-    out = asyncio.run(m.evaluate_round(_snaps_for(fo), {"team_a"}))
+    snaps = {t: _mock_snap(t) for t in m.TEAMS}
+    out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
     assert out["team_a"]["judge"] == "fallback"
-    assert out["team_a"]["feature_state"] == "frontend_only"
+    assert out["team_a"]["feature_state"] == "absent"
     assert out["team_a"]["delta"] == 0
 
-    # Правило 4: фича работает и удобна (быстро, с объяснением) — клиенты приходят
+
+def test_fallback_new_feature_in_contract_gains_clients(monkeypatch):
+    # без LLM: контракты изменились во всех трёх блоках → partial, база растёт
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
+    now = datetime.now(timezone.utc)
     _reset(now)
-    good = _real_snap("team_a", credit_in_ui=True, e2e=True, backend_api=True,
-                      explained=True, discriminating=True, latency=700)
-    out = asyncio.run(m.evaluate_round(_snaps_for(good), {"team_a"}))
-    assert out["team_a"]["feature_state"] == "working"
+    snaps = {t: _changed_snap(t) for t in m.TEAMS}
+    out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
+    assert out["team_a"]["judge"] == "fallback"
+    assert out["team_a"]["feature_state"] == "partial"
     assert out["team_a"]["delta"] > 0
 
-    # Правило 3: фича работает, но криво (медленно, без объяснения) — клиенты уходят
-    _reset(now)
-    bad = _real_snap("team_a", credit_in_ui=True, e2e=True, backend_api=True,
-                     explained=False, discriminating=False, latency=9000)
-    out = asyncio.run(m.evaluate_round(_snaps_for(bad), {"team_a"}))
-    assert out["team_a"]["feature_state"] == "working"
-    assert out["team_a"]["delta"] < 0
 
-    # Правило 2: застой — клиенты утекают вообще без участия LLM
+def test_fallback_regression_loses_clients(monkeypatch):
+    # без LLM: переводы сломаны (регрессия базовой функции) → клиенты уходят
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
+    now = datetime.now(timezone.utc)
+    _reset(now)
+    snaps = {t: _mock_snap(t) for t in m.TEAMS}
+    snaps["team_a"] = _mock_snap("team_a", transfer_ok=False)
+    out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
+    assert out["team_a"]["delta"] < 0
+    assert "Регрессия базовой функции" in out["team_a"]["reason"]
+
+
+def test_fallback_stagnation_leaks_clients(monkeypatch):
+    # застой утекает вообще без участия LLM
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
+    now = datetime.now(timezone.utc)
     _reset(now)
     m._state["team_a"]["last_commit_ts"] = now - timedelta(hours=2)
     m._state["team_a"]["last_eval_ts"] = now - timedelta(minutes=1)
@@ -207,19 +237,16 @@ def test_fallback_path_covers_all_four_rules(monkeypatch):
     assert m._state["team_a"]["client_base"] < before
 
 
-def test_broken_endpoint_loses_clients_even_without_working_feature(monkeypatch):
-    # команда выкатила вкладку и кнопку, но ручка заявки падает с 500 —
-    # сквозной фичи ещё нет (frontend_only), а клиенты уже уходят за «криво»
-    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")   # только fallback
+def test_unreachable_bank_drops_base(monkeypatch):
+    # все три блока недоступны — клиенты не могут войти, база падает
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
     now = datetime.now(timezone.utc)
     _reset(now)
-    snap = _real_snap("team_a", credit_in_ui=True)
-    snap["blocks"]["retail"]["checks"]["credit_apply_status"] = 500   # 5xx, не 404
-    snaps = {"team_a": snap}
-    for t in m.TEAMS:
-        if t != "team_a":
-            snaps[t] = _real_snap(t)
+    down = {"team": "team_a", "blocks": {
+        n: {"reachable": False, "commit": None, "contract": "", "checks": {}}
+        for n in ("backend", "cib", "retail")}, "regression": {}}
+    snaps = {t: _mock_snap(t) for t in m.TEAMS}
+    snaps["team_a"] = down
     out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
-    assert out["team_a"]["feature_state"] == "frontend_only"
+    assert out["team_a"]["judge"] == "unreachable"
     assert out["team_a"]["delta"] < 0
-    assert "Не работает" in out["team_a"]["reason"]

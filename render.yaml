@@ -43,6 +43,13 @@ services:
         value: credit
       - key: TEAM_NAMES
         value: team_a,team_b,team_c,team_d
+      # GitHub-репозитории команд — generic-судья читает их CONTRACT.md по commit
+      # из /health (raw.githubusercontent, репозитории public). Ключ <P>_REPO,
+      # P — первая буква суффикса команды. Без него судья деградирует на UI+регрессию.
+      - key: A_REPO
+        value: ErokhinVi/team_1
+      - key: B_REPO
+        value: ErokhinVi/team_2
       # 12 URL-ов командных банков. Заполняй после деплоя командных репо.
       # Шаблон: https://raif-<a|b|c|d>-<retail|cib|backend>.onrender.com
       - key: A_BACKEND_URL

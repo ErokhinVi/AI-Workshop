@@ -1,21 +1,30 @@
-"""Probe — снятие состояния трёх блоков команды. Закрытый список проверок.
+"""Probe — снятие generic-снимка трёх блоков команды. Без кредит-хардкода.
 
-Фиксированные клиенты из seed/clients.jsonl: сильный c-01394 (premium),
-слабый c-01434 (mass, просрочки).
+Снимок собирает то, по чему судья оценивает ЛЮБУЮ добавленную фичу:
+
+* `reachable`, `commit` — из `/health` блока;
+* `contract` — текст `CONTRACT.md` блока с `raw.githubusercontent.com` на текущем
+  коммите (что команда заявила/добавила); при недоступности — "";
+* retail дополнительно `html` — тело `GET /` (что видит клиент, усечено).
+
+Плюс детерминированный якорь регрессии базовых функций (без LLM): переводы
+(`transfer_ok`) и отдача данных клиента (`serves_client`). `assess_regression`
+вынесена в чистую функцию — она читает только готовый снимок и тестируема без
+сети.
+
+`SAMPLE_CLIENT` — любой существующий из seed/clients.jsonl клиент: используется
+лишь для проверки, что `GET /clients/{id}` по-прежнему отдаёт данные.
 """
 from __future__ import annotations
 
 import json
-import time
 
 import httpx
 
-STRONG_APPLICANT = "c-01394"
-WEAK_APPLICANT = "c-01434"
+SAMPLE_CLIENT = "c-01394"   # любой существующий клиент — для проверки serves_client
 PROBE_TIMEOUT_S = 20.0
-
-_APPROVE = ("approv", "одобр", "выдан", "accept", "положительн")
-_REJECT = ("reject", "отказ", "decline", "denied", "отрицательн")
+HTML_LIMIT = 8000
+CONTRACT_LIMIT = 6000
 
 
 def _safe_json(resp: httpx.Response) -> dict:
@@ -26,161 +35,67 @@ def _safe_json(resp: httpx.Response) -> dict:
         return {}
 
 
-def _decision(body: dict) -> str | None:
-    """Вердикт из ответа независимо от формы. → approved|rejected|None."""
-    if not isinstance(body, dict):
-        return None
-    for k in ("decision", "status", "verdict", "result", "approved"):
-        if k in body:
-            v = str(body[k]).lower()
-            if v in ("true", "ok") or any(w in v for w in _APPROVE):
-                return "approved"
-            if v == "false" or any(w in v for w in _REJECT):
-                return "rejected"
-    blob = json.dumps(body, ensure_ascii=False).lower()
-    a, r = any(w in blob for w in _APPROVE), any(w in blob for w in _REJECT)
-    if a and not r:
-        return "approved"
-    if r and not a:
-        return "rejected"
-    return None
+async def _fetch_contract(client: httpx.AsyncClient, repo: str | None,
+                          commit: str | None, block: str) -> str:
+    """Текст CONTRACT.md блока на текущем коммите. Любая ошибка → "".
 
-
-def _explanation(body: dict) -> str:
-    if not isinstance(body, dict):
+    Репозитории команд публичные — читаем через raw.githubusercontent.com без
+    токена. Если repo/commit не заданы или raw недоступен — деградируем мягко.
+    """
+    if not repo or not commit:
         return ""
-    for k in ("explanation", "reason", "message", "comment", "text", "detail"):
-        v = body.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return ""
+    url = f"https://raw.githubusercontent.com/{repo}/{commit}/{block}/CONTRACT.md"
+    try:
+        r = await client.get(url)
+    except httpx.HTTPError:
+        return ""
+    return r.text[:CONTRACT_LIMIT] if r.status_code == 200 else ""
 
 
-async def _probe_backend(client: httpx.AsyncClient, url: str) -> dict:
-    snap: dict = {"reachable": False, "commit": None, "checks": {}}
-    c = snap["checks"]
+async def _probe_health(client: httpx.AsyncClient, url: str) -> dict:
+    """Базовый снимок блока: reachable + commit из /health."""
+    snap: dict = {"reachable": False, "commit": None, "contract": "", "checks": {}}
     try:
         h = await client.get(f"{url}/health")
         snap["reachable"] = h.status_code == 200
         if h.status_code == 200:
             snap["commit"] = _safe_json(h).get("commit")
     except httpx.HTTPError:
+        pass
+    return snap
+
+
+async def _probe_backend(client: httpx.AsyncClient, url: str) -> dict:
+    """Backend: /health + регрессионная проверка отдачи данных клиента."""
+    snap = await _probe_health(client, url)
+    if not snap["reachable"]:
         return snap
     try:
-        r = await client.get(f"{url}/clients/{STRONG_APPLICANT}")
-        c["serves_client"] = r.status_code == 200 and "id" in _safe_json(r)
+        r = await client.get(f"{url}/clients/{SAMPLE_CLIENT}")
+        snap["checks"]["serves_client"] = (
+            r.status_code == 200 and "id" in _safe_json(r))
     except httpx.HTTPError:
-        c["serves_client"] = False
-    try:
-        r = await client.post(
-            f"{url}/credit-applications",
-            json={"client_id": STRONG_APPLICANT, "amount_rub": 300000,
-                  "term_months": 12, "decision": "approved"},
-        )
-        c["accepts_application"] = r.status_code in (200, 201)
-    except httpx.HTTPError:
-        c["accepts_application"] = False
-    try:
-        r = await client.get(f"{url}/credit-applications")
-        c["lists_applications"] = (
-            r.status_code == 200 and isinstance(_safe_json(r).get("items"), list)
-        )
-    except httpx.HTTPError:
-        c["lists_applications"] = False
+        snap["checks"]["serves_client"] = False
     return snap
 
 
 async def _probe_cib(client: httpx.AsyncClient, url: str) -> dict:
-    snap: dict = {"reachable": False, "commit": None, "checks": {}}
-    c = snap["checks"]
-    try:
-        h = await client.get(f"{url}/health")
-        snap["reachable"] = h.status_code == 200
-        if h.status_code == 200:
-            snap["commit"] = _safe_json(h).get("commit")
-    except httpx.HTTPError:
-        return snap
-    try:
-        r = await client.get(f"{url}/products")
-        blob = json.dumps(_safe_json(r).get("items", []), ensure_ascii=False).lower()
-        c["has_credit_product"] = r.status_code == 200 and (
-            "кредит" in blob or "credit" in blob
-        )
-    except httpx.HTTPError:
-        c["has_credit_product"] = False
-    t0 = time.time()
-    try:
-        r = await client.post(
-            f"{url}/credit/decide",
-            json={"client_id": STRONG_APPLICANT, "amount_rub": 300000, "term_months": 12},
-        )
-        c["decide_status"] = r.status_code
-        c["decide_latency_ms"] = int((time.time() - t0) * 1000)
-        c["decision_strong"] = _decision(_safe_json(r))
-    except httpx.HTTPError:
-        c["decide_status"] = 0
-        c["decide_latency_ms"] = -1
-        c["decision_strong"] = None
-    try:
-        r = await client.post(
-            f"{url}/credit/decide",
-            json={"client_id": WEAK_APPLICANT, "amount_rub": 900000, "term_months": 6},
-        )
-        c["decision_weak"] = _decision(_safe_json(r))
-    except httpx.HTTPError:
-        c["decision_weak"] = None
-    ds, dw = c.get("decision_strong"), c.get("decision_weak")
-    c["decision_is_discriminating"] = ds is not None and dw is not None and ds != dw
-    return snap
+    """CIB: /health (контракт читается отдельно, кредит-проверок больше нет)."""
+    return await _probe_health(client, url)
 
 
 async def _probe_retail(client: httpx.AsyncClient, url: str) -> dict:
-    snap: dict = {"reachable": False, "commit": None, "checks": {}}
+    """Retail: /health + html главной + регрессионная проверка переводов."""
+    snap = await _probe_health(client, url)
+    if not snap["reachable"]:
+        return snap
     c = snap["checks"]
     try:
-        h = await client.get(f"{url}/health")
-        snap["reachable"] = h.status_code == 200
-        if h.status_code == 200:
-            snap["commit"] = _safe_json(h).get("commit")
-    except httpx.HTTPError:
-        return snap
-    try:
         root = await client.get(f"{url}/")
-        html = root.text.lower() if root.status_code == 200 else ""
+        snap["html"] = root.text[:HTML_LIMIT] if root.status_code == 200 else ""
     except httpx.HTTPError:
-        html = ""
-    c["credit_in_ui"] = "кредит" in html
-    c["transfer_in_ui"] = "перевод" in html
-    t0 = time.time()
-    try:
-        r = await client.post(
-            f"{url}/api/credit-apply",
-            json={"client_id": STRONG_APPLICANT, "amount_rub": 300000, "term_months": 12},
-        )
-        c["credit_apply_status"] = r.status_code
-        c["credit_apply_latency_ms"] = int((time.time() - t0) * 1000)
-        c["credit_apply_decision"] = _decision(_safe_json(r))
-        # сниппет тела при не-200 — судья по нему отличит «не сделано» (404)
-        # от «сделано криво» (500 со стектрейсом)
-        c["credit_apply_error"] = "" if r.status_code == 200 else r.text[:200].strip()
-    except httpx.HTTPError:
-        c["credit_apply_status"] = 0
-        c["credit_apply_latency_ms"] = -1
-        c["credit_apply_decision"] = None
-        c["credit_apply_error"] = "запрос не дошёл"
-    try:
-        r = await client.post(
-            f"{url}/api/credit-apply",
-            json={"client_id": WEAK_APPLICANT, "amount_rub": 900000, "term_months": 6},
-        )
-        expl = _explanation(_safe_json(r))
-        c["credit_apply_explained"] = bool(expl) and len(expl) > 40
-        # реальный текст объяснения — судья оценит, человеческий он или
-        # роботизированный, и поставит convenience
-        c["credit_apply_explanation"] = expl[:300]
-    except httpx.HTTPError:
-        c["credit_apply_explained"] = False
-        c["credit_apply_explanation"] = ""
+        snap["html"] = ""
+    # Базовая функция: перевод между двумя реальными клиентами по-прежнему идёт.
     try:
         cl = await client.get(f"{url}/clients?limit=2")
         ids = [x["id"] for x in _safe_json(cl).get("items", []) if "id" in x]
@@ -197,16 +112,60 @@ async def _probe_retail(client: httpx.AsyncClient, url: str) -> dict:
     return snap
 
 
-async def probe_team(team: str, urls: dict) -> dict:
-    """Снять снапшот трёх блоков команды. urls = {retail, cib, backend}.
+def assess_regression(snap: dict) -> dict:
+    """Что в банке СЛОМАНО на этом коммите — детерминированно из снимка, без LLM.
 
-    Возвращает {team, blocks: {backend, cib, retail}}, каждый блок —
-    {reachable, commit, checks}. Никогда не бросает.
+    Якорь честности: даже при красивом CONTRACT.md сломанная база бьёт по
+    ценности. Считает только регрессию БАЗОВЫХ функций (переводы, отдача данных
+    клиента) и недоступность блоков; недоделанная новая фича (404) не штрафуется.
+
+    Возвращает ``{"unreachable_blocks", "transfers_broken", "serves_client_broken",
+    "labels"}``: первое — количество для `scoring.outage_cost`, `labels` —
+    человеческие ярлыки для обоснования. Чистая функция: читает готовый снимок.
+    """
+    blocks = snap.get("blocks", {})
+    unreachable = [name for name in ("backend", "cib", "retail")
+                   if not blocks.get(name, {}).get("reachable", False)]
+    retail_checks = blocks.get("retail", {}).get("checks", {})
+    backend = blocks.get("backend", {})
+    backend_checks = backend.get("checks", {})
+
+    transfers_broken = retail_checks.get("transfer_ok") is False
+    serves_broken = bool(backend.get("reachable")
+                         and backend_checks.get("serves_client") is False)
+
+    labels = [f"блок {name} недоступен" for name in unreachable]
+    if transfers_broken:
+        labels.append("переводы (базовая функция) не работают")
+    if serves_broken:
+        labels.append("данные клиента (/clients) не отдаются")
+
+    return {
+        "unreachable_blocks": len(unreachable),
+        "transfers_broken": transfers_broken,
+        "serves_client_broken": serves_broken,
+        "labels": labels,
+    }
+
+
+async def probe_team(team: str, urls: dict, repo: str | None = None) -> dict:
+    """Снять generic-снимок трёх блоков команды. urls = {retail, cib, backend}.
+
+    Возвращает ``{team, blocks: {backend, cib, retail}, regression: {...}}``.
+    Каждый блок — ``{reachable, commit, contract, checks, (retail: html)}``.
+    `repo` (``owner/name`` на GitHub) нужен для чтения CONTRACT.md через raw;
+    при отсутствии контракт пуст, снимок деградирует мягко. Никогда не бросает.
     """
     out: dict = {"team": team, "blocks": {}}
     async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_S) as client:
         out["blocks"]["backend"] = await _probe_backend(
             client, urls["backend"].rstrip("/"))
         out["blocks"]["cib"] = await _probe_cib(client, urls["cib"].rstrip("/"))
-        out["blocks"]["retail"] = await _probe_retail(client, urls["retail"].rstrip("/"))
+        out["blocks"]["retail"] = await _probe_retail(
+            client, urls["retail"].rstrip("/"))
+        for block in ("backend", "cib", "retail"):
+            commit = out["blocks"][block].get("commit")
+            out["blocks"][block]["contract"] = await _fetch_contract(
+                client, repo, commit, block)
+    out["regression"] = assess_regression(out)
     return out

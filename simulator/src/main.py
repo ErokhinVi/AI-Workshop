@@ -24,16 +24,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import db as dbmod
-from src.judge import assess_outages, judge_round
-from src.probe import probe_team
+from src.judge import judge_round
+from src.probe import assess_regression, probe_team
 from src.scoring import (
     B0,
     RUBRIC_MAX,
     compute_commit_round,
     compute_decay,
     compute_unreachable,
+    feature_value,
     outage_cost,
-    perceived_value,
     rubric_total,
 )
 
@@ -81,7 +81,22 @@ def _bank_urls() -> dict[str, dict[str, str]]:
     return out
 
 
+def _bank_repos() -> dict[str, str]:
+    """GitHub-репозиторий каждой команды из env `<P>_REPO` (например team_1).
+
+    Нужен probe, чтобы читать CONTRACT.md через raw.githubusercontent.com. Если
+    не задан — снимок деградирует мягко: контракт пустой, судья опирается на
+    HTML + регрессию.
+    """
+    return {team: os.environ.get(f"{_team_prefix(team)}_REPO", "").strip()
+            for team in TEAMS}
+
+
 BANK_URLS = _bank_urls()
+BANK_REPOS = _bank_repos()
+# Пример задачи, который ведущий озвучивает командам (например «кредитная фича»).
+# Подсказка судье, НЕ переключатель логики: команда может сделать что угодно.
+ACTIVE_TASK = os.environ.get("ACTIVE_TASK", "").strip()
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 POLL_INTERVAL_S = float(os.environ.get("POLL_INTERVAL_S", "30"))
 # Событие застоя в ленту — не на каждый тик, а когда накопилось столько утечки.
@@ -102,12 +117,16 @@ def _fresh_state() -> dict:
         "baseline_score": None,    # балл рубрики на старте (и признак инициализации)
         "last_score": None,        # балл рубрики прошлого раунда — для табло
         "last_value": 0.0,         # ценность банка прошлого раунда — для дельты
-        "feature_state": None,     # стадия кредитной фичи — для табло
+        "feature_state": None,     # стадия добавленной фичи — для табло
         "decay_pending": 0.0,      # накопленная утечка, ещё не показанная событием
     }
 
 
 _state: dict[str, dict] = {t: _fresh_state() for t in TEAMS}
+# Baseline-снимки (нулевые точки) на команду: их diff показывает судье, что
+# команда добавила. Снимаются в `_baseline()`, хранятся в памяти; при рестарте
+# Render пересобираются при следующем старте/ресете воркшопа.
+_baselines: dict[str, dict] = {}
 _events: list[dict] = []
 _eval_lock: asyncio.Lock | None = None
 _workshop_started: bool = False
@@ -134,6 +153,31 @@ def _commit_fingerprint(snapshot: dict) -> str:
     )
 
 
+def _axes_of(verdict: dict) -> tuple[int, int, int]:
+    """Тройка осей ценности из вердикта судьи."""
+    return (int(verdict.get("new_functionality", 0)),
+            int(verdict.get("client_value", 0)),
+            int(verdict.get("completeness", 0)))
+
+
+def _regression_penalty(reg: dict) -> float:
+    """Штраф за регрессию базовых функций в клиентах (через `outage_cost`).
+
+    Сломанные базовые функции (переводы, отдача данных клиента) считаются как
+    «выкаченные, но падающие ручки»; недоступные блоки — отдельно. Недоделанная
+    новая фича (404) сюда не попадает — `assess_regression` её не помечает.
+    """
+    broken = int(bool(reg.get("transfers_broken"))) \
+        + int(bool(reg.get("serves_client_broken")))
+    return outage_cost(reg.get("unreachable_blocks", 0), broken)
+
+
+def _rubric_of(verdict: dict) -> list[int]:
+    """Сводка осей для табло/журнала (rubric-поле): оси + cross_block."""
+    a = _axes_of(verdict)
+    return [a[0], a[1], a[2], int(verdict.get("cross_block", 0))]
+
+
 # Порог «значимого» сдвига ценности в клиентах — ниже считаем коммит
 # функционально нейтральным и не выдумываем причину движения.
 _VALUE_EPS = 1.0
@@ -145,14 +189,15 @@ def _compose_reason(*, prev_fs: str | None, cur_fs: str,
     """Собрать чёткое обоснование коммит-раунда из фактов, а не из фантазии LLM.
 
     Текст всегда отражает РОВНО то, что изменилось на этом коммите и что в банке
-    не работает: смена стадии фичи / рост / падение ценности, список сломанных
-    ручек, оценка удобства. Это убирает повторяющиеся однотипные обоснования —
-    на пустом коммите так и пишем «ничего не изменилось», а не плюсуем клиентов.
+    не работает: появление/доводка фичи, рост или падение ценности, список
+    сломанных базовых функций, оценка удобства. Это убирает повторяющиеся
+    однотипные обоснования — на пустом коммите так и пишем «ничего не
+    изменилось», а не плюсуем клиентов. Фича — любая, не только кредит.
     """
     if cur_fs == "working" and prev_fs != "working":
-        head = "Кредитная фича заработала сквозь все три блока."
+        head = "Новая функция заработала сквозь все три блока."
     elif prev_fs == "working" and cur_fs != "working":
-        head = "Кредитная фича перестала работать сквозь все три блока."
+        head = "Функция перестала работать сквозь все три блока."
     elif value_now > value_prev + _VALUE_EPS:
         head = "Банк стал ценнее для клиента, чем на прошлом коммите."
     elif value_now < value_prev - _VALUE_EPS:
@@ -162,20 +207,14 @@ def _compose_reason(*, prev_fs: str | None, cur_fs: str,
 
     parts = [head]
     if outage_labels:
-        parts.append("Не работает: " + "; ".join(outage_labels) + ".")
-    if cur_fs == "working":
+        parts.append("Регрессия базовой функции: " + "; ".join(outage_labels) + ".")
+    if cur_fs in ("working", "partial"):
         if convenience >= 7:
             parts.append("Пользоваться удобно — клиенты приходят.")
         elif convenience >= 4:
             parts.append("Удобство среднее.")
         else:
             parts.append("Пользоваться неудобно — клиенты уходят.")
-    elif cur_fs == "frontend_only" and not outage_labels:
-        parts.append("Вкладка «Кредиты» есть, но за ней нет работающих ручек — "
-                     "клиенты функцию не видят.")
-    elif cur_fs == "partial" and not outage_labels:
-        parts.append("Кредитная фича собрана не до конца — "
-                     "сквозная заявка не проходит.")
     return " ".join(parts)
 
 
@@ -243,13 +282,22 @@ async def _emit_event(team: str, commit: str, delta: float, scores: list[int],
 
 
 async def _baseline() -> None:
-    """Замерить стартовое состояние всех команд по нетронутым блокам."""
+    """Замерить стартовое состояние всех команд по нетронутым блокам.
+
+    Снимок каждой команды сохраняется как baseline (нулевая точка) в `_baselines`
+    — его diff потом показывает судье, что команда добавила. На самой нулевой
+    точке фича отсутствует (diff с самим собой пуст), ценность задаёт только
+    регрессия базовых функций, если она уже есть.
+    """
     now = _now()
     snaps = dict(zip(
         TEAMS,
-        await asyncio.gather(*(probe_team(t, BANK_URLS[t]) for t in TEAMS)),
+        await asyncio.gather(*(
+            probe_team(t, BANK_URLS[t], BANK_REPOS.get(t)) for t in TEAMS)),
     ))
-    verdict = await judge_round(snaps)
+    _baselines.clear()
+    _baselines.update(snaps)
+    verdict = await judge_round(snaps, _baselines, active_task=ACTIVE_TASK)
     for team in TEAMS:
         snap = snaps[team]
         v = verdict[team]
@@ -257,13 +305,12 @@ async def _baseline() -> None:
         st["last_commit"] = _commit_fingerprint(snap)
         st["last_commit_ts"] = now
         st["last_eval_ts"] = now
-        st["baseline_score"] = rubric_total(v["scores"])
+        st["baseline_score"] = rubric_total(_rubric_of(v))
         st["last_score"] = st["baseline_score"]
-        outages = assess_outages(snap)
-        st["last_value"] = perceived_value(
-            v["scores"], v["feature_state"], v["convenience"],
-            outage_penalty=outage_cost(outages["unreachable_blocks"],
-                                       outages["broken_endpoints"]))
+        reg = assess_regression(snap)
+        st["last_value"] = feature_value(
+            _axes_of(v), v["cross_block"], v["convenience"], v["feature_state"],
+            outage_penalty=_regression_penalty(reg))
         st["feature_state"] = v["feature_state"]
         _state[team] = st
         await _save_state(team)
@@ -282,10 +329,12 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
             snapshots = {}
         for team in TEAMS:
             if team not in snapshots:
-                snapshots[team] = await probe_team(team, BANK_URLS[team])
+                snapshots[team] = await probe_team(
+                    team, BANK_URLS[team], BANK_REPOS.get(team))
         if committed is None:
             committed = set(TEAMS)
-        verdict = await judge_round({t: snapshots[t] for t in TEAMS})
+        verdict = await judge_round({t: snapshots[t] for t in TEAMS},
+                                    _baselines, active_task=ACTIVE_TASK)
         now = _now()
         out: dict[str, dict] = {}
         for team in TEAMS:
@@ -294,7 +343,7 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
             snap = snapshots[team]
             st = _state[team]
             v = verdict[team]
-            scores = v["scores"]
+            rubric = _rubric_of(v)
             judge = v["judge"]
             # reason собираем ниже из фактов коммита (не из текста LLM):
             # пустой коммит — «без изменений», иначе — что именно поменялось/сломалось.
@@ -310,14 +359,13 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 judge = "unreachable"
                 # ценность не пересчитываем — измерить нечем
             else:
-                # Работоспособность ручек считаем детерминированно из probe —
-                # не доверяем это LLM: сломанное (5xx/недоступно) штрафуем,
-                # недоделанное (404) — нет.
-                outages = assess_outages(snap)
-                value_now = perceived_value(
-                    scores, v["feature_state"], v["convenience"],
-                    outage_penalty=outage_cost(outages["unreachable_blocks"],
-                                               outages["broken_endpoints"]))
+                # Регрессию базовых функций считаем детерминированно из probe —
+                # не доверяем это LLM: сломанное (переводы/данные клиента,
+                # недоступный блок) штрафуем, недоделанную новую фичу (404) — нет.
+                reg = assess_regression(snap)
+                value_now = feature_value(
+                    _axes_of(v), v["cross_block"], v["convenience"],
+                    v["feature_state"], outage_penalty=_regression_penalty(reg))
                 value_prev = st["last_value"]
                 prev_fs = st["feature_state"]
                 r = compute_commit_round(value_now, value_prev,
@@ -327,10 +375,10 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 reason = _compose_reason(
                     prev_fs=prev_fs, cur_fs=v["feature_state"],
                     value_prev=value_prev, value_now=value_now,
-                    outage_labels=outages["labels"],
+                    outage_labels=reg["labels"],
                     convenience=v["convenience"])
                 st["last_value"] = value_now
-                st["last_score"] = rubric_total(scores)
+                st["last_score"] = rubric_total(rubric)
                 st["feature_state"] = v["feature_state"]
             st["client_base"] = r["client_base"]
             st["last_commit"] = fp
@@ -338,7 +386,7 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
             st["last_eval_ts"] = now
             st["decay_pending"] = 0.0
             await _save_state(team)
-            await _emit_event(team, fp, r["delta"], scores, reason, judge, snap)
+            await _emit_event(team, fp, r["delta"], rubric, reason, judge, snap)
             out[team] = {"delta": round(r["delta"]),
                          "client_base": round(st["client_base"]),
                          "reason": reason, "judge": judge,
@@ -390,7 +438,7 @@ async def _poll_loop() -> None:
             snaps: dict[str, dict] = {}
             committed: set = set()
             for team in TEAMS:
-                snap = await probe_team(team, BANK_URLS[team])
+                snap = await probe_team(team, BANK_URLS[team], BANK_REPOS.get(team))
                 snaps[team] = snap
                 fp = _commit_fingerprint(snap)
                 if "local" not in fp and "None" not in fp \

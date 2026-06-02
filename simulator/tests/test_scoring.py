@@ -6,14 +6,14 @@ from src.scoring import (
     compute_decay,
     compute_unreachable,
     convenience_factor,
+    cross_block_mult,
+    feature_value,
     outage_cost,
-    perceived_value,
     rubric_total,
 )
 
-FULL_CREDIT = [2] * 9 + [2]   # все 9 кредитных критериев + переводы целы
-NO_CREDIT = [0] * 9 + [2]     # кредитной фичи нет, переводы целы
-BROKEN = [0] * 9 + [0]        # фичи нет и переводы сломаны
+FULL_AXES = (2, 2, 2)   # полная сквозная фича: все три оси максимальны
+NO_AXES = (0, 0, 0)     # фичи нет
 
 
 def test_rubric_total_clamps():
@@ -35,34 +35,55 @@ def test_convenience_factor_monotone_and_signed():
     assert convenience_factor(7) > 0 > convenience_factor(3)
 
 
-# --- perceived_value ---------------------------------------------------------
+# --- cross_block_mult --------------------------------------------------------
 
-def test_value_zero_when_feature_not_working():
-    # фронтендер выкатил вкладку, апишек ещё нет — клиенты функцию не видят
-    for fs in ("absent", "frontend_only", "partial"):
-        assert perceived_value(FULL_CREDIT, fs, 9) == 0.0
-
-
-def test_value_positive_when_working_and_convenient():
-    assert perceived_value(FULL_CREDIT, "working", 9) > 0
+def test_cross_block_mult_bonus_for_three_blocks():
+    assert cross_block_mult(0) == 1.0
+    assert cross_block_mult(2) > 1.0          # бонус за сквозную фичу
+    assert cross_block_mult(1) == 1.0 + (cross_block_mult(2) - 1.0) / 2.0
+    assert cross_block_mult(99) == cross_block_mult(2)   # зажато сверху
 
 
-def test_value_negative_when_working_but_clunky():
+# --- feature_value -----------------------------------------------------------
+
+def test_feature_value_zero_when_absent():
+    assert feature_value(axes=(2, 2, 2), cross_block=2, convenience=9,
+                         feature_state="absent", outage_penalty=0.0) == 0.0
+
+
+def test_feature_value_positive_when_working_and_convenient():
+    v = feature_value(axes=(2, 2, 2), cross_block=2, convenience=9,
+                      feature_state="working", outage_penalty=0.0)
+    assert v > 0
+
+
+def test_feature_value_counts_partial_feature():
+    # частично доступная фича клиенту видна — она тоже двигает базу
+    assert feature_value((2, 2, 2), 2, 9, "partial") > 0
+
+
+def test_feature_value_regression_penalty_always_applies():
+    # absent + сломанная база → отрицательно (штраф вне зависимости от фичи)
+    v = feature_value(axes=(0, 0, 0), cross_block=0, convenience=5,
+                      feature_state="absent", outage_penalty=120.0)
+    assert v == -120.0
+
+
+def test_feature_value_bad_convenience_reduces_working():
+    good = feature_value((2, 2, 2), 2, 9, "working", outage_penalty=0.0)
+    bad = feature_value((2, 2, 2), 2, 1, "working", outage_penalty=0.0)
+    assert bad < good
+
+
+def test_feature_value_negative_when_working_but_clunky():
     # фича работает, но сделана криво и неудобно — клиенты уходят
-    assert perceived_value(FULL_CREDIT, "working", 1) < 0
+    assert feature_value(FULL_AXES, 2, 1, "working") < 0
 
 
-def test_convenience_drives_direction_for_working_feature():
-    convenient = perceived_value(FULL_CREDIT, "working", 9)
-    clunky = perceived_value(FULL_CREDIT, "working", 2)
-    assert convenient > 0 > clunky
-
-
-def test_regression_costs_clients_regardless_of_feature():
-    # сломанные переводы бьют всегда — даже когда кредитной фичи нет
-    assert perceived_value(BROKEN, "absent", 5) < 0
-    assert perceived_value(BROKEN, "working", 9) < perceived_value(
-        FULL_CREDIT, "working", 9)
+def test_feature_value_cross_block_bonus_raises_value():
+    flat = feature_value(FULL_AXES, 0, 9, "working")
+    cross = feature_value(FULL_AXES, 2, 9, "working")
+    assert cross > flat
 
 
 # --- outage_cost / штраф за сломанные ручки ----------------------------------
@@ -75,18 +96,10 @@ def test_outage_cost_prices_blocks_and_endpoints():
     assert outage_cost(-3, -3) == 0.0         # отрицательные зажаты в ноль
 
 
-def test_broken_endpoints_cost_clients_regardless_of_feature():
-    # фича ещё не работает (frontend_only), но выкаченная ручка падает — минус
-    base = perceived_value(NO_CREDIT, "frontend_only", 5)
-    broken = perceived_value(NO_CREDIT, "frontend_only", 5,
-                             outage_penalty=outage_cost(0, 1))
-    assert broken == base - 60.0 < base
-
-
 def test_outage_penalty_subtracts_even_from_working_feature():
-    clean = perceived_value(FULL_CREDIT, "working", 9)
-    with_outage = perceived_value(FULL_CREDIT, "working", 9,
-                                  outage_penalty=outage_cost(1, 0))
+    clean = feature_value(FULL_AXES, 2, 9, "working")
+    with_outage = feature_value(FULL_AXES, 2, 9, "working",
+                                outage_penalty=outage_cost(1, 0))
     assert with_outage == clean - 90.0
 
 

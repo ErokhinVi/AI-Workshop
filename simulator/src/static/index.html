@@ -101,7 +101,7 @@ const fmt = n => Number(n||0).toLocaleString('ru-RU');
 const signed = n => (n > 0 ? '+' : (n < 0 ? '−' : '±')) + fmt(Math.abs(n));
 const LABEL = {team_a:'Команда A', team_b:'Команда B',
   team_c:'Команда C', team_d:'Команда D'};
-const FSTATE = {absent:'фича не начата', frontend_only:'только витрина',
+const FSTATE = {absent:'фича не начата',
   partial:'фича в сборке', working:'фича работает'};
 
 const MSK_TIME = new Intl.DateTimeFormat('ru-RU', {
