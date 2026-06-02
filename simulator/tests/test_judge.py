@@ -192,3 +192,24 @@ def test_active_task_is_hint_not_switch():
     assert "ПРИМЕР" in with_task
     assert "кредитная фича" in with_task
     assert "ПРИМЕР" not in without_task
+
+
+# --- секция работоспособности новой фичи (feature_probe) ---------------------
+
+def test_prompt_includes_dead_feature_liveness_fact():
+    base = _baseline("old")
+    cur = _snap({"backend": "old", "cib": "old", "retail": "NEW"})
+    cur["feature_probe"] = {
+        "primary": {"block": "retail", "method": "POST", "path": "/api/credit-apply"},
+        "status": 500, "feature_live": False, "tier": 1}
+    prompt = _build_team_prompt(cur, base, cur["regression"], "")
+    assert "/api/credit-apply" in prompt
+    assert "НЕ работает" in prompt           # вердикт витрины подан судье
+    assert "completeness" in prompt          # инструкция занижать оси
+
+
+def test_prompt_has_no_liveness_section_without_probe():
+    base = _baseline("old")
+    cur = _snap({"backend": "old", "cib": "old", "retail": "NEW"})
+    prompt = _build_team_prompt(cur, base, cur["regression"], "")
+    assert "работоспособности НОВОЙ фичи" not in prompt

@@ -133,6 +133,57 @@ def test_llm_feature_reason_shown_on_board(monkeypatch):
     assert "оформляют её за минуту" in res["reason"]
 
 
+def _run_commit_with_probe(feature_probe: dict | None, team: str = "team_a",
+                           **snap_kw) -> dict:
+    snaps = {t: _mock_snap(t, **snap_kw) for t in m.TEAMS}
+    snaps[team]["feature_probe"] = feature_probe
+    out = asyncio.run(m.evaluate_round(snaps, {team}))
+    return out[team]
+
+
+def test_dead_feature_404_gives_no_client_gain(monkeypatch):
+    # судья по тексту контракта нахвалил рабочую удобную фичу, но реальный вызов
+    # новой ручки дал 404 (витрина) → клиентов НЕ прибавляем
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit_with_probe({"feature_live": False, "status": 404,
+                                  "primary": {"method": "POST",
+                                              "path": "/api/credit-apply"}})
+    assert res["delta"] == 0
+    assert round(m._state["team_a"]["client_base"]) == B0
+    assert "не работает" in res["reason"]
+
+
+def test_dead_feature_5xx_loses_clients(monkeypatch):
+    # ручка выкачена, но падает (5xx) на глазах клиента → база уходит в минус
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit_with_probe({"feature_live": False, "status": 500,
+                                  "primary": {"method": "POST",
+                                              "path": "/api/credit-apply"}})
+    assert res["delta"] < 0
+    assert m._state["team_a"]["client_base"] < B0
+    assert "не работает" in res["reason"]
+
+
+def test_feature_live_true_keeps_gain(monkeypatch):
+    # ручку дёрнули — реально работает → ценность как обычно, клиенты приходят
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit_with_probe({"feature_live": True, "status": 200,
+                                  "primary": {"method": "POST", "path": "/x"}})
+    assert res["delta"] > 0
+
+
+def test_feature_live_none_does_not_suppress_gain(monkeypatch):
+    # проверить работоспособность не удалось (None) → НЕ штрафуем, как сейчас
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit_with_probe({"feature_live": None, "status": None,
+                                  "primary": None})
+    assert res["delta"] > 0
+
+
 def test_reeval_same_commit_emits_no_event(monkeypatch):
     # повторная оценка ТОГО ЖЕ коммита (ручной /admin/evaluate без нового
     # деплоя) не двигает базу и не пишет событие — фикс двойного скоринга

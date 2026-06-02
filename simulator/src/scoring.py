@@ -114,7 +114,8 @@ def cross_block_mult(cross_block: int) -> float:
 
 def feature_value(axes: tuple[int, int, int], cross_block: int,
                   convenience: float, feature_state: str, *,
-                  outage_penalty: float = 0.0) -> float:
+                  outage_penalty: float = 0.0,
+                  feature_live: bool | None = None) -> float:
     """Ценность банка для клиента в «клиентах» — куда тянет клиентскую базу.
 
     Кредит больше не привилегирован: ценность даёт ЛЮБАЯ добавленная фича. Оси
@@ -124,17 +125,40 @@ def feature_value(axes: tuple[int, int, int], cross_block: int,
     удобства и бонус за сквозную работу. При `feature_state == "absent"`
     ценности нет — учитываются только штрафы.
 
+    `feature_live` — якорь работоспособности новой ручки (см.
+    `feature_probe.assess_feature_liveness`): `False` означает «фичу дёрнули, она
+    доказанно НЕ работает» (витрина без функциональности) — тогда оси НЕ дают
+    ценности, как при `absent`, сколько бы LLM ни поставил по тексту контракта.
+    `True`/`None` (работает либо проверить не удалось) — поведение прежнее: не
+    наказываем за то, что не смогли проверить.
+
     Регрессия базовых функций (`outage_penalty` — цена сломанных/недоступных
     ручек, см. `outage_cost`) бьёт ВСЕГДА, на любой стадии фичи — это про
     работоспособность банка, не про стадию фичи.
     """
     a = [max(0, min(2, int(x))) for x in axes]
     value = 0.0
-    if feature_state in ("working", "partial"):
+    feature_counts = (feature_state in ("working", "partial")
+                      and feature_live is not False)
+    if feature_counts:
         base = AXIS_WEIGHT * sum(a)           # 0..180
         value = base * convenience_factor(convenience) * cross_block_mult(cross_block)
     value -= max(0.0, float(outage_penalty))
     return value
+
+
+def dead_feature_cost(status: int | None) -> float:
+    """Цена доказанно мёртвой, но клиенту видимой новой ручки — в «клиентах».
+
+    Применяется только когда liveness-проверка дала вердикт «не работает»
+    (см. `feature_probe`). `5xx` (выкачено и падает на глазах клиента) штрафуем
+    как «сделано криво» — клиент попробовал и обманулся. Чистый `404` (ручки
+    нет вовсе) не штрафуем: действия клиент не получает, но и обмана нет — ноль
+    ценности от осей уже отражает это (см. `feature_value`).
+    """
+    if status is not None and 500 <= int(status) <= 599:
+        return BROKEN_ENDPOINT_COST
+    return 0.0
 
 
 def compute_commit_round(value_now: float, value_prev: float,

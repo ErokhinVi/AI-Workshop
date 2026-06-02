@@ -19,11 +19,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import db as dbmod
+from src import feature_probe as fpmod
 from src.judge import judge_round
 from src.probe import assess_regression, probe_team
 from src.scoring import (
@@ -32,6 +34,7 @@ from src.scoring import (
     compute_commit_round,
     compute_decay,
     compute_unreachable,
+    dead_feature_cost,
     feature_value,
     outage_cost,
     rubric_total,
@@ -185,7 +188,8 @@ _VALUE_EPS = 1.0
 
 def _compose_reason(*, prev_fs: str | None, cur_fs: str,
                     value_prev: float, value_now: float,
-                    outage_labels: list[str], feature_reason: str) -> str:
+                    outage_labels: list[str], feature_reason: str,
+                    feature_live: bool | None = None) -> str:
     """Собрать обоснование коммит-раунда для табло — человеческим языком.
 
     Основной текст — живое объяснение судьи (`feature_reason`) про саму фичу:
@@ -194,6 +198,10 @@ def _compose_reason(*, prev_fs: str | None, cur_fs: str,
     стадии так и пишем «ничего не изменилось» (фичу впустую не нахваливаем), а
     факт поломки базовой функции (`outage_labels` из probe — судья её надёжно не
     видит) дописываем всегда. Аудитория — нетехнические руководители банка.
+
+    `feature_live is False` (новую ручку дёрнули — она доказанно НЕ работает)
+    перебивает любой хвалебный текст судьи: на табло честно пишем, что
+    возможность показали, но воспользоваться ей нельзя.
     """
     moved_up = value_now > value_prev + _VALUE_EPS
     moved_down = value_now < value_prev - _VALUE_EPS
@@ -201,6 +209,17 @@ def _compose_reason(*, prev_fs: str | None, cur_fs: str,
     if not (moved_up or moved_down or state_changed):
         return ("С прошлого шага в банке для клиентов ничего не изменилось — "
                 "клиентская база на месте.")
+
+    # Доказанно мёртвая новая фича (витрина без функциональности): клиент видит
+    # возможность, но воспользоваться не может — независимо от того, что нахвалил
+    # LLM по тексту контракта.
+    if feature_live is False and cur_fs in ("working", "partial"):
+        parts = ["Клиенты увидели новую возможность в приложении, но "
+                 "воспользоваться ей пока нельзя — она не работает."]
+        if outage_labels:
+            parts.append("Важно: сломалось то, чем клиенты пользуются каждый "
+                         "день — " + "; ".join(outage_labels) + ".")
+        return " ".join(parts)
 
     # Подробный позитивный текст судьи показываем ТОЛЬКО когда база выросла —
     # иначе он противоречил бы оттоку («стало удобнее, и они ушли»). На спаде
@@ -324,6 +343,30 @@ async def _baseline() -> None:
         await _save_state(team)
 
 
+async def _ensure_feature_probe(team: str, snap: dict) -> None:
+    """Досчитать в снимок вердикт работоспособности новой фичи (`feature_probe`).
+
+    Дорогую проверку (реальный вызов ручки + LLM-синтез тела) запускаем ТОЛЬКО
+    когда в контракте появилась новая ручка vs baseline — иначе ставим `None`
+    (поведение как сейчас). Если снимок уже несёт `feature_probe` (передан тестом
+    или посчитан ранее) — не трогаем. Никогда не бросает: ошибка → `None`, чтобы
+    сбой нашей проверки не штрафовал команду.
+    """
+    if "feature_probe" in snap:
+        return
+    snap["feature_probe"] = None
+    baseline = _baselines.get(team)
+    try:
+        if not fpmod.discover_new_endpoints(snap, baseline):
+            return
+        async with httpx.AsyncClient(timeout=fpmod.LIVENESS_TIMEOUT_S) as client:
+            snap["feature_probe"] = await fpmod.assess_feature_liveness(
+                client, snap, baseline, BANK_URLS[team])
+    except Exception as exc:  # noqa: BLE001 — fail-safe → None, без штрафа
+        snap["feature_probe"] = None
+        print(f"[simulator] feature-probe error ({team}): {exc!r}")
+
+
 async def evaluate_round(snapshots: dict[str, dict] | None = None,
                          committed: set | None = None) -> dict:
     """Коммит-раунд: probe + один параллельный вызов судьи + сдвиг базы команд.
@@ -341,6 +384,20 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                     team, BANK_URLS[team], BANK_REPOS.get(team))
         if committed is None:
             committed = set(TEAMS)
+        # Якорь «фича живая» — только для команд с реально новым коммитом:
+        # дёргаем новую ручку и кладём вердикт в снимок до оценки судьёй. Тот же
+        # коммит (ручной /admin/evaluate без деплоя) пропускаем — его всё равно
+        # отсечёт no-op-гейт ниже, незачем жечь LLM и слать лишний вызов.
+        for team in committed:
+            snap = snapshots.get(team)
+            if snap is None:
+                continue
+            unchanged = _commit_fingerprint(snap) == _state[team]["last_commit"]
+            reachable = any(snap["blocks"].get(b, {}).get("reachable")
+                            for b in ("backend", "cib", "retail"))
+            if unchanged and reachable:
+                continue
+            await _ensure_feature_probe(team, snap)
         verdict = await judge_round({t: snapshots[t] for t in TEAMS},
                                     _baselines, active_task=ACTIVE_TASK)
         now = _now()
@@ -386,21 +443,30 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 # не доверяем это LLM: сломанное (переводы/данные клиента,
                 # недоступный блок) штрафуем, недоделанную новую фичу (404) — нет.
                 reg = assess_regression(snap)
+                # Якорь «фича живая»: если новую ручку дёрнули и она доказанно НЕ
+                # работает (витрина), оси не дают ценности, а 5xx-витрина ещё и
+                # штрафуется. None (проверить не смогли) — поведение как сейчас.
+                fp_probe = snap.get("feature_probe") or {}
+                feature_live = fp_probe.get("feature_live")
+                dead_pen = (dead_feature_cost(fp_probe.get("status"))
+                            if feature_live is False else 0.0)
                 value_now = feature_value(
                     _axes_of(v), v["cross_block"], v["convenience"],
-                    v["feature_state"], outage_penalty=_regression_penalty(reg))
+                    v["feature_state"],
+                    outage_penalty=_regression_penalty(reg) + dead_pen,
+                    feature_live=feature_live)
                 value_prev = st["last_value"]
                 prev_fs = st["feature_state"]
                 r = compute_commit_round(value_now, value_prev,
                                          st["client_base"])
                 # Обоснование для табло: основной текст — живое человеческое
                 # объяснение судьи про саму фичу (v["reason"]); детерминированные
-                # якоря (no-op, поломка базовой функции) дописываются поверх.
+                # якоря (no-op, мёртвая фича, поломка базовой функции) — поверх.
                 reason = _compose_reason(
                     prev_fs=prev_fs, cur_fs=v["feature_state"],
                     value_prev=value_prev, value_now=value_now,
                     outage_labels=reg["labels"],
-                    feature_reason=v["reason"])
+                    feature_reason=v["reason"], feature_live=feature_live)
                 st["last_value"] = value_now
                 st["last_score"] = rubric_total(rubric)
                 st["feature_state"] = v["feature_state"]

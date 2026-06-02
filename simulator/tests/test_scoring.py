@@ -1,5 +1,6 @@
 """Тесты формулы клиентской базы — модель «запаса и потока»."""
 from src.scoring import (
+    BROKEN_ENDPOINT_COST,
     CEIL,
     FLOOR,
     compute_commit_round,
@@ -7,6 +8,7 @@ from src.scoring import (
     compute_unreachable,
     convenience_factor,
     cross_block_mult,
+    dead_feature_cost,
     feature_value,
     outage_cost,
     rubric_total,
@@ -84,6 +86,40 @@ def test_feature_value_cross_block_bonus_raises_value():
     flat = feature_value(FULL_AXES, 0, 9, "working")
     cross = feature_value(FULL_AXES, 2, 9, "working")
     assert cross > flat
+
+
+# --- якорь «фича живая»: feature_live ----------------------------------------
+
+def test_feature_value_dead_feature_gives_no_axis_value():
+    # ручку дёрнули — НЕ работает: высокие оси LLM не дают ценности (витрина)
+    v = feature_value(FULL_AXES, 2, 9, "working", feature_live=False)
+    assert v == 0.0
+
+
+def test_feature_value_dead_feature_with_outage_only_penalty():
+    # мёртвая фича + штраф 5xx → строго отрицательно, без вклада осей
+    v = feature_value(FULL_AXES, 2, 9, "working",
+                      outage_penalty=BROKEN_ENDPOINT_COST, feature_live=False)
+    assert v == -BROKEN_ENDPOINT_COST
+
+
+def test_feature_value_live_true_unchanged():
+    # доказанно работает → как сейчас (равно вызову без feature_live)
+    assert (feature_value(FULL_AXES, 2, 9, "working", feature_live=True)
+            == feature_value(FULL_AXES, 2, 9, "working"))
+
+
+def test_feature_value_live_none_does_not_penalize():
+    # проверить не удалось (None) → не наказываем, ценность как обычно
+    assert (feature_value(FULL_AXES, 2, 9, "working", feature_live=None)
+            == feature_value(FULL_AXES, 2, 9, "working"))
+
+
+def test_dead_feature_cost_only_for_5xx():
+    assert dead_feature_cost(500) == BROKEN_ENDPOINT_COST
+    assert dead_feature_cost(503) == BROKEN_ENDPOINT_COST
+    assert dead_feature_cost(404) == 0.0     # ручки нет — без штрафа
+    assert dead_feature_cost(None) == 0.0
 
 
 # --- outage_cost / штраф за сломанные ручки ----------------------------------
