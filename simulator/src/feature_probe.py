@@ -70,18 +70,35 @@ def _contracts(snap: dict | None) -> dict[str, str]:
             for name in BLOCKS}
 
 
+_READ_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _endpoint_sort_key(endpoint: tuple[str, str]) -> tuple[int, str]:
+    """Порядок ручек: сначала ДЕЙСТВИЯ (POST/PUT/…), потом чтения, затем по пути.
+
+    «Работает ли фича» для клиента — это про действие (оформить кредит, сделать
+    перевод = POST), а не про сопутствующее чтение (GET /products). Поэтому
+    главной ручкой фичи выбираем действие: иначе рабочий GET-прокси замаскировал
+    бы сломанное действие и фича прошла бы как живая.
+    """
+    method, path = endpoint
+    is_read = 1 if method in _READ_METHODS else 0
+    return (is_read, path)
+
+
 def discover_new_endpoints(snap: dict, baseline_snap: dict | None) -> list[dict]:
     """Ручки, появившиеся в контрактах vs baseline. Чистая функция, без сети.
 
     Возвращает список ``{block, method, path}`` в порядке приоритета блоков
-    (retail → cib → backend), внутри блока — стабильно отсортирован.
+    (retail → cib → backend), внутри блока — действия раньше чтений (см.
+    `_endpoint_sort_key`), затем по пути. `[0]` — главная ручка фичи.
     """
     cur = _contracts(snap)
     base = _contracts(baseline_snap)
     found: list[dict] = []
     for block in BLOCKS:
         new = parse_endpoints(cur[block]) - parse_endpoints(base[block])
-        for method, path in sorted(new):
+        for method, path in sorted(new, key=_endpoint_sort_key):
             found.append({"block": block, "method": method, "path": path})
     return found
 

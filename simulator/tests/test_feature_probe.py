@@ -45,6 +45,18 @@ def test_discover_none_when_contracts_unchanged():
     assert fp.discover_new_endpoints(_snap(RETAIL_BASE), _snap(RETAIL_BASE)) == []
 
 
+def test_discover_picks_action_over_read_as_primary():
+    # реальный кейс: credit-фича добавляет в retail И GET /products (прокси, жив),
+    # И POST /api/credit-apply (действие, мертво). Главной должна быть ручка-
+    # действие, иначе рабочий GET замаскировал бы сломанное действие.
+    base = _snap(RETAIL_BASE)
+    cur = _snap(RETAIL_BASE + "### GET /products\nкаталог\n"
+                "### POST /api/credit-apply\nоформить кредит\n")
+    new = fp.discover_new_endpoints(cur, base)
+    assert new[0]["method"] == "POST"
+    assert new[0]["path"] == "/api/credit-apply"
+
+
 def test_discover_orders_retail_first():
     cur = {"team": "t", "blocks": {
         "backend": {"contract": "### GET /health\n### GET /new-backend\n"},
