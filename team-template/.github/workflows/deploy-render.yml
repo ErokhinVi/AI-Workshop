@@ -3,6 +3,14 @@ name: Deploy services via Render Deploy Hooks
 # Дёргаем Deploy Hook сервиса, чья папка менялась. Секреты в GitHub →
 # Settings → Secrets and variables → Actions данного репозитория команды:
 #   RENDER_HOOK_BACKEND, RENDER_HOOK_CIB, RENDER_HOOK_RETAIL.
+#
+# Каждый блок — ОТДЕЛЬНЫЙ job матрицы со СВОЕЙ concurrency-группой
+# (render-deploy-<ref>-<block>). Это важно: при общей группе на все три блока
+# и cancel-in-progress:false GitHub держит в очереди лишь один pending-ран, и
+# средний из трёх близких по времени пушей вытесняется самым новым (cancelled)
+# — его сервис молча НЕ выезжает. С группой на (ветка × блок) пуши разных
+# блоков идут независимо; повторный пуш ОДНОГО блока отменяет лишь свой
+# незавершённый триггер (выезжает последний).
 
 on:
   push:
@@ -17,58 +25,69 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: render-deploy
-  cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        block: [backend, cib, retail]
+    concurrency:
+      group: render-deploy-${{ github.ref }}-${{ matrix.block }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Detect and deploy
+      - name: Detect and deploy ${{ matrix.block }}
         env:
           MANUAL: ${{ inputs.services }}
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
+          BLOCK: ${{ matrix.block }}
           HOOK_BACKEND: ${{ secrets.RENDER_HOOK_BACKEND }}
           HOOK_CIB: ${{ secrets.RENDER_HOOK_CIB }}
           HOOK_RETAIL: ${{ secrets.RENDER_HOOK_RETAIL }}
         run: |
           set -e
-          # имя → "путь-папки:переменная-хука"
-          MAP="backend:backend:HOOK_BACKEND
-          cib:cib:HOOK_CIB
-          retail:retail:HOOK_RETAIL"
+          case "$BLOCK" in
+            backend) HOOK="$HOOK_BACKEND";;
+            cib)     HOOK="$HOOK_CIB";;
+            retail)  HOOK="$HOOK_RETAIL";;
+          esac
 
+          # Нужно ли деплоить ЭТОТ блок?
           if [ "$EVENT" = "workflow_dispatch" ]; then
-            CHANGED="__manual__"
-          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            CHANGED=$(git ls-files)
+            REQ="${MANUAL:-all}"
+            if [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$BLOCK,"; then
+              HIT=yes
+            else
+              HIT=no
+            fi
           else
-            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" || true)
-          fi
-          RENDER_ALL=no
-          echo "$CHANGED" | grep -qE "^(render\.yaml|seed/)" && RENDER_ALL=yes
-
-          echo "$MAP" | while IFS=: read -r NAME PATHPREFIX HOOKVAR; do
-            [ -z "$NAME" ] && continue
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              CHANGED=$(git ls-files)
+            else
+              CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" || true)
+            fi
             HIT=no
-            if [ "$EVENT" = "workflow_dispatch" ]; then
-              REQ="${MANUAL:-all}"
-              { [ "$REQ" = "all" ] || echo ",$REQ," | grep -q ",$NAME,"; } && HIT=yes
-            else
-              echo "$CHANGED" | grep -qE "^${PATHPREFIX}/" && HIT=yes
-              [ "$RENDER_ALL" = "yes" ] && HIT=yes
+            # своя папка блока изменилась
+            echo "$CHANGED" | grep -qE "^${BLOCK}/" && HIT=yes
+            # render.yaml меняет конфиг всех трёх сервисов
+            echo "$CHANGED" | grep -qE "^render\.yaml$" && HIT=yes
+            # seed/ грузит только backend
+            if [ "$BLOCK" = "backend" ]; then
+              echo "$CHANGED" | grep -qE "^seed/" && HIT=yes
             fi
-            [ "$HIT" != "yes" ] && { echo "skip $NAME"; continue; }
-            HOOK=$(eval echo "\$$HOOKVAR")
-            if [ -z "$HOOK" ]; then
-              echo "::warning::секрет для $NAME не задан — пропуск"
-            else
-              curl -fsS -X POST "$HOOK" && echo " → triggered $NAME"
-            fi
-          done
+          fi
+
+          if [ "$HIT" != "yes" ]; then
+            echo "skip $BLOCK — его папка не менялась в этом пуше"
+            exit 0
+          fi
+          if [ -z "$HOOK" ]; then
+            echo "::warning::секрет хука для $BLOCK не задан — пропуск"
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" && echo " → triggered $BLOCK"
