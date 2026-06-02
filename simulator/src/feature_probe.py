@@ -104,6 +104,32 @@ def classify_status(status: int | None) -> bool | None:
     return None
 
 
+# Маркеры «фейкового 2xx»: ручка ответила успехом, но тело честно сообщает, что
+# фича на деле не доведена (заглушка / сосед-блок ещё не подключён). Каноничный
+# пример — retail credit-apply, который при отсутствии cib-решения отдаёт 200 с
+# {"decision": "pending_integration", ...}: кредит не оформляется, но статус 200.
+_INCOMPLETE_MARKERS = (
+    "pending_integration", "pending integration",
+    "not_implemented", "not implemented",
+    "coming soon", "в разработке", "заглушк",
+    "не реализова", "не подключ", "не опубликова",
+)
+
+
+def _body_signals_incomplete(body: str) -> bool:
+    """True, если тело 2xx-ответа явно сигналит незавершённость фичи (витрина)."""
+    low = (body or "").lower()
+    return any(marker in low for marker in _INCOMPLETE_MARKERS)
+
+
+def _verdict(status: int | None, body: str) -> bool | None:
+    """Живость с учётом тела: 2xx с маркерами незавершённости → False (витрина)."""
+    base = classify_status(status)
+    if base is True and _body_signals_incomplete(body):
+        return False
+    return base
+
+
 def _fill_path(path: str, snap: dict) -> str | None:
     """Подставить реальный id в путь с ``{param}``. Если нечем — None (не зовём)."""
     if not _PATH_PARAM_RE.search(path):
@@ -213,9 +239,10 @@ async def assess_feature_liveness(client, snap: dict,
         # Сервис команды не ответил (наш таймаут/сеть) → не штрафуем.
         return _result(endpoints, primary, tier=1, feature_live=None,
                        note="нет ответа сервиса")
-    live = classify_status(status)
+    live = _verdict(status, body)
     if live is not None:
-        # Однозначный ответ сервиса: 2xx → работает, 404/5xx → мертва.
+        # Однозначный ответ сервиса: 2xx-успех → работает; 404/5xx или 2xx с
+        # телом-заглушкой → мертва.
         return _result(endpoints, primary, status=status, tier=1,
                        feature_live=live, body=body)
 
@@ -234,6 +261,7 @@ async def assess_feature_liveness(client, snap: dict,
 
     status2, body2 = await _http_call(client, primary["method"], url,
                                       body=body_obj)
-    # Реальный вызов: 2xx → работает, 404/5xx → мертва, прочее → неубедительно.
+    # Реальный вызов: 2xx-успех → работает; 404/5xx или 2xx-заглушка → мертва;
+    # прочее (опять валидация) → неубедительно (None).
     return _result(endpoints, primary, status=status2, tier=2,
-                   feature_live=classify_status(status2), body=body2)
+                   feature_live=_verdict(status2, body2), body=body2)

@@ -222,6 +222,7 @@ def _liveness_section(snap: dict) -> str:
     facts = {
         "новая_ручка": f"{primary.get('method')} {primary.get('path')}",
         "http_статус_вызова": fp.get("status"),
+        "ответ_ручки": str(fp.get("body_excerpt", ""))[:200],
         "работает": _LIVENESS_VERDICT.get(fp.get("feature_live")),
     }
     return (

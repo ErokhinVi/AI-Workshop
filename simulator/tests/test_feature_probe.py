@@ -67,6 +67,22 @@ def test_classify_status_buckets():
     assert fp.classify_status(None) is None
 
 
+def test_body_signals_incomplete_markers():
+    assert fp._body_signals_incomplete('{"decision": "pending_integration"}')
+    assert fp._body_signals_incomplete("блок решений (cib) ещё не опубликовал ручку")
+    assert fp._body_signals_incomplete("not implemented yet")
+    assert not fp._body_signals_incomplete('{"approved": true, "limit": 100000}')
+    assert not fp._body_signals_incomplete("")
+
+
+def test_verdict_overlays_body_on_status():
+    # «фейковый 200»: статус успешный, но тело — заглушка → мертва
+    assert fp._verdict(200, '{"decision": "pending_integration"}') is False
+    assert fp._verdict(200, '{"approved": true}') is True
+    assert fp._verdict(404, "") is False
+    assert fp._verdict(422, "") is None
+
+
 # --- оркестратор assess_feature_liveness -------------------------------------
 
 class _Resp:
@@ -135,6 +151,20 @@ def test_assess_dead_when_real_call_500s():
     async def good_synth(snap, primary):
         return {"client_id": "c-01394", "amount": 50000}
     res = _assess(_Client(_Resp(422), _Resp(500)), synth=good_synth)
+    assert res["feature_live"] is False
+    assert res["tier"] == 2
+
+
+def test_assess_fake_200_pending_integration_is_dead():
+    # реальный кейс с воркшопа: credit-apply на пустом теле → 400 (нужен клиент),
+    # с валидным телом → 200, но {"decision": "pending_integration"} (cib-ручки
+    # нет) — кредит не оформляется. Гейт по телу ловит «фейковый 200».
+    async def good_synth(snap, primary):
+        return {"client_id": "c-01394", "amount_rub": 50000}
+    pending = ('{"decision": "pending_integration", "client": {"id": "c-01394"}, '
+               '"message": "блок решений (cib) ещё не опубликовал ручку"}')
+    res = _assess(_Client(_Resp(400, '{"detail": "не указан клиент"}'),
+                          _Resp(200, pending)), synth=good_synth)
     assert res["feature_live"] is False
     assert res["tier"] == 2
 
