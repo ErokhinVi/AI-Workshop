@@ -133,6 +133,31 @@ def test_llm_feature_reason_shown_on_board(monkeypatch):
     assert "оформляют её за минуту" in res["reason"]
 
 
+def test_reeval_same_commit_emits_no_event(monkeypatch):
+    # повторная оценка ТОГО ЖЕ коммита (ручной /admin/evaluate без нового
+    # деплоя) не двигает базу и не пишет событие — фикс двойного скоринга
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    first = _run_commit()
+    assert first["delta"] > 0
+    base_after = m._state["team_a"]["client_base"]
+    n_events = len([e for e in m._events if e["team"] == "team_a"])
+    again = _run_commit()
+    assert again["delta"] == 0
+    assert m._state["team_a"]["client_base"] == base_after
+    assert "ничего не изменилось" in again["reason"]
+    assert len([e for e in m._events if e["team"] == "team_a"]) == n_events
+
+
+def test_reason_on_decline_not_contradictory():
+    # на спаде базы НЕ показываем позитивный текст судьи (без «удобно → ушли»)
+    r = m._compose_reason(
+        prev_fs="working", cur_fs="working", value_prev=200.0, value_now=80.0,
+        outage_labels=[], feature_reason="Клиентам очень удобно, они в восторге.")
+    assert "в восторге" not in r
+    assert "ушл" in r.lower() or "неудоб" in r.lower()
+
+
 def test_unchanged_commit_does_not_spam_clients(monkeypatch):
     # рабочую удобную фичу коммитят повторно без изменений ценности —
     # первый коммит приводит клиентов, а второй (та же ценность) НЕ двигает базу

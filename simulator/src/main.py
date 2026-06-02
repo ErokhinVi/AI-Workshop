@@ -202,18 +202,23 @@ def _compose_reason(*, prev_fs: str | None, cur_fs: str,
         return ("С прошлого шага в банке для клиентов ничего не изменилось — "
                 "клиентская база на месте.")
 
-    parts: list[str] = []
+    # Подробный позитивный текст судьи показываем ТОЛЬКО когда база выросла —
+    # иначе он противоречил бы оттоку («стало удобнее, и они ушли»). На спаде
+    # ведём корректной по направлению фразой.
+    gained = (cur_fs == "working" and prev_fs != "working") or moved_up
+    lost = (prev_fs == "working" and cur_fs != "working") or moved_down
     human = feature_reason.strip()
-    if human and human != "(без обоснования)":
+    parts: list[str] = []
+    if gained and not lost and human and human != "(без обоснования)":
         parts.append(human)
     elif cur_fs == "working" and prev_fs != "working":
         parts.append("Новая возможность заработала по-настоящему — клиенты пришли.")
     elif prev_fs == "working" and cur_fs != "working":
-        parts.append("Возможность перестала работать — клиенты уходят.")
+        parts.append("Ключевая возможность перестала работать — клиенты уходят.")
     elif moved_up:
         parts.append("Клиентам стало удобнее — их прибавилось.")
     else:
-        parts.append("Клиентам стало хуже — их поубавилось.")
+        parts.append("Клиентам стало неудобно, и часть из них ушла.")
 
     if outage_labels:
         parts.append("Важно: сломалось то, чем клиенты пользуются каждый день — "
@@ -356,6 +361,21 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 not snap["blocks"].get(b, {}).get("reachable")
                 for b in ("backend", "cib", "retail")
             )
+            if not all_down and fp == st["last_commit"]:
+                # Повторная оценка ТОГО ЖЕ коммита (например, ручной
+                # /admin/evaluate без нового деплоя): база НЕ двигается. Иначе
+                # неизбежный шум LLM на идентичном снимке телескопировался бы в
+                # скачки вверх-вниз (+168, потом −96 на том же коммите). Событие
+                # не пишем и idle-таймер не сбрасываем — это не новый релиз.
+                out[team] = {
+                    "delta": 0,
+                    "client_base": round(st["client_base"]),
+                    "reason": ("С прошлого шага в банке для клиентов ничего не "
+                               "изменилось — клиентская база на месте."),
+                    "judge": judge,
+                    "feature_state": st["feature_state"],
+                }
+                continue
             if all_down:
                 r = compute_unreachable(st["client_base"])
                 reason = "Все три блока банка недоступны — клиенты не могут войти."
