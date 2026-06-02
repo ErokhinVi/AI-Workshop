@@ -1,16 +1,26 @@
-name: Deploy services via Render Deploy Hooks
+name: Deploy services via Render API
 
-# Дёргаем Deploy Hook сервиса, чья папка менялась. Секреты в GitHub →
-# Settings → Secrets and variables → Actions данного репозитория команды:
-#   RENDER_HOOK_BACKEND, RENDER_HOOK_CIB, RENDER_HOOK_RETAIL.
+# Селективный редеплой через Render REST API. autoDeploy у самих сервисов
+# выключен — деплой триггерит ТОЛЬКО этот workflow, по факту изменения папки
+# блока. Секрет репозитория: RENDER_API_KEY (Bearer-токен Render-аккаунта).
+#
+# ВАЖНО (грабли 2026-06-02): не переводить этот workflow на Deploy Hooks
+# (RENDER_HOOK_*) — секреты хуков в репозиториях команд НЕ заведены, и job
+# тихо уходит в ветку «секрет не задан → exit 0» (фейковый success), ничего
+# не деплоя. Рабочий механизм — RENDER_API_KEY + service IDs ниже.
+#
+# ВАЖНО: SID_* НИЖЕ — это сервис-айди КОНКРЕТНОЙ команды. Шаблон несёт ID
+# команды A; sync-team-repos.sh копирует файл дословно во все репозитории,
+# поэтому ПОСЛЕ синка в каждом team-репо нужно подставить ЕГО три ID:
+#   team_1 (A): backend srv-d8bjjtq8qa3s73cn1fd0  cib srv-d8bjknkp3tds739s1il0  retail srv-d8bjkomk1jcs73f782lg
+#   team_2 (B): backend srv-d8bjkpernols73ctqa90  cib srv-d8bjkq37uimc73dpves0  retail srv-d8bjkr3eo5us738o11hg
 #
 # Каждый блок — ОТДЕЛЬНЫЙ job матрицы со СВОЕЙ concurrency-группой
-# (render-deploy-<ref>-<block>). Это важно: при общей группе на все три блока
-# и cancel-in-progress:false GitHub держит в очереди лишь один pending-ран, и
-# средний из трёх близких по времени пушей вытесняется самым новым (cancelled)
-# — его сервис молча НЕ выезжает. С группой на (ветка × блок) пуши разных
-# блоков идут независимо; повторный пуш ОДНОГО блока отменяет лишь свой
-# незавершённый триггер (выезжает последний).
+# (render-deploy-<ref>-<block>). Иначе при общей группе и cancel-in-progress:false
+# GitHub держит в очереди лишь один pending-ран, и средний из трёх близких по
+# времени пушей вытесняется самым новым (cancelled) — его сервис молча НЕ выезжает.
+# С группой на (ветка × блок) пуши разных блоков идут независимо; повторный пуш
+# ОДНОГО блока отменяет лишь свой незавершённый триггер (выезжает последний).
 
 on:
   push:
@@ -39,22 +49,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Detect and deploy ${{ matrix.block }}
+      - name: Deploy ${{ matrix.block }} via Render API
         env:
           MANUAL: ${{ inputs.services }}
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           BLOCK: ${{ matrix.block }}
-          HOOK_BACKEND: ${{ secrets.RENDER_HOOK_BACKEND }}
-          HOOK_CIB: ${{ secrets.RENDER_HOOK_CIB }}
-          HOOK_RETAIL: ${{ secrets.RENDER_HOOK_RETAIL }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SID_BACKEND: srv-d8bjjtq8qa3s73cn1fd0
+          SID_CIB: srv-d8bjknkp3tds739s1il0
+          SID_RETAIL: srv-d8bjkomk1jcs73f782lg
         run: |
           set -e
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::secret RENDER_API_KEY is empty"
+            exit 1
+          fi
           case "$BLOCK" in
-            backend) HOOK="$HOOK_BACKEND";;
-            cib)     HOOK="$HOOK_CIB";;
-            retail)  HOOK="$HOOK_RETAIL";;
+            backend) SID="$SID_BACKEND";;
+            cib)     SID="$SID_CIB";;
+            retail)  SID="$SID_RETAIL";;
           esac
 
           # Нужно ли деплоить ЭТОТ блок?
@@ -86,8 +101,19 @@ jobs:
             echo "skip $BLOCK — его папка не менялась в этом пуше"
             exit 0
           fi
-          if [ -z "$HOOK" ]; then
-            echo "::warning::секрет хука для $BLOCK не задан — пропуск"
-            exit 0
+          if [ -z "$SID" ]; then
+            echo "::error::service id для $BLOCK не задан"
+            exit 1
           fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered $BLOCK"
+          echo " → trigger $BLOCK ($SID)"
+          HTTP=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$SID/deploys" \
+            -d '{"clearCache":"do_not_clear"}')
+          if [ "$HTTP" != "201" ] && [ "$HTTP" != "200" ]; then
+            echo "::error::Render API returned $HTTP for $BLOCK"
+            cat /tmp/resp.json
+            exit 1
+          fi
+          echo "   ok: deploy $(python3 -c 'import json; print(json.load(open("/tmp/resp.json")).get("id","?"))')"
