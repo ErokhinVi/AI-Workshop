@@ -26,6 +26,14 @@ PROBE_TIMEOUT_S = 20.0
 HTML_LIMIT = 8000
 CONTRACT_LIMIT = 6000
 
+# Человеческие названия блоков для ярлыков регрессии на табло (аудитория —
+# нетехнические руководители банка, технических имён блоков они не понимают).
+_BLOCK_ROLE = {
+    "backend": "ядро данных банка",
+    "cib": "бизнес-сервисы банка",
+    "retail": "мобильное приложение",
+}
+
 
 def _safe_json(resp: httpx.Response) -> dict:
     try:
@@ -134,11 +142,12 @@ def assess_regression(snap: dict) -> dict:
     serves_broken = bool(backend.get("reachable")
                          and backend_checks.get("serves_client") is False)
 
-    labels = [f"блок {name} недоступен" for name in unreachable]
+    # Человеческие ярлыки для табло: его читают нетехнические руководители банка.
+    labels = [f"не отвечает {_BLOCK_ROLE.get(name, name)}" for name in unreachable]
     if transfers_broken:
-        labels.append("переводы (базовая функция) не работают")
+        labels.append("переводы между счетами перестали проходить")
     if serves_broken:
-        labels.append("данные клиента (/clients) не отдаются")
+        labels.append("перестали открываться данные клиентов")
 
     return {
         "unreachable_blocks": len(unreachable),

@@ -114,6 +114,25 @@ def test_working_feature_gains_clients(monkeypatch):
     assert res["delta"] > 0
 
 
+def test_llm_feature_reason_shown_on_board(monkeypatch):
+    # живое объяснение судьи про фичу попадает на табло как основной текст,
+    # а не подменяется генеричной детерминированной фразой
+    _reset(datetime.now(timezone.utc))
+
+    async def fake_judge(snaps, baselines=None, *, active_task=""):
+        block = {"new_functionality": 2, "client_value": 2, "completeness": 2,
+                 "cross_block": 2, "convenience": 9, "feature_state": "working",
+                 "reason": "В приложении появилась кредитная карта — клиенты "
+                           "оформляют её за минуту, не приходя в отделение.",
+                 "judge": "llm"}
+        return {team: dict(block) for team in m.TEAMS}
+
+    monkeypatch.setattr(m, "judge_round", fake_judge)
+    res = _run_commit()
+    assert "кредитная карта" in res["reason"]
+    assert "оформляют её за минуту" in res["reason"]
+
+
 def test_unchanged_commit_does_not_spam_clients(monkeypatch):
     # рабочую удобную фичу коммитят повторно без изменений ценности —
     # первый коммит приводит клиентов, а второй (та же ценность) НЕ двигает базу
@@ -137,7 +156,7 @@ def test_regression_penalizes_even_working_feature(monkeypatch):
     _patch_judge(monkeypatch, "working", 9)
     broken = _run_commit(transfer_ok=False)
     assert broken["delta"] < clean["delta"]
-    assert "Регрессия базовой функции" in broken["reason"]
+    assert "клиенты пользуются каждый день" in broken["reason"]
 
 
 def test_rule2_stagnation_leaks_clients():
@@ -222,7 +241,7 @@ def test_fallback_regression_loses_clients(monkeypatch):
     snaps["team_a"] = _mock_snap("team_a", transfer_ok=False)
     out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
     assert out["team_a"]["delta"] < 0
-    assert "Регрессия базовой функции" in out["team_a"]["reason"]
+    assert "клиенты пользуются каждый день" in out["team_a"]["reason"]
 
 
 def test_fallback_stagnation_leaks_clients(monkeypatch):

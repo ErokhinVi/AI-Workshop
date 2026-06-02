@@ -31,7 +31,7 @@ def test_assess_regression_flags_broken_serves_client():
     snap["blocks"]["backend"]["checks"]["serves_client"] = False
     r = assess_regression(snap)
     assert r["serves_client_broken"] is True
-    assert any("/clients" in lbl for lbl in r["labels"])
+    assert any("данные клиент" in lbl.lower() for lbl in r["labels"])
 
 
 def test_assess_regression_counts_unreachable():
@@ -40,7 +40,7 @@ def test_assess_regression_counts_unreachable():
     snap["blocks"]["backend"]["checks"] = {}
     r = assess_regression(snap)
     assert r["unreachable_blocks"] == 1
-    assert any("backend" in lbl for lbl in r["labels"])
+    assert any("ядро данных" in lbl for lbl in r["labels"])
 
 
 def test_assess_regression_unreachable_backend_not_double_flagged_as_serves():

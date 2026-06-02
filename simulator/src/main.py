@@ -185,36 +185,39 @@ _VALUE_EPS = 1.0
 
 def _compose_reason(*, prev_fs: str | None, cur_fs: str,
                     value_prev: float, value_now: float,
-                    outage_labels: list[str], convenience: float) -> str:
-    """Собрать чёткое обоснование коммит-раунда из фактов, а не из фантазии LLM.
+                    outage_labels: list[str], feature_reason: str) -> str:
+    """Собрать обоснование коммит-раунда для табло — человеческим языком.
 
-    Текст всегда отражает РОВНО то, что изменилось на этом коммите и что в банке
-    не работает: появление/доводка фичи, рост или падение ценности, список
-    сломанных базовых функций, оценка удобства. Это убирает повторяющиеся
-    однотипные обоснования — на пустом коммите так и пишем «ничего не
-    изменилось», а не плюсуем клиентов. Фича — любая, не только кредит.
+    Основной текст — живое объяснение судьи (`feature_reason`) про саму фичу:
+    что команда добавила и почему клиенты пришли или ушли. Детерминированные
+    якоря остаются ради честности: на коммите без сдвига ценности и без смены
+    стадии так и пишем «ничего не изменилось» (фичу впустую не нахваливаем), а
+    факт поломки базовой функции (`outage_labels` из probe — судья её надёжно не
+    видит) дописываем всегда. Аудитория — нетехнические руководители банка.
     """
-    if cur_fs == "working" and prev_fs != "working":
-        head = "Новая функция заработала сквозь все три блока."
-    elif prev_fs == "working" and cur_fs != "working":
-        head = "Функция перестала работать сквозь все три блока."
-    elif value_now > value_prev + _VALUE_EPS:
-        head = "Банк стал ценнее для клиента, чем на прошлом коммите."
-    elif value_now < value_prev - _VALUE_EPS:
-        head = "Банк стал хуже для клиента, чем на прошлом коммите."
-    else:
-        head = "Функционально с прошлого коммита ничего не изменилось."
+    moved_up = value_now > value_prev + _VALUE_EPS
+    moved_down = value_now < value_prev - _VALUE_EPS
+    state_changed = cur_fs != prev_fs
+    if not (moved_up or moved_down or state_changed):
+        return ("С прошлого шага в банке для клиентов ничего не изменилось — "
+                "клиентская база на месте.")
 
-    parts = [head]
+    parts: list[str] = []
+    human = feature_reason.strip()
+    if human and human != "(без обоснования)":
+        parts.append(human)
+    elif cur_fs == "working" and prev_fs != "working":
+        parts.append("Новая возможность заработала по-настоящему — клиенты пришли.")
+    elif prev_fs == "working" and cur_fs != "working":
+        parts.append("Возможность перестала работать — клиенты уходят.")
+    elif moved_up:
+        parts.append("Клиентам стало удобнее — их прибавилось.")
+    else:
+        parts.append("Клиентам стало хуже — их поубавилось.")
+
     if outage_labels:
-        parts.append("Регрессия базовой функции: " + "; ".join(outage_labels) + ".")
-    if cur_fs in ("working", "partial"):
-        if convenience >= 7:
-            parts.append("Пользоваться удобно — клиенты приходят.")
-        elif convenience >= 4:
-            parts.append("Удобство среднее.")
-        else:
-            parts.append("Пользоваться неудобно — клиенты уходят.")
+        parts.append("Важно: сломалось то, чем клиенты пользуются каждый день — "
+                     + "; ".join(outage_labels) + ".")
     return " ".join(parts)
 
 
@@ -370,13 +373,14 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 prev_fs = st["feature_state"]
                 r = compute_commit_round(value_now, value_prev,
                                          st["client_base"])
-                # Обоснование собираем из фактов коммита, а не из текста LLM —
-                # так оно чёткое и не повторяется раунд за раундом.
+                # Обоснование для табло: основной текст — живое человеческое
+                # объяснение судьи про саму фичу (v["reason"]); детерминированные
+                # якоря (no-op, поломка базовой функции) дописываются поверх.
                 reason = _compose_reason(
                     prev_fs=prev_fs, cur_fs=v["feature_state"],
                     value_prev=value_prev, value_now=value_now,
                     outage_labels=reg["labels"],
-                    convenience=v["convenience"])
+                    feature_reason=v["reason"])
                 st["last_value"] = value_now
                 st["last_score"] = rubric_total(rubric)
                 st["feature_state"] = v["feature_state"]
