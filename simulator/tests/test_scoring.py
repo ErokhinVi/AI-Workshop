@@ -88,6 +88,31 @@ def test_feature_value_cross_block_bonus_raises_value():
     assert cross > flat
 
 
+def test_feature_value_structural_axes_raise_saturated_working_feature():
+    # Даже когда базовые оси уже максимальны, новая глубина backend и ширина
+    # продуктовой линейки должны давать измеримый прирост.
+    base = feature_value(FULL_AXES, 2, 8, "working")
+    richer = feature_value(
+        FULL_AXES, 2, 8, "working",
+        backend_persistence=2, feature_breadth=2,
+    )
+    assert richer > base
+
+
+def test_feature_value_structural_axes_do_not_reward_dead_feature():
+    v = feature_value(
+        FULL_AXES, 2, 9, "working", feature_live=False,
+        backend_persistence=2, feature_breadth=2,
+    )
+    assert v == 0.0
+
+
+def test_feature_value_ui_polish_adds_client_value():
+    base = feature_value(FULL_AXES, 2, 8, "working")
+    polished = feature_value(FULL_AXES, 2, 8, "working", ui_polish=2)
+    assert polished > base
+
+
 # --- якорь «фича живая»: feature_live ----------------------------------------
 
 def test_feature_value_dead_feature_gives_no_axis_value():

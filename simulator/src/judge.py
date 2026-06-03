@@ -10,6 +10,8 @@
 
 * `new_functionality`, `client_value`, `completeness` — 0/1/2 каждая;
 * `cross_block` — 0/1/2 (бонус-ось за сквозную работу через все три блока);
+* `backend_persistence`, `feature_breadth`, `ui_polish` — 0/1/2 каждая
+  (глубина хранения, ширина линейки фич, визуальная полировка UI);
 * `convenience` — 0–10, насколько удобно клиенту пользоваться фичей;
 * `feature_state` — стадия фичи (absent/partial/working);
 * `reason` — живое человеческое обоснование.
@@ -26,11 +28,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from src.llm import LLMError, ask_llm, last_call_degraded
 
 BLOCKS = ("backend", "cib", "retail")
 COMPLETENESS_WORKING = 2   # порог completeness, при котором фича считается working
+_ENDPOINT_RE = re.compile(r"^###\s+(GET|POST|PUT|PATCH|DELETE)\s+(/\S+)",
+                          re.MULTILINE)
 
 
 def _contracts(snap: dict) -> dict[str, str]:
@@ -52,6 +57,67 @@ def _changed_blocks(snap: dict, baseline_snap: dict) -> list[str]:
             if cur[name].strip() != base[name].strip()]
 
 
+def _endpoints(contract: str) -> set[tuple[str, str]]:
+    """Ручки из CONTRACT.md в формате заголовков `### METHOD /path`."""
+    return {(m.group(1).upper(), m.group(2).rstrip("/"))
+            for m in _ENDPOINT_RE.finditer(contract or "")}
+
+
+def _new_endpoints(snap: dict, baseline_snap: dict) -> dict[str, set[tuple[str, str]]]:
+    """Новые ручки по блокам относительно baseline-контракта."""
+    cur, base = _contracts(snap), _contracts(baseline_snap)
+    return {name: _endpoints(cur[name]) - _endpoints(base[name])
+            for name in BLOCKS}
+
+
+def _topic_of(path: str) -> str:
+    """Грубая тематика ручки: credit-card/cashback/deposit/etc."""
+    chunks = [p for p in path.strip("/").split("/") if p and not p.startswith("{")]
+    ignored = {"api", "clients", "client", "health", "transactions", "products"}
+    for chunk in chunks:
+        low = chunk.lower()
+        if low not in ignored:
+            return low
+    return chunks[-1].lower() if chunks else path.lower()
+
+
+def _default_backend_persistence(snap: dict, baseline_snap: dict) -> int:
+    """Страховка оси backend_persistence, если LLM её не вернул."""
+    eps = _new_endpoints(snap, baseline_snap).get("backend", set())
+    if not eps:
+        return 0
+    stateful_words = (
+        "card", "cards", "deposit", "deposits", "cashback", "application",
+        "applications", "account", "accounts", "history", "payment", "purchase",
+    )
+    if any(method != "GET" or any(word in path.lower() for word in stateful_words)
+           for method, path in eps):
+        return 2
+    return 1
+
+
+def _default_feature_breadth(snap: dict, baseline_snap: dict) -> int:
+    """Страховка оси feature_breadth из новых endpoint-тематик."""
+    eps = _new_endpoints(snap, baseline_snap)
+    topics = {_topic_of(path) for by_block in eps.values() for _, path in by_block}
+    if not topics:
+        return 0
+    return min(2, len(topics))
+
+
+def _default_ui_polish(snap: dict, baseline_snap: dict) -> int:
+    """Страховка оси ui_polish: retail HTML изменился → минимум косметики есть."""
+    cur = str(snap.get("blocks", {}).get("retail", {}).get("html", "") or "")
+    base = str(baseline_snap.get("blocks", {}).get("retail", {}).get("html", "") or "")
+    if not cur.strip() or cur.strip() == base.strip():
+        return 0
+    return 1
+
+
+def _retail_html_changed(snap: dict, baseline_snap: dict) -> bool:
+    return _default_ui_polish(snap, baseline_snap) > 0
+
+
 def classify_feature(snap: dict, baseline_snap: dict | None = None,
                      *, completeness: int | None = None) -> str:
     """Стадия добавленной фичи — частично детерминированно из diff контрактов.
@@ -68,7 +134,7 @@ def classify_feature(snap: dict, baseline_snap: dict | None = None,
     """
     base = baseline_snap if baseline_snap is not None else {}
     changed = _changed_blocks(snap, base)
-    if not changed:
+    if not changed and not _retail_html_changed(snap, base):
         return "absent"
     if completeness is not None and int(completeness) >= COMPLETENESS_WORKING:
         return "working"
@@ -84,15 +150,20 @@ def generic_fallback(snap: dict, baseline_snap: dict | None = None) -> dict:
     """
     base = baseline_snap if baseline_snap is not None else {}
     changed = _changed_blocks(snap, base)
+    ui_polish = _default_ui_polish(snap, base)
     n = len(changed)
-    if n == 0:
+    if n == 0 and ui_polish == 0:
         axes = (0, 0, 0)
         cross_block = 0
+        backend_persistence = 0
+        feature_breadth = 0
         reason = "С прошлого шага в банке для клиентов ничего не поменялось."
     else:
         # есть изменения, но без LLM не уверены в завершённости — ставим скромно
         axes = (1, 1, 1)
         cross_block = min(2, n)
+        backend_persistence = _default_backend_persistence(snap, base)
+        feature_breadth = _default_feature_breadth(snap, base)
         reason = "Команда добавила в банк новую возможность для клиентов."
     fs = classify_feature(snap, base)   # без completeness → absent/partial
     return {
@@ -100,6 +171,9 @@ def generic_fallback(snap: dict, baseline_snap: dict | None = None) -> dict:
         "client_value": axes[1],
         "completeness": axes[2],
         "cross_block": cross_block,
+        "backend_persistence": backend_persistence,
+        "feature_breadth": feature_breadth,
+        "ui_polish": ui_polish,
         "convenience": 5,
         "feature_state": fs,
         "reason": reason,
@@ -177,6 +251,16 @@ _AXES_RULES = (
     "1 — частично/каркас, 0 — только заявка/заглушка/обещание).\n"
     "• cross_block — задействованы ли все три блока согласованно (2 — фича "
     "проходит через backend+cib+retail, 1 — два блока, 0 — один блок/нет).\n"
+    "• backend_persistence — хранит ли backend состояние новой фичи (2 — есть "
+    "собственное хранение или ручки состояния, 1 — backend отдаёт данные для "
+    "фичи, 0 — фича симулируется без ядра данных).\n"
+    "• feature_breadth — сколько РАЗНЫХ клиентских возможностей добавлено "
+    "(0 — ничего нового, 1 — одна новая возможность, 2 — несколько разных "
+    "возможностей: например кредит + карта + вклад).\n"
+    "• ui_polish — насколько красиво, понятно и богато выглядит клиентский "
+    "интерфейс retail (2 — заметно полированный интерфейс с хорошими экранами "
+    "и состояниями, 1 — аккуратное базовое UI-улучшение, 0 — нет видимой "
+    "полировки или только текстовая заглушка).\n"
     "convenience — целое 0..10: насколько клиенту удобно пользоваться фичей "
     "(скорость, понятность, человеческие тексты). Если новой фичи нет — 5.\n"
     "feature_state — одно из: absent (контракты не менялись), partial (есть "
@@ -253,7 +337,8 @@ def _build_team_prompt(snap: dict, baseline_snap: dict, regression: dict,
         f"{json.dumps(_block_view(snap, baseline_snap), ensure_ascii=False)}\n\n"
         'Верни JSON ровно такой формы: '
         '{"new_functionality": 0-2, "client_value": 0-2, "completeness": 0-2, '
-        '"cross_block": 0-2, "convenience": 0-10, '
+        '"cross_block": 0-2, "backend_persistence": 0-2, '
+        '"feature_breadth": 0-2, "ui_polish": 0-2, "convenience": 0-10, '
         '"reason": "2-4 живых предложения ПРОСТЫМ человеческим языком для '
         'нетехнических руководителей банка. Назови своими словами, какую новую '
         'возможность команда добавила в банк (или что изменилось), и объясни, '
@@ -271,11 +356,20 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     completeness = _axis(block.get("completeness"))
     fs = classify_feature(snap, baseline_snap, completeness=completeness)
     tag = "llm-degraded" if last_call_degraded() else "llm"
+    backend_raw = block.get("backend_persistence")
+    breadth_raw = block.get("feature_breadth")
+    ui_raw = block.get("ui_polish")
     return {
         "new_functionality": _axis(block.get("new_functionality")),
         "client_value": _axis(block.get("client_value")),
         "completeness": completeness,
         "cross_block": _axis(block.get("cross_block")),
+        "backend_persistence": (_axis(backend_raw) if backend_raw is not None
+                                else _default_backend_persistence(snap, baseline_snap)),
+        "feature_breadth": (_axis(breadth_raw) if breadth_raw is not None
+                            else _default_feature_breadth(snap, baseline_snap)),
+        "ui_polish": (_axis(ui_raw) if ui_raw is not None
+                      else _default_ui_polish(snap, baseline_snap)),
         "convenience": _coerce_convenience(block.get("convenience")),
         "feature_state": fs,
         "reason": str(block.get("reason", "")).strip() or "(без обоснования)",

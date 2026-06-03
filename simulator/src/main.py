@@ -176,9 +176,15 @@ def _regression_penalty(reg: dict) -> float:
 
 
 def _rubric_of(verdict: dict) -> list[int]:
-    """Сводка осей для табло/журнала (rubric-поле): оси + cross_block."""
+    """Сводка осей для табло/журнала."""
     a = _axes_of(verdict)
-    return [a[0], a[1], a[2], int(verdict.get("cross_block", 0))]
+    return [
+        a[0], a[1], a[2],
+        int(verdict.get("cross_block", 0)),
+        int(verdict.get("backend_persistence", 0)),
+        int(verdict.get("feature_breadth", 0)),
+        int(verdict.get("ui_polish", 0)),
+    ]
 
 
 # Порог «значимого» сдвига ценности в клиентах — ниже считаем коммит
@@ -337,7 +343,10 @@ async def _baseline() -> None:
         reg = assess_regression(snap)
         st["last_value"] = feature_value(
             _axes_of(v), v["cross_block"], v["convenience"], v["feature_state"],
-            outage_penalty=_regression_penalty(reg))
+            outage_penalty=_regression_penalty(reg),
+            backend_persistence=v.get("backend_persistence", 0),
+            feature_breadth=v.get("feature_breadth", 0),
+            ui_polish=v.get("ui_polish", 0))
         st["feature_state"] = v["feature_state"]
         _state[team] = st
         await _save_state(team)
@@ -454,7 +463,10 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                     _axes_of(v), v["cross_block"], v["convenience"],
                     v["feature_state"],
                     outage_penalty=_regression_penalty(reg) + dead_pen,
-                    feature_live=feature_live)
+                    feature_live=feature_live,
+                    backend_persistence=v.get("backend_persistence", 0),
+                    feature_breadth=v.get("feature_breadth", 0),
+                    ui_polish=v.get("ui_polish", 0))
                 value_prev = st["last_value"]
                 prev_fs = st["feature_state"]
                 r = compute_commit_round(value_now, value_prev,

@@ -48,6 +48,12 @@ RUBRIC_MAX = 20       # верхняя граница сводного балл�
 AXIS_WEIGHT = 30.0
 CROSS_BLOCK_BONUS = 0.4   # cross_block=2 → множитель 1.4
 
+# Дополнительные структурные оси. Они нужны, чтобы банк мог расти после первого
+# `working`: несколько независимых фич и перенос состояния в backend дают
+# измеримый прирост, а не растворяются в уже максимальных 3 базовых осях.
+STRUCTURAL_AXIS_WEIGHT = 24.0
+UI_POLISH_WEIGHT = 18.0
+
 # Цена регрессии базовой функции (например, сломанных переводов) в клиентах.
 # Сохранена как именованная константа; конкретный штраф собирает main через
 # `outage_cost` по фактам `probe.assess_regression`.
@@ -118,7 +124,10 @@ def cross_block_mult(cross_block: int) -> float:
 def feature_value(axes: tuple[int, int, int], cross_block: int,
                   convenience: float, feature_state: str, *,
                   outage_penalty: float = 0.0,
-                  feature_live: bool | None = None) -> float:
+                  feature_live: bool | None = None,
+                  backend_persistence: int = 0,
+                  feature_breadth: int = 0,
+                  ui_polish: int = 0) -> float:
     """Ценность банка для клиента в «клиентах» — куда тянет клиентскую базу.
 
     Кредит больше не привилегирован: ценность даёт ЛЮБАЯ добавленная фича. Оси
@@ -145,7 +154,22 @@ def feature_value(axes: tuple[int, int, int], cross_block: int,
                       and feature_live is not False)
     if feature_counts:
         base = AXIS_WEIGHT * sum(a)           # 0..180
-        value = base * convenience_factor(convenience) * cross_block_mult(cross_block)
+        conv = convenience_factor(convenience)
+        value = base * conv * cross_block_mult(cross_block)
+        structural_axes = (
+            max(0, min(2, int(backend_persistence)))
+            + max(0, min(2, int(feature_breadth)))
+        )
+        # Структурная глубина не должна усиливать неудобную фичу в минус: если
+        # клиенту неудобно, это уже отражено базовой осью convenience.
+        value += (
+            STRUCTURAL_AXIS_WEIGHT * structural_axes
+            * max(0.0, conv) * cross_block_mult(cross_block)
+        )
+        value += (
+            UI_POLISH_WEIGHT * max(0, min(2, int(ui_polish)))
+            * max(0.0, conv)
+        )
     value -= max(0.0, float(outage_penalty))
     return value
 

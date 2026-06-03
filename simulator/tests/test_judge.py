@@ -85,6 +85,33 @@ def test_generic_fallback_partial_with_cross_block_from_diff():
     assert v["cross_block"] == 2   # два изменённых блока
 
 
+def test_generic_fallback_detects_backend_persistence_and_feature_breadth():
+    base = _snap({
+        "backend": "### GET /health\n",
+        "cib": "### GET /health\n",
+        "retail": "### GET /health\n",
+    })
+    cur = _snap({
+        "backend": ("### GET /health\n"
+                    "### POST /api/credit-cards\n"
+                    "### GET /cashback/{client_id}\n"),
+        "cib": "### GET /health\n### POST /deposit/open\n",
+        "retail": "### GET /health\n### POST /api/credit-card-payment\n",
+    })
+    v = generic_fallback(cur, base)
+    assert v["backend_persistence"] == 2
+    assert v["feature_breadth"] == 2
+
+
+def test_generic_fallback_detects_ui_polish_from_retail_html_change():
+    base = _snap({b: "### GET /health\n" for b in ("backend", "cib", "retail")},
+                 html="<button>Переводы</button>")
+    cur = _snap({b: "### GET /health\n" for b in ("backend", "cib", "retail")},
+                html="<section class='card beautiful'>Карта с кешбэком</section>")
+    v = generic_fallback(cur, base)
+    assert v["ui_polish"] == 1
+
+
 # --- judge_round / fallback path ---------------------------------------------
 
 def test_judge_fallback_without_llm(monkeypatch):
@@ -93,7 +120,8 @@ def test_judge_fallback_without_llm(monkeypatch):
     cur = _snap({b: "old" for b in ("backend", "cib", "retail")})
     v = asyncio.run(judge_round({"team_a": cur}, {"team_a": base}))["team_a"]
     keys = {"new_functionality", "client_value", "completeness",
-            "cross_block", "convenience"}
+            "cross_block", "backend_persistence", "feature_breadth",
+            "ui_polish", "convenience"}
     assert keys <= set(v)
     assert v["judge"] == "fallback"
     assert v["feature_state"] == "absent"
@@ -127,7 +155,9 @@ def test_judge_round_without_baselines_does_not_crash(monkeypatch):
 def test_judge_team_uses_llm_axes(monkeypatch):
     async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
         return ('{"new_functionality": 2, "client_value": 2, "completeness": 2, '
-                '"cross_block": 2, "convenience": 8, "reason": "удобно"}')
+                '"cross_block": 2, "backend_persistence": 2, '
+                '"feature_breadth": 2, "ui_polish": 2, '
+                '"convenience": 8, "reason": "удобно"}')
 
     monkeypatch.setattr("src.judge.ask_llm", fake_ask)
     monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
@@ -136,6 +166,9 @@ def test_judge_team_uses_llm_axes(monkeypatch):
     v = asyncio.run(judge_team(cur, base))
     assert v["judge"] == "llm"
     assert v["new_functionality"] == 2
+    assert v["backend_persistence"] == 2
+    assert v["feature_breadth"] == 2
+    assert v["ui_polish"] == 2
     assert v["convenience"] == 8
     assert v["feature_state"] == "working"   # completeness=2 + изменения
 
@@ -143,7 +176,9 @@ def test_judge_team_uses_llm_axes(monkeypatch):
 def test_judge_team_clamps_out_of_range_axes(monkeypatch):
     async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
         return ('{"new_functionality": 9, "client_value": -3, "completeness": 1, '
-                '"cross_block": 5, "convenience": 99, "reason": "x"}')
+                '"cross_block": 5, "backend_persistence": 9, '
+                '"feature_breadth": -3, "ui_polish": 99, '
+                '"convenience": 99, "reason": "x"}')
 
     monkeypatch.setattr("src.judge.ask_llm", fake_ask)
     monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
@@ -153,6 +188,9 @@ def test_judge_team_clamps_out_of_range_axes(monkeypatch):
     assert v["new_functionality"] == 2
     assert v["client_value"] == 0
     assert v["cross_block"] == 2
+    assert v["backend_persistence"] == 2
+    assert v["feature_breadth"] == 0
+    assert v["ui_polish"] == 2
     assert v["convenience"] == 10
 
 
@@ -192,6 +230,15 @@ def test_active_task_is_hint_not_switch():
     assert "ПРИМЕР" in with_task
     assert "кредитная фича" in with_task
     assert "ПРИМЕР" not in without_task
+
+
+def test_prompt_requests_structural_axes():
+    base = _baseline("old")
+    cur = _snap({"backend": "NEW", "cib": "old", "retail": "old"})
+    prompt = _build_team_prompt(cur, base, cur["regression"], "")
+    assert "backend_persistence" in prompt
+    assert "feature_breadth" in prompt
+    assert "ui_polish" in prompt
 
 
 # --- секция работоспособности новой фичи (feature_probe) ---------------------
