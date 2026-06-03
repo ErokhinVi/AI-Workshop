@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src import db as dbmod
 from src import feature_probe as fpmod
+from src.baseline import baseline_snapshot
 from src.judge import feature_family, judge_round
 from src.probe import assess_regression, probe_team
 from src.scoring import (
@@ -313,6 +314,13 @@ async def _load_state() -> None:
     for team in TEAMS:
         if (await dbmod.get_meta(pool, f"frozen_{team}")) == "true":
             _state[team]["frozen"] = True
+    # Нулевая точка для оценки diff'а — детерминированный шаблон (см. src/baseline),
+    # а НЕ probe-снимок: тот жил только в памяти и терялся при каждом редеплое, и
+    # судья съезжал на пустой baseline (отсюда дёрганье табло). Встроенный шаблон
+    # гарантирует корректный diff «что команда добавила поверх шаблона» при любом
+    # старте процесса, без сети и состояния.
+    for team in TEAMS:
+        _baselines[team] = baseline_snapshot(team)
     # Защита холодного старта Render: простой считаем с момента, как симулятор
     # снова поднялся, а не задним числом за весь сон сервиса.
     now = _now()
@@ -364,21 +372,25 @@ async def _emit_event(team: str, commit: str, delta: float, scores: list[int],
 
 
 async def _baseline() -> None:
-    """Замерить стартовое состояние всех команд по нетронутым блокам.
+    """Зафиксировать нулевую точку (шаблон) и стартовое состояние всех команд.
 
-    Снимок каждой команды сохраняется как baseline (нулевая точка) в `_baselines`
-    — его diff потом показывает судье, что команда добавила. На самой нулевой
-    точке фича отсутствует (diff с самим собой пуст), ценность задаёт только
-    регрессия базовых функций, если она уже есть.
+    Нулевая точка — детерминированный шаблон (`baseline.baseline_snapshot`), от
+    которого форкнулись все команды, а НЕ probe-снимок текущих банков: так diff
+    «что команда добавила поверх шаблона» считается одинаково при любом старте
+    процесса и переживает редеплой. Текущее состояние всё равно снимаем — чтобы
+    зафиксировать стартовую точку каждой команды относительно шаблона
+    (`baseline_score`, `last_value`): выкаченное ДО старта воркшопа в дельты потом
+    не засчитывается (delta телескопируется от стартовой ценности).
     """
     now = _now()
+    _baselines.clear()
+    for team in TEAMS:
+        _baselines[team] = baseline_snapshot(team)
     snaps = dict(zip(
         TEAMS,
         await asyncio.gather(*(
             probe_team(t, BANK_URLS[t], BANK_REPOS.get(t)) for t in TEAMS)),
     ))
-    _baselines.clear()
-    _baselines.update(snaps)
     verdict = await judge_round(snaps, _baselines, active_task=ACTIVE_TASK)
     for team in TEAMS:
         snap = snaps[team]
@@ -635,7 +647,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.4.1-releasecount", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.5.0-fixedbaseline", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
