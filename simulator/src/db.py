@@ -134,6 +134,30 @@ async def recent_events(pool: asyncpg.Pool, limit: int = 30) -> list[dict]:
     ]
 
 
+async def event_counts(pool: asyncpg.Pool) -> dict[str, dict[str, int]]:
+    """Агрегаты событий по всей истории, не только по последним событиям ленты."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT team,
+                      COUNT(DISTINCT commit) FILTER (
+                          WHERE COALESCE(judge, '') NOT IN (
+                              'stagnation', 'unreachable', 'admin-set-base'
+                          )
+                          AND NULLIF(commit, '') IS NOT NULL
+                      ) AS releases,
+                      COUNT(*) FILTER (WHERE judge = 'stagnation') AS stagnations
+               FROM sim_events
+               GROUP BY team"""
+        )
+    return {
+        r["team"]: {
+            "releases": int(r["releases"] or 0),
+            "stagnations": int(r["stagnations"] or 0),
+        }
+        for r in rows
+    }
+
+
 async def reset(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE sim_events")

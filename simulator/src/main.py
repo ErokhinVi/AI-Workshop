@@ -104,6 +104,7 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 POLL_INTERVAL_S = float(os.environ.get("POLL_INTERVAL_S", "30"))
 # Событие застоя в ленту — не на каждый тик, а когда накопилось столько утечки.
 DECAY_EVENT_THRESHOLD = float(os.environ.get("DECAY_EVENT_THRESHOLD", "25"))
+_NON_RELEASE_JUDGES = {"stagnation", "unreachable", "admin-set-base"}
 
 
 def _now() -> datetime:
@@ -206,6 +207,29 @@ def _rubric_of(verdict: dict) -> list[int]:
         int(verdict.get("feature_breadth", 0)),
         int(verdict.get("ui_polish", 0)),
     ]
+
+
+def _event_counts_from(events: list[dict]) -> dict[str, dict[str, int]]:
+    """Посчитать релизы/застои по тем же правилам, что и SQL-агрегат."""
+    release_commits: dict[str, set[str]] = {team: set() for team in TEAMS}
+    counts: dict[str, dict[str, int]] = {
+        team: {"releases": 0, "stagnations": 0} for team in TEAMS
+    }
+    for event in events:
+        team = event.get("team")
+        if team not in counts:
+            continue
+        judge = str(event.get("judge") or "")
+        if judge == "stagnation":
+            counts[team]["stagnations"] += 1
+        if judge in _NON_RELEASE_JUDGES:
+            continue
+        commit = str(event.get("commit") or "").strip()
+        if commit:
+            release_commits[team].add(commit)
+    for team, commits in release_commits.items():
+        counts[team]["releases"] = len(commits)
+    return counts
 
 
 # Порог «значимого» сдвига ценности в клиентах — ниже считаем коммит
@@ -611,7 +635,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.4.0-normaljudge", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.4.1-releasecount", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
@@ -628,11 +652,11 @@ async def health() -> dict:
 async def state() -> dict:
     now = _now()
     teams_out: dict[str, dict] = {}
+    pool = _pool()
+    counts = (await dbmod.event_counts(pool)
+              if pool is not None else _event_counts_from(_events))
     for t, s in _state.items():
-        team_events = [e for e in _events if e["team"] == t]
-        releases = [e for e in team_events
-                    if e["judge"] not in ("stagnation", "unreachable")]
-        stagnations = [e for e in team_events if e["judge"] == "stagnation"]
+        event_counts = counts.get(t, {"releases": 0, "stagnations": 0})
         last_commit_ts = s["last_commit_ts"]
         idle_s = ((now - last_commit_ts).total_seconds()
                   if last_commit_ts else None)
@@ -644,8 +668,8 @@ async def state() -> dict:
             "baseline_score": s["baseline_score"],
             "rubric_max": RUBRIC_MAX,
             "feature_state": s["feature_state"],
-            "releases": len(releases),
-            "stagnations": len(stagnations),
+            "releases": event_counts["releases"],
+            "stagnations": event_counts["stagnations"],
             "idle_seconds": int(idle_s) if idle_s is not None else None,
             "last_commit_ts": (last_commit_ts.isoformat()
                                if last_commit_ts else None),
@@ -760,6 +784,6 @@ async def admin_set_base(team: str, base: float | None = None,
         reason = ("Клиенты высоко оценили новые возможности банка — за последнее "
                   "время клиентская база команды заметно выросла.")
         await _emit_event(team, st.get("last_commit") or "", new - old,
-                          [2, 2, 2, 2, 2, 2, 2], reason, "llm")
+                          [2, 2, 2, 2, 2, 2, 2], reason, "admin-set-base")
     return {"status": "ok", "team": team, "client_base": new,
             "frozen": st["frozen"]}

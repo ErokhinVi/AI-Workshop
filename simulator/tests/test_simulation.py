@@ -280,6 +280,25 @@ def test_stagnation_emits_coalesced_event():
     assert stagnation[0]["delta"] < 0
 
 
+def test_state_counts_distinct_releases_not_recent_event_noise():
+    now = datetime.now(timezone.utc)
+    _reset(now)
+    m.app.state.pool = None
+    m._events.extend([
+        {"team": "team_a", "commit": "c1|c1|c1", "judge": "llm"},
+        {"team": "team_a", "commit": "c1|c1|c1", "judge": "llm"},
+        {"team": "team_a", "commit": "c2|c2|c2", "judge": "llm-guarded"},
+        {"team": "team_a", "commit": "c3|c3|c3", "judge": "admin-set-base"},
+        {"team": "team_a", "commit": "c4|c4|c4", "judge": "unreachable"},
+        {"team": "team_a", "commit": "None|None|None", "judge": "stagnation"},
+        {"team": "team_b", "commit": "b1|b1|b1", "judge": "fallback"},
+    ])
+    out = asyncio.run(m.state())
+    assert out["teams"]["team_a"]["releases"] == 2
+    assert out["teams"]["team_a"]["stagnations"] == 1
+    assert out["teams"]["team_b"]["releases"] == 1
+
+
 def test_cold_start_guard_no_retroactive_dump():
     # _load_state после сна Render ставит last_eval_ts=now: 6 ч простоя не
     # должны обернуться разовым обвалом — утекает только наблюдаемый срез
