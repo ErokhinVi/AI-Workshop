@@ -200,6 +200,14 @@ def _feature_live_for_scoring(fp_probe: dict | None) -> bool | None:
 
 def _convenience_bonus(verdict: dict) -> int:
     """Удобство 0..10 -> отдельный бонус 0..6 к сводной рубрике."""
+    if verdict.get("feature_state") == "absent":
+        return 0
+    scored_keys = (
+        "new_functionality", "client_value", "completeness", "cross_block",
+        "backend_persistence", "feature_breadth", "ui_polish",
+    )
+    if not any(int(verdict.get(key, 0)) > 0 for key in scored_keys):
+        return 0
     value = verdict.get("convenience", 5)
     if isinstance(value, bool):
         value = 5
@@ -661,7 +669,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.5.1-convbonus", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.5.2-convbonus", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
