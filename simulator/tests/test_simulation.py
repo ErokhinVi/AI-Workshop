@@ -154,6 +154,26 @@ def test_dead_feature_404_gives_no_client_gain(monkeypatch):
     assert "не работает" in res["reason"]
 
 
+def test_dead_probe_does_not_suppress_multi_feature_release(monkeypatch):
+    # feature_probe дёрнул одну ручку и получил 404, но в diff есть несколько
+    # независимых фич. Такой smoke-fail не должен обнулять ценность всего релиза.
+    _reset(datetime.now(timezone.utc))
+    _patch_judge(monkeypatch, "working", 9)
+    res = _run_commit_with_probe({
+        "feature_live": False,
+        "status": 404,
+        "primary": {"method": "POST", "path": "/api/brokerage/orders"},
+        "new_endpoints": [
+            {"block": "retail", "method": "POST", "path": "/api/brokerage/orders"},
+            {"block": "retail", "method": "POST", "path": "/api/deposit/open"},
+            {"block": "retail", "method": "POST", "path": "/api/loan/disburse"},
+            {"block": "retail", "method": "POST", "path": "/api/payroll/run"},
+        ],
+    })
+    assert res["delta"] > 0
+    assert "не работает" not in res["reason"]
+
+
 def test_dead_feature_5xx_loses_clients(monkeypatch):
     # ручка выкачена, но падает (5xx) на глазах клиента → база уходит в минус
     _reset(datetime.now(timezone.utc))

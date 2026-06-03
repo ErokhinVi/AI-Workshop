@@ -20,9 +20,9 @@
 блоков с baseline — нет изменений → `absent`, есть изменения → минимум `partial`;
 `working` подтверждает LLM по completeness. Если LLM недоступна — раунд считается
 скриптовым `generic_fallback` (оси из diff контрактов), симулятор не стопорится.
-Если LLM валидно отвечает «всё по нулям», но diff контрактов/UI явно ненулевой,
+Если LLM валидно отвечает слишком скупо, но diff контрактов/UI явно ненулевой,
 детерминированная оценка используется как нижняя граница, чтобы судья не стирал
-реально добавленные возможности.
+реально добавленные возможности и не занижал очевидную структурную глубину.
 
 Источник истины о том, что команда добавила — тексты CONTRACT.md и retail HTML
 из probe-снимка. Они подаются модели как ДАННЫЕ для оценки, не как инструкции.
@@ -73,6 +73,39 @@ def _new_endpoints(snap: dict, baseline_snap: dict) -> dict[str, set[tuple[str, 
             for name in BLOCKS}
 
 
+def feature_family(path: str) -> str:
+    """Каноническая бизнес-семья ручки для оценки breadth."""
+    low = (path or "").lower()
+    if "brokerage" in low:
+        return "brokerage"
+    if "payroll" in low:
+        return "payroll"
+    if "corporate" in low or "payment-auth" in low:
+        return "corporate"
+    if "deposit" in low:
+        return "deposit"
+    if "loan" in low:
+        return "loan"
+    if "credit-card" in low or "credit-cards" in low or "credit-decision" in low \
+            or "credit-apply" in low:
+        return "credit_card"
+    if "cashback" in low:
+        return "cashback"
+    if "transfer" in low:
+        return "transfer"
+    return _topic_of(path)
+
+
+def _feature_families(snap: dict, baseline_snap: dict) -> set[str]:
+    eps = _new_endpoints(snap, baseline_snap)
+    return {feature_family(path) for by_block in eps.values() for _, path in by_block}
+
+
+def _has_observable_diff(snap: dict, baseline_snap: dict) -> bool:
+    eps = _new_endpoints(snap, baseline_snap)
+    return any(eps.values()) or _retail_html_changed(snap, baseline_snap)
+
+
 def _endpoint_diff_view(snap: dict, baseline_snap: dict) -> dict[str, list[str]]:
     """Компактный явный diff новых ручек/UI для промпта LLM."""
     diff: dict[str, list[str]] = {
@@ -80,6 +113,9 @@ def _endpoint_diff_view(snap: dict, baseline_snap: dict) -> dict[str, list[str]]
         for name, endpoints in _new_endpoints(snap, baseline_snap).items()
         if endpoints
     }
+    families = sorted(_feature_families(snap, baseline_snap))
+    if families:
+        diff["feature_families"] = families
     if _retail_html_changed(snap, baseline_snap):
         diff["retail_ui"] = ["HTML главного экрана retail изменился"]
     return diff
@@ -113,11 +149,10 @@ def _default_backend_persistence(snap: dict, baseline_snap: dict) -> int:
 
 def _default_feature_breadth(snap: dict, baseline_snap: dict) -> int:
     """Страховка оси feature_breadth из новых endpoint-тематик."""
-    eps = _new_endpoints(snap, baseline_snap)
-    topics = {_topic_of(path) for by_block in eps.values() for _, path in by_block}
-    if not topics:
+    families = _feature_families(snap, baseline_snap)
+    if not families:
         return 0
-    return min(2, len(topics))
+    return min(2, len(families))
 
 
 def _default_ui_polish(snap: dict, baseline_snap: dict) -> int:
@@ -313,7 +348,7 @@ _LIVENESS_VERDICT = {
 
 
 def _liveness_section(snap: dict) -> str:
-    """Детерминированный факт: дёрнули ли новую ручку и работает ли она."""
+    """Детерминированный факт: дёрнули ли одну новую ручку и работает ли она."""
     fp = snap.get("feature_probe")
     if not fp or not fp.get("primary"):
         return ""
@@ -325,19 +360,18 @@ def _liveness_section(snap: dict) -> str:
         "работает": _LIVENESS_VERDICT.get(fp.get("feature_live")),
     }
     return (
-        "Факт проверки работоспособности НОВОЙ фичи (детерминированно, реальным "
-        "вызовом её ручки на сервисе команды):\n"
+        "Smoke-проверка ОДНОЙ выбранной новой ручки (детерминированно, реальным "
+        "вызовом на сервисе команды; это НЕ полный e2e-аудит всех новых "
+        "возможностей):\n"
         f"{json.dumps(facts, ensure_ascii=False)}\n"
-        "Если работает = НЕТ — это НЕ ценность для клиента: ставь completeness и "
-        "client_value низко (0–1), а в reason простыми словами скажи, что "
-        "возможность показали (например, появилась вкладка), но воспользоваться "
-        "ей пока нельзя.\n"
+        "Если работает = НЕТ — занижай именно ту возможность, к которой относится "
+        "проверенная ручка. НЕ распространяй этот факт автоматически на другие "
+        "независимые фичи, если явный diff ниже показывает несколько разных "
+        "семейств возможностей.\n"
         "Если работает = ДА — это доказано ДЕЛОМ (мы реально вызвали ручку и "
-        "получили рабочий ответ, не заглушку): фича функционально доведена. НЕ "
-        "занижай её по придиркам к тексту контракта — completeness и client_value "
-        "должны отражать, что возможность РЕАЛЬНО работает (completeness = 2, "
-        "client_value ≥ 1). Скупой текст контракта не повод считать рабочую фичу "
-        "недоделанной.\n\n"
+        "получили рабочий ответ или строгую бизнес-валидацию): это сильный "
+        "положительный сигнал. Скупой текст контракта не повод считать такую "
+        "возможность недоделанной.\n\n"
     )
 
 
@@ -397,13 +431,16 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     их детерминированный дефолт считается по РЕАЛЬНО появившимся ручкам, а не по
     прозе.
 
-    Отдельная страховка: если LLM вернул валидный all-zero вердикт при видимом
-    diff контрактов/UI, используем `generic_fallback` как нижнюю границу. Это не
-    применяется к доказанно мёртвой фиче (`feature_live is False`) и не переводит
-    непроверенную фичу (`None`) в `working`.
+    Отдельная страховка: если LLM вернул валидный, но слишком скупо заниженный
+    вердикт при видимом diff контрактов/UI, используем deterministic floor как
+    нижнюю границу. Одна доказанно мёртвая smoke-ручка (`feature_live is False`)
+    не должна топить весь multi-feature релиз: если diff показывает несколько
+    независимых семейств возможностей, остальные оси всё равно считаются.
     """
     feature_live = (snap.get("feature_probe") or {}).get("feature_live")
     fallback = generic_fallback(snap, baseline_snap)
+    observable = _has_observable_diff(snap, baseline_snap)
+    multi_feature = _default_feature_breadth(snap, baseline_snap) >= 2
     new_func = _axis(block.get("new_functionality"))
     client_value = _axis(block.get("client_value"))
     completeness = _axis(block.get("completeness"))
@@ -420,16 +457,14 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     convenience = _coerce_convenience(block.get("convenience"))
     reason = str(block.get("reason", "")).strip()
     tag = "llm-degraded" if last_call_degraded() else "llm"
+    guarded = False
 
-    llm_erased_visible_diff = (
-        feature_live is not False
-        and fallback["feature_state"] != "absent"
-        and all(axis == 0 for axis in (
+    allow_floor = observable and (feature_live is not False or multi_feature)
+    if allow_floor:
+        old_axes = (
             new_func, client_value, completeness, cross_block,
-            backend_persistence, feature_breadth, ui_polish,
-        ))
-    )
-    if llm_erased_visible_diff:
+            backend_persistence, feature_breadth, ui_polish, convenience,
+        )
         new_func = max(new_func, fallback["new_functionality"])
         client_value = max(client_value, fallback["client_value"])
         completeness = max(completeness, fallback["completeness"])
@@ -438,11 +473,16 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
         feature_breadth = max(feature_breadth, fallback["feature_breadth"])
         ui_polish = max(ui_polish, fallback["ui_polish"])
         convenience = max(convenience, fallback["convenience"])
+        guarded = old_axes != (
+            new_func, client_value, completeness, cross_block,
+            backend_persistence, feature_breadth, ui_polish, convenience,
+        )
         if _should_replace_reason(reason):
             reason = fallback["reason"]
-        tag = f"{tag}-guarded"
 
     if feature_live is True:
+        old_axes = (new_func, client_value, completeness,
+                    backend_persistence, feature_breadth)
         completeness = max(completeness, COMPLETENESS_WORKING)
         client_value = max(client_value, 1)
         new_func = max(new_func, 1)
@@ -452,6 +492,12 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
                                   _default_backend_persistence(snap, baseline_snap))
         feature_breadth = max(feature_breadth,
                               _default_feature_breadth(snap, baseline_snap))
+        guarded = guarded or old_axes != (
+            new_func, client_value, completeness,
+            backend_persistence, feature_breadth,
+        )
+    if guarded:
+        tag = f"{tag}-guarded"
     fs = classify_feature(snap, baseline_snap, completeness=completeness)
     return {
         "new_functionality": new_func,

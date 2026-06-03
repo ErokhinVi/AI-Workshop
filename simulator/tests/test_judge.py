@@ -231,6 +231,82 @@ def test_judge_team_unverified_liveness_false_zero_gets_partial_guard(monkeypatc
     assert v["reason"] == "Команда добавила в банк новую возможность для клиентов."
 
 
+def test_judge_team_broad_diff_floors_stingy_nonzero_llm(monkeypatch):
+    # Реальный сценарий воркшопа: LLM вернул не all-zero, но занизил очевидную
+    # ширину/ценность multi-feature релиза. Baseline diff должен дать нижний пол.
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        return ('{"new_functionality": 1, "client_value": 0, "completeness": 0, '
+                '"cross_block": 1, "backend_persistence": 0, '
+                '"feature_breadth": 0, "ui_polish": 1, '
+                '"convenience": 4, "reason": "клиентам стало неудобно"}')
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    base = _baseline("### GET /health\n")
+    cur = _snap({
+        "backend": (
+            "### GET /health\n"
+            "### POST /deposits\n"
+            "### POST /loans\n"
+            "### POST /payroll/run\n"
+            "### POST /corporate/payments\n"
+        ),
+        "cib": (
+            "### GET /health\n"
+            "### POST /deposit/terms\n"
+            "### POST /loan/decision\n"
+            "### POST /payroll/validate\n"
+        ),
+        "retail": (
+            "### GET /health\n"
+            "### POST /api/deposit/open\n"
+            "### POST /api/loan/disburse\n"
+            "### POST /api/payroll/run\n"
+            "### POST /api/corporate/payments\n"
+        ),
+    }, html="<main><section class='product-grid'>Вклады, кредиты, зарплаты</section></main>")
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/brokerage/orders"},
+                            "status": 422, "feature_live": None, "tier": 2}
+    v = asyncio.run(judge_team(cur, base))
+    assert v["judge"] == "llm-guarded"
+    assert v["new_functionality"] >= 1
+    assert v["client_value"] >= 1
+    assert v["completeness"] >= 1
+    assert v["cross_block"] == 2
+    assert v["backend_persistence"] == 2
+    assert v["feature_breadth"] == 2
+    assert v["ui_polish"] == 1
+    assert v["feature_state"] == "partial"
+
+
+def test_judge_team_dead_probe_does_not_sink_multi_feature_diff(monkeypatch):
+    # Одна smoke-ручка может быть мёртвой, но если diff показывает несколько
+    # независимых фич, судья не должен превращать весь банк в ноль.
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        return ('{"new_functionality": 0, "client_value": 0, "completeness": 0, '
+                '"cross_block": 0, "backend_persistence": 0, '
+                '"feature_breadth": 0, "ui_polish": 0, '
+                '"convenience": 5, "reason": "клиент не может воспользоваться"}')
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    base = _baseline("### GET /health\n")
+    cur = _snap({
+        "backend": "### GET /health\n### POST /deposits\n### POST /loans\n",
+        "cib": "### GET /health\n### POST /deposit/terms\n### POST /loan/decision\n",
+        "retail": "### GET /health\n### POST /api/deposit/open\n### POST /api/loan/disburse\n",
+    })
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/bad"},
+                            "status": 404, "feature_live": False, "tier": 2}
+    v = asyncio.run(judge_team(cur, base))
+    assert v["judge"] == "llm-guarded"
+    assert v["new_functionality"] == 1
+    assert v["client_value"] == 1
+    assert v["completeness"] == 1
+    assert v["feature_breadth"] == 2
+    assert v["backend_persistence"] == 2
+
+
 def test_judge_team_dead_liveness_does_not_get_false_zero_guard(monkeypatch):
     # feature_live=False — доказанный факт, что фича не работает. Guard не должен
     # начислять ценность только за видимый diff.
@@ -338,6 +414,8 @@ def test_prompt_includes_explicit_new_endpoint_diff():
     assert "Явный diff новых ручек/UI" in prompt
     assert "POST /deposits" in prompt
     assert "POST /api/deposit/open" in prompt
+    assert "feature_families" in prompt
+    assert "deposit" in prompt
     assert "retail_ui" in prompt
 
 
