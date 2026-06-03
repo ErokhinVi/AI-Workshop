@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src import db as dbmod
 from src import feature_probe as fpmod
-from src.judge import judge_round
+from src.judge import feature_family, judge_round
 from src.probe import assess_regression, probe_team
 from src.scoring import (
     B0,
@@ -173,6 +173,26 @@ def _regression_penalty(reg: dict) -> float:
     broken = int(bool(reg.get("transfers_broken"))) \
         + int(bool(reg.get("serves_client_broken")))
     return outage_cost(reg.get("unreachable_blocks", 0), broken)
+
+
+def _probe_feature_families(fp_probe: dict | None) -> set[str]:
+    """Сколько независимых семейств фич увидел feature_probe в diff контрактов."""
+    endpoints = (fp_probe or {}).get("new_endpoints") or []
+    families: set[str] = set()
+    for endpoint in endpoints:
+        if isinstance(endpoint, dict):
+            path = str(endpoint.get("path", "") or "")
+            if path:
+                families.add(feature_family(path))
+    return families
+
+
+def _feature_live_for_scoring(fp_probe: dict | None) -> bool | None:
+    """Smoke-check одной ручки не должен обнулять весь multi-feature релиз."""
+    raw = (fp_probe or {}).get("feature_live")
+    if raw is False and len(_probe_feature_families(fp_probe)) >= 2:
+        return None
+    return raw
 
 
 def _rubric_of(verdict: dict) -> list[int]:
@@ -456,7 +476,7 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
                 # работает (витрина), оси не дают ценности, а 5xx-витрина ещё и
                 # штрафуется. None (проверить не смогли) — поведение как сейчас.
                 fp_probe = snap.get("feature_probe") or {}
-                feature_live = fp_probe.get("feature_live")
+                feature_live = _feature_live_for_scoring(fp_probe)
                 dead_pen = (dead_feature_cost(fp_probe.get("status"))
                             if feature_live is False else 0.0)
                 value_now = feature_value(
@@ -581,7 +601,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.3.0-livefloor2", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.4.0-normaljudge", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
