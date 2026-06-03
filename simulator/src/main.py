@@ -581,7 +581,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.2.0-livefloor", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.3.0-livefloor2", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():

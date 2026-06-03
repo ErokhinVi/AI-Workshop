@@ -287,7 +287,17 @@ async def assess_feature_liveness(client, snap: dict,
 
     status2, body2 = await _http_call(client, primary["method"], url,
                                       body=body_obj)
-    # Реальный вызов: 2xx-успех → работает; 404/5xx или 2xx-заглушка → мертва;
-    # прочее (опять валидация) → неубедительно (None).
+    # Реальный вызов с осмысленным телом: 2xx-успех → работает; 404/5xx или
+    # 2xx-заглушка → мертва. Если ручка СНОВА отвечает структурной валидацией
+    # (400/422, не 404, не 5xx) — мы уже дали ей реальный синтезированный ввод, а
+    # она его разбирает и валидирует: значит ручка РЕАЛИЗОВАНА и обрабатывает
+    # запросы (строгий ввод мы могли не угадать), а не «маршрута нет»/«падает».
+    # Для крединга рабочей фичи этого достаточно — считаем живой. Это снимает
+    # зависимость вердикта от того, идеально ли LLM собрал тело: иначе строгие, но
+    # рабочие ручки бесконечно болтались бы в None и пол по живости не включался.
+    verdict2 = _verdict(status2, body2)
+    if verdict2 is None and status2 is not None and 400 <= status2 < 500 \
+            and status2 != 404:
+        verdict2 = True
     return _result(endpoints, primary, status=status2, tier=2,
-                   feature_live=_verdict(status2, body2), body=body2)
+                   feature_live=verdict2, body=body2)

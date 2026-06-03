@@ -199,6 +199,30 @@ def test_assess_fake_200_pending_integration_is_dead():
     assert res["tier"] == 2
 
 
+def test_assess_strict_endpoint_validation_at_tier2_is_live():
+    # Строгая, но РАБОЧАЯ ручка: Tier 1 пустым телом → 400 (нужен ввод), Tier 2 с
+    # синтезированным телом, которое мы не угадали идеально → снова 400-валидация
+    # (не 404, не 5xx). Ручка реально разбирает и валидирует запрос → реализована →
+    # live=True. Снимает зависимость вердикта от идеальности LLM-синтеза.
+    async def imperfect_synth(snap, primary):
+        return {"customer_id": "c-01394", "ticker": "SBER", "quantity": 1,
+                "direction": "BUY"}   # верхний регистр — банк строго требует 'buy'
+    res = _assess(_Client(_Resp(400, '{"detail":"нужен клиент"}'),
+                          _Resp(400, '{"detail":"direction должен быть buy|sell"}')),
+                  synth=imperfect_synth)
+    assert res["feature_live"] is True
+    assert res["tier"] == 2
+
+
+def test_assess_tier2_404_still_dead():
+    # Но если Tier 2 даёт 404 — маршрута нет, фича мертва (не путать с валидацией).
+    async def good_synth(snap, primary):
+        return {"client_id": "c-01394"}
+    res = _assess(_Client(_Resp(400), _Resp(404)), synth=good_synth)
+    assert res["feature_live"] is False
+    assert res["tier"] == 2
+
+
 def test_assess_our_fault_synth_crash_degrades_to_none():
     # Tier 1 = 422 (неубедительно), LLM-синтез упал по нашей вине → None, не False
     async def boom_synth(snap, primary):
