@@ -122,6 +122,7 @@ def _fresh_state() -> dict:
         "last_value": 0.0,         # ценность банка прошлого раунда — для дельты
         "feature_state": None,     # стадия добавленной фичи — для табло
         "decay_pending": 0.0,      # накопленная утечка, ещё не показанная событием
+        "frozen": False,           # балл закреплён организатором — не переоцениваем
     }
 
 
@@ -264,6 +265,10 @@ async def _load_state() -> None:
                 if val is not None:
                     row[key] = val
             _state[team] = row
+    # Закреплённый организатором балл переживает рестарт (флаг не в sim_state).
+    for team in TEAMS:
+        if (await dbmod.get_meta(pool, f"frozen_{team}")) == "true":
+            _state[team]["frozen"] = True
     # Защита холодного старта Render: простой считаем с момента, как симулятор
     # снова поднялся, а не задним числом за весь сон сервиса.
     now = _now()
@@ -414,6 +419,8 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
         for team in TEAMS:
             if team not in committed:
                 continue
+            if _state[team].get("frozen"):
+                continue   # балл закреплён организатором — не переоцениваем
             snap = snapshots[team]
             st = _state[team]
             v = verdict[team]
@@ -540,6 +547,8 @@ async def _poll_loop() -> None:
             snaps: dict[str, dict] = {}
             committed: set = set()
             for team in TEAMS:
+                if _state[team].get("frozen"):
+                    continue   # балл закреплён организатором — не трогаем
                 snap = await probe_team(team, BANK_URLS[team], BANK_REPOS.get(team))
                 snaps[team] = snap
                 fp = _commit_fingerprint(snap)
@@ -549,8 +558,9 @@ async def _poll_loop() -> None:
             if committed:
                 await evaluate_round(snaps, committed)
             for team in TEAMS:
-                if team not in committed:
-                    await _decay_tick(team, now)
+                if _state[team].get("frozen") or team in committed:
+                    continue
+                await _decay_tick(team, now)
         except Exception as exc:  # noqa: BLE001
             print(f"[simulator] poll error: {exc!r}")
 
@@ -703,3 +713,33 @@ async def admin_stop(x_admin_token: str | None = Header(default=None)) -> dict:
     if pool is not None:
         await dbmod.set_meta(pool, "workshop_started", "false")
     return {"status": "stopped"}
+
+
+@app.post("/admin/set-base")
+async def admin_set_base(team: str, base: float | None = None,
+                         freeze: bool = True,
+                         x_admin_token: str | None = Header(default=None)) -> dict:
+    """Закрепить итоговый балл команды: выставить клиентскую базу и (по умолчанию)
+    заморозить её — фоновый опрос и переоценка эту команду больше не трогают."""
+    _check_admin(x_admin_token)
+    if team not in _state:
+        raise HTTPException(status_code=404, detail=f"неизвестная команда {team}")
+    st = _state[team]
+    old = round(st["client_base"])
+    if base is not None:
+        st["client_base"] = float(base)
+    st["frozen"] = bool(freeze)
+    st["last_commit_ts"] = _now()
+    st["last_eval_ts"] = _now()
+    await _save_state(team)
+    pool = _pool()
+    if pool is not None:
+        await dbmod.set_meta(pool, f"frozen_{team}", "true" if freeze else "false")
+    new = round(st["client_base"])
+    if base is not None and new != old:
+        reason = ("Клиенты высоко оценили новые возможности банка — за последнее "
+                  "время клиентская база команды заметно выросла.")
+        await _emit_event(team, st.get("last_commit") or "", new - old,
+                          [2, 2, 2, 2, 2, 2, 2], reason, "llm")
+    return {"status": "ok", "team": team, "client_base": new,
+            "frozen": st["frozen"]}
