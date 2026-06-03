@@ -316,7 +316,13 @@ def _liveness_section(snap: dict) -> str:
         "Если работает = НЕТ — это НЕ ценность для клиента: ставь completeness и "
         "client_value низко (0–1), а в reason простыми словами скажи, что "
         "возможность показали (например, появилась вкладка), но воспользоваться "
-        "ей пока нельзя.\n\n"
+        "ей пока нельзя.\n"
+        "Если работает = ДА — это доказано ДЕЛОМ (мы реально вызвали ручку и "
+        "получили рабочий ответ, не заглушку): фича функционально доведена. НЕ "
+        "занижай её по придиркам к тексту контракта — completeness и client_value "
+        "должны отражать, что возможность РЕАЛЬНО работает (completeness = 2, "
+        "client_value ≥ 1). Скупой текст контракта не повод считать рабочую фичу "
+        "недоделанной.\n\n"
     )
 
 
@@ -352,16 +358,31 @@ def _build_team_prompt(snap: dict, baseline_snap: dict, regression: dict,
 
 
 def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
-    """Собрать вердикт из распарсенного LLM-ответа + детерминированный fs."""
+    """Собрать вердикт из распарсенного LLM-ответа + детерминированный fs.
+
+    Симметрия к мёртвой фиче: если liveness РЕАЛЬНЫМ вызовом подтвердил, что новая
+    ручка работает (`feature_live is True` — 2xx, не заглушка), фича функционально
+    доведена. Не позволяем скупому по тексту контракта LLM занизить её ниже
+    «работает»: пол на completeness (→ working), client_value и new_functionality.
+    Только при доказанном `True`; `None` (не смогли проверить) и `False` (мертва)
+    пол не поднимают — там поведение прежнее.
+    """
+    new_func = _axis(block.get("new_functionality"))
+    client_value = _axis(block.get("client_value"))
     completeness = _axis(block.get("completeness"))
+    feature_live = (snap.get("feature_probe") or {}).get("feature_live")
+    if feature_live is True:
+        completeness = max(completeness, COMPLETENESS_WORKING)
+        client_value = max(client_value, 1)
+        new_func = max(new_func, 1)
     fs = classify_feature(snap, baseline_snap, completeness=completeness)
     tag = "llm-degraded" if last_call_degraded() else "llm"
     backend_raw = block.get("backend_persistence")
     breadth_raw = block.get("feature_breadth")
     ui_raw = block.get("ui_polish")
     return {
-        "new_functionality": _axis(block.get("new_functionality")),
-        "client_value": _axis(block.get("client_value")),
+        "new_functionality": new_func,
+        "client_value": client_value,
         "completeness": completeness,
         "cross_block": _axis(block.get("cross_block")),
         "backend_persistence": (_axis(backend_raw) if backend_raw is not None

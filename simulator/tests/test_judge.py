@@ -173,6 +173,46 @@ def test_judge_team_uses_llm_axes(monkeypatch):
     assert v["feature_state"] == "working"   # completeness=2 + изменения
 
 
+def test_judge_team_live_feature_floors_stingy_llm(monkeypatch):
+    # Скупой LLM по тексту контракта ставит рабочей фиче 0, НО liveness реальным
+    # вызовом доказал, что ручка работает (feature_live=True). Симметрично мёртвой
+    # фиче: пол поднимает completeness→2 (working), client_value≥1, new_func≥1.
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        return ('{"new_functionality": 0, "client_value": 0, "completeness": 0, '
+                '"cross_block": 1, "backend_persistence": 0, '
+                '"feature_breadth": 1, "ui_polish": 1, '
+                '"convenience": 6, "reason": "появилась возможность"}')
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    base = _baseline("old")
+    cur = _snap({"backend": "NEW", "cib": "NEW", "retail": "NEW"})
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/x"},
+                            "status": 200, "feature_live": True, "tier": 2}
+    v = asyncio.run(judge_team(cur, base))
+    assert v["completeness"] == 2
+    assert v["client_value"] >= 1
+    assert v["new_functionality"] >= 1
+    assert v["feature_state"] == "working"   # пол по доказанной живости
+
+
+def test_judge_team_unverified_liveness_does_not_floor(monkeypatch):
+    # feature_live=None (проверить не смогли) — пол НЕ поднимаем, поведение прежнее.
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        return ('{"new_functionality": 0, "client_value": 0, "completeness": 0, '
+                '"cross_block": 0, "convenience": 5, "reason": "x"}')
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    base = _baseline("old")
+    cur = _snap({"backend": "NEW", "cib": "old", "retail": "old"})
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/x"},
+                            "status": 422, "feature_live": None, "tier": 1}
+    v = asyncio.run(judge_team(cur, base))
+    assert v["completeness"] == 0
+    assert v["feature_state"] == "partial"
+
+
 def test_judge_team_clamps_out_of_range_axes(monkeypatch):
     async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
         return ('{"new_functionality": 9, "client_value": -3, "completeness": 1, '
