@@ -198,6 +198,19 @@ def _feature_live_for_scoring(fp_probe: dict | None) -> bool | None:
     return raw
 
 
+def _convenience_bonus(verdict: dict) -> int:
+    """Удобство 0..10 -> отдельный бонус 0..6 к сводной рубрике."""
+    value = verdict.get("convenience", 5)
+    if isinstance(value, bool):
+        value = 5
+    try:
+        convenience = int(round(float(value)))
+    except (TypeError, ValueError):
+        convenience = 5
+    convenience = max(0, min(10, convenience))
+    return min(6, (convenience * 6 + 9) // 10)
+
+
 def _rubric_of(verdict: dict) -> list[int]:
     """Сводка осей для табло/журнала."""
     a = _axes_of(verdict)
@@ -207,6 +220,7 @@ def _rubric_of(verdict: dict) -> list[int]:
         int(verdict.get("backend_persistence", 0)),
         int(verdict.get("feature_breadth", 0)),
         int(verdict.get("ui_polish", 0)),
+        _convenience_bonus(verdict),
     ]
 
 
@@ -647,7 +661,7 @@ async def lifespan(app: FastAPI):
             await pool.close()
 
 
-app = FastAPI(title="Симулятор клиентов", version="3.5.0-fixedbaseline", lifespan=lifespan)
+app = FastAPI(title="Симулятор клиентов", version="3.5.1-convbonus", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
@@ -796,6 +810,6 @@ async def admin_set_base(team: str, base: float | None = None,
         reason = ("Клиенты высоко оценили новые возможности банка — за последнее "
                   "время клиентская база команды заметно выросла.")
         await _emit_event(team, st.get("last_commit") or "", new - old,
-                          [2, 2, 2, 2, 2, 2, 2], reason, "admin-set-base")
+                          [2, 2, 2, 2, 2, 2, 2, 6], reason, "admin-set-base")
     return {"status": "ok", "team": team, "client_base": new,
             "frozen": st["frozen"]}

@@ -83,6 +83,23 @@ def _run_commit(team: str = "team_a", **snap_kw) -> dict:
 
 # --- путь с LLM-судьёй (мок) -------------------------------------------------
 
+def test_rubric_includes_convenience_bonus_to_reach_twenty():
+    verdict = {"new_functionality": 2, "client_value": 2, "completeness": 2,
+               "cross_block": 2, "backend_persistence": 2,
+               "feature_breadth": 2, "ui_polish": 2, "convenience": 9}
+    rubric = m._rubric_of(verdict)
+    assert rubric == [2, 2, 2, 2, 2, 2, 2, 6]
+    assert m.rubric_total(rubric) == 20
+
+
+def test_convenience_bonus_is_capped_and_sanitized():
+    assert m._convenience_bonus({"convenience": -1}) == 0
+    assert m._convenience_bonus({"convenience": 4}) == 3
+    assert m._convenience_bonus({"convenience": 10}) == 6
+    assert m._convenience_bonus({"convenience": True}) == 3
+    assert m._convenience_bonus({"convenience": "wat"}) == 3
+
+
 def test_rule1_empty_commit_no_movement(monkeypatch):
     _reset(datetime.now(timezone.utc))
     _patch_judge(monkeypatch, "absent", 5, axes=(0, 0, 0), cross_block=0)
