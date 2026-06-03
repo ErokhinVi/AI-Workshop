@@ -202,20 +202,60 @@ def test_judge_team_live_feature_floors_stingy_llm(monkeypatch):
     assert v["feature_breadth"] >= 1                # реальные новые темы, не LLM-1
 
 
-def test_judge_team_unverified_liveness_does_not_floor(monkeypatch):
-    # feature_live=None (проверить не смогли) — пол НЕ поднимаем, поведение прежнее.
+def test_judge_team_unverified_liveness_false_zero_gets_partial_guard(monkeypatch):
+    # feature_live=None (проверить не смогли) — не делаем working, но и не даём
+    # валидному all-zero ответу LLM стереть видимый diff контрактов.
     async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
         return ('{"new_functionality": 0, "client_value": 0, "completeness": 0, '
-                '"cross_block": 0, "convenience": 5, "reason": "x"}')
+                '"cross_block": 0, "backend_persistence": 0, '
+                '"feature_breadth": 0, "ui_polish": 0, '
+                '"convenience": 5, "reason": "С прошлого шага ничего не изменилось"}')
 
     monkeypatch.setattr("src.judge.ask_llm", fake_ask)
     monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
-    base = _baseline("old")
-    cur = _snap({"backend": "NEW", "cib": "old", "retail": "old"})
+    base = _baseline("### GET /health\n")
+    cur = _snap({
+        "backend": "### GET /health\n### POST /deposits\n",
+        "cib": "### GET /health\n",
+        "retail": "### GET /health\n",
+    })
     cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/x"},
                             "status": 422, "feature_live": None, "tier": 1}
     v = asyncio.run(judge_team(cur, base))
+    assert v["judge"] == "llm-guarded"
+    assert v["new_functionality"] == 1
+    assert v["client_value"] == 1
+    assert v["completeness"] == 1
+    assert v["feature_state"] == "partial"
+    assert v["backend_persistence"] == 2
+    assert v["reason"] == "Команда добавила в банк новую возможность для клиентов."
+
+
+def test_judge_team_dead_liveness_does_not_get_false_zero_guard(monkeypatch):
+    # feature_live=False — доказанный факт, что фича не работает. Guard не должен
+    # начислять ценность только за видимый diff.
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        return ('{"new_functionality": 0, "client_value": 0, "completeness": 0, '
+                '"cross_block": 0, "backend_persistence": 0, '
+                '"feature_breadth": 0, "ui_polish": 0, '
+                '"convenience": 5, "reason": "клиент не может воспользоваться"}')
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    base = _baseline("### GET /health\n")
+    cur = _snap({
+        "backend": "### GET /health\n### POST /deposits\n",
+        "cib": "### GET /health\n",
+        "retail": "### GET /health\n",
+    })
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/deposits"},
+                            "status": 500, "feature_live": False, "tier": 1}
+    v = asyncio.run(judge_team(cur, base))
+    assert v["judge"] == "llm"
+    assert v["new_functionality"] == 0
+    assert v["client_value"] == 0
     assert v["completeness"] == 0
+    assert v["backend_persistence"] == 0
     assert v["feature_state"] == "partial"
 
 
@@ -285,6 +325,20 @@ def test_prompt_requests_structural_axes():
     assert "backend_persistence" in prompt
     assert "feature_breadth" in prompt
     assert "ui_polish" in prompt
+
+
+def test_prompt_includes_explicit_new_endpoint_diff():
+    base = _baseline("### GET /health\n")
+    cur = _snap({
+        "backend": "### GET /health\n### POST /deposits\n",
+        "cib": "### GET /health\n",
+        "retail": "### GET /health\n### POST /api/deposit/open\n",
+    }, html="<section>Новый экран вклада</section>")
+    prompt = _build_team_prompt(cur, base, cur["regression"], "")
+    assert "Явный diff новых ручек/UI" in prompt
+    assert "POST /deposits" in prompt
+    assert "POST /api/deposit/open" in prompt
+    assert "retail_ui" in prompt
 
 
 # --- секция работоспособности новой фичи (feature_probe) ---------------------
