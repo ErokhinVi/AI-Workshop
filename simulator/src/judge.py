@@ -363,9 +363,11 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     Симметрия к мёртвой фиче: если liveness РЕАЛЬНЫМ вызовом подтвердил, что новая
     ручка работает (`feature_live is True` — 2xx, не заглушка), фича функционально
     доведена. Не позволяем скупому по тексту контракта LLM занизить её ниже
-    «работает»: пол на completeness (→ working), client_value и new_functionality.
-    Только при доказанном `True`; `None` (не смогли проверить) и `False` (мертва)
-    пол не поднимают — там поведение прежнее.
+    «работает»: пол на базовые оси (completeness → working, client_value,
+    new_functionality) И на структурные (backend_persistence, feature_breadth) —
+    их детерминированный дефолт считается по РЕАЛЬНО появившимся ручкам, а не по
+    прозе. Только при доказанном `True`; `None` (не смогли проверить) и `False`
+    (мертва) пол не поднимают — там поведение прежнее.
     """
     new_func = _axis(block.get("new_functionality"))
     client_value = _axis(block.get("client_value"))
@@ -380,15 +382,24 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     backend_raw = block.get("backend_persistence")
     breadth_raw = block.get("feature_breadth")
     ui_raw = block.get("ui_polish")
+    backend_persistence = (_axis(backend_raw) if backend_raw is not None
+                           else _default_backend_persistence(snap, baseline_snap))
+    feature_breadth = (_axis(breadth_raw) if breadth_raw is not None
+                       else _default_feature_breadth(snap, baseline_snap))
+    if feature_live is True:
+        # доказанно живая фича: структурные оси не ниже детерминированной оценки
+        # по реально появившимся ручкам (LLM мог их занизить по тексту).
+        backend_persistence = max(backend_persistence,
+                                  _default_backend_persistence(snap, baseline_snap))
+        feature_breadth = max(feature_breadth,
+                              _default_feature_breadth(snap, baseline_snap))
     return {
         "new_functionality": new_func,
         "client_value": client_value,
         "completeness": completeness,
         "cross_block": _axis(block.get("cross_block")),
-        "backend_persistence": (_axis(backend_raw) if backend_raw is not None
-                                else _default_backend_persistence(snap, baseline_snap)),
-        "feature_breadth": (_axis(breadth_raw) if breadth_raw is not None
-                            else _default_feature_breadth(snap, baseline_snap)),
+        "backend_persistence": backend_persistence,
+        "feature_breadth": feature_breadth,
         "ui_polish": (_axis(ui_raw) if ui_raw is not None
                       else _default_ui_polish(snap, baseline_snap)),
         "convenience": _coerce_convenience(block.get("convenience")),

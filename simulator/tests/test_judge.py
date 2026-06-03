@@ -185,15 +185,21 @@ def test_judge_team_live_feature_floors_stingy_llm(monkeypatch):
 
     monkeypatch.setattr("src.judge.ask_llm", fake_ask)
     monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
-    base = _baseline("old")
-    cur = _snap({"backend": "NEW", "cib": "NEW", "retail": "NEW"})
-    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/x"},
+    base = _baseline("### GET /health\n")
+    # реально появившиеся ручки: backend хранит карты (stateful), две разные темы
+    cur = _snap({
+        "backend": "### GET /health\n### POST /credit-cards\n### POST /brokerage/orders\n",
+        "cib": "### GET /health\n### POST /credit-decision\n",
+        "retail": "### GET /health\n### POST /api/credit-apply\n"})
+    cur["feature_probe"] = {"primary": {"method": "POST", "path": "/api/credit-apply"},
                             "status": 200, "feature_live": True, "tier": 2}
     v = asyncio.run(judge_team(cur, base))
     assert v["completeness"] == 2
     assert v["client_value"] >= 1
     assert v["new_functionality"] >= 1
-    assert v["feature_state"] == "working"   # пол по доказанной живости
+    assert v["feature_state"] == "working"          # пол по доказанной живости
+    assert v["backend_persistence"] == 2            # stateful backend-ручки, не LLM-0
+    assert v["feature_breadth"] >= 1                # реальные новые темы, не LLM-1
 
 
 def test_judge_team_unverified_liveness_does_not_floor(monkeypatch):
