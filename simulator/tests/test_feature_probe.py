@@ -135,12 +135,30 @@ def test_assess_none_when_no_new_endpoints():
     assert client.calls == []
 
 
-def test_assess_dead_on_404_without_llm():
-    # ручка задекларирована, но её нет (404) → False уже на Tier 1, без LLM
-    res = _assess(_Client(_Resp(404)), synth=_fail_synth())
+def test_assess_404_on_empty_body_is_not_decisive_route_truly_missing():
+    # Маршрута реально нет: Tier 1 пустым телом → 404, но 404 на «голый» вызов
+    # неубедителен (мог быть «ресурс не найден»). Уточняем Tier 2 валидным телом —
+    # маршрут так и отвечает 404 → честно False (но уже на Tier 2, после проверки).
+    async def good_synth(snap, primary):
+        return {"client_id": "c-01394", "amount_rub": 50000}
+    res = _assess(_Client(_Resp(404), _Resp(404)), synth=good_synth)
     assert res["feature_live"] is False
-    assert res["tier"] == 1
+    assert res["tier"] == 2
     assert res["primary"]["path"] == "/api/credit-apply"
+
+
+def test_assess_404_on_empty_body_then_live_on_valid_body():
+    # Регрессия с воркшопа (команда A): строгая, но РАБОЧАЯ ручка отвечает 404
+    # «клиент не найден» на пустое тело Tier 1. Раньше это ошибочно замыкалось на
+    # «фича мертва». Теперь Tier 2 шлёт валидное тело → 200 → фича живая.
+    async def good_synth(snap, primary):
+        return {"client_id": "c-01394", "ticker": "SBER", "quantity": 1,
+                "direction": "buy"}
+    res = _assess(_Client(_Resp(404, '{"detail": "клиент не найден"}'),
+                          _Resp(200, '{"order_id": "ord-1", "status": "executed"}')),
+                  synth=good_synth)
+    assert res["feature_live"] is True
+    assert res["tier"] == 2
 
 
 def test_assess_dead_on_500():
