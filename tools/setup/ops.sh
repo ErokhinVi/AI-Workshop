@@ -3,7 +3,8 @@
 #
 # Для компьютеров, откуда api.render.com и *.onrender.com недоступны
 # (корпоративная сеть). Запускает workflow Workshop ops в оркестраторе, ждет
-# конца, печатает лог и скачивает render-services.conf, если run его выложил.
+# конца, печатает вывод render_ops.py и скачивает render-services.conf, если run
+# его выложил.
 #
 # Использование: tools/setup/ops.sh <команда> [аргументы]
 #   tools/setup/ops.sh status
@@ -22,7 +23,7 @@ REPO="$GH_OWNER/$ORCHESTRATOR_REPO"
 WORKFLOW="workshop-ops.yml"
 
 if [ $# -lt 1 ]; then
-  sed -n '2,15p' "$0"
+  sed -n '2,16p' "$0"
   exit 2
 fi
 command="$1"
@@ -43,7 +44,7 @@ latest_run() {
 }
 
 before="$(latest_run)"
-gh workflow run "$WORKFLOW" -R "$REPO" -f command="$command" -f args="$args" -f confirm="$confirm"
+gh workflow run "$WORKFLOW" -R "$REPO" -f command="$command" -f args="$args" -f confirm="$confirm" >/dev/null
 echo "запустил $command в $REPO, жду run"
 run="$before"
 for _ in $(seq 1 45); do
@@ -62,9 +63,19 @@ echo "https://github.com/$REPO/actions/runs/$run"
 status=0
 gh run watch "$run" -R "$REPO" --interval 5 --exit-status >/dev/null 2>&1 || status=$?
 
-# Лог только шага render_ops.py, без префиксов job/step и времени.
-gh run view "$run" -R "$REPO" --log 2>/dev/null \
-  | awk -F '\t' '$2 ~ /render_ops/ { line = $3; sub(/^[0-9T:.-]+Z ?/, "", line); print line }' || true
+# Вывод шага render_ops.py: без колонок job/step, BOM, времени, цветов, шапки
+# шага и служебных ##[error] (текст ошибки скрипт печатает и так).
+gh run view "$run" -R "$REPO" --log 2>/dev/null | awk -F '\t' '
+  $2 ~ /render_ops/ {
+    line = $3
+    sub(/^[^0-9]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]*Z ?/, "", line)
+    gsub(/\033\[[0-9;]*m/, "", line)
+    if (line ~ /^##\[group\]/) { in_group = 1; next }
+    if (line ~ /^##\[endgroup\]/) { in_group = 0; next }
+    if (in_group || line ~ /^##\[error\]/) next
+    sub(/^##\[(notice|warning)\]/, "", line)
+    print line
+  }' || true
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

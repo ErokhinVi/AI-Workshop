@@ -247,8 +247,10 @@ class Workshop:
     def need(self, *keys: str) -> None:
         missing = [k for k in keys if not self.secrets.get(k)]
         if missing:
-            raise OpsError(f"не хватает секретов: {', '.join(missing)}. Заполни "
-                           f"{self.conf.secrets_dir / 'workshop.env'} (или секреты репозитория в Actions)")
+            where = ("задай секреты репозитория: tools/setup/github-access.sh ops-secrets"
+                     if os.environ.get("GITHUB_ACTIONS")
+                     else f"заполни {self.conf.secrets_dir / 'workshop.env'}")
+            raise OpsError(f"не хватает секретов: {', '.join(missing)}, {where}")
 
     def owner_id(self) -> str:
         if self._owner:
