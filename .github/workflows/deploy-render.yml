@@ -1,17 +1,15 @@
-name: Deploy simulator via Render Deploy Hook
+name: Deploy simulator via Render API
 
-# Организаторский репо деплоит только симулятор. Командные блоки
-# деплоятся из СВОИХ репозиториев своими Actions. Секрет в GitHub →
-# Settings → Secrets and variables → Actions:
-#   RENDER_HOOK_SIMULATOR
+# Симулятор на Render создан из этого репозитория без автодеплоя, поэтому
+# деплой после push в simulator/ запускает этот workflow. Нужен секрет
+# RENDER_API_KEY (tools/setup/github-access.sh ops-secrets). Нет секрета или
+# сервиса на Render: шаг пишет notice и выходит без деплоя.
 
 on:
   push:
     branches: [main]
     paths:
       - "simulator/**"
-      - "render.yaml"
-      - ".github/workflows/deploy-render.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,20 +17,20 @@ permissions:
 
 concurrency:
   group: render-deploy-simulator
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Trigger Render deploy hook
+      - name: Trigger simulator deploy
         env:
-          HOOK: ${{ secrets.RENDER_HOOK_SIMULATOR }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_OWNER_ID: ${{ secrets.RENDER_OWNER_ID }}
         run: |
-          set -e
-          if [ -z "$HOOK" ]; then
-            echo "::warning::RENDER_HOOK_SIMULATOR is not set — skipping deploy."
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::notice::секрета RENDER_API_KEY нет: Render для этого репозитория не настроен, деплой пропущен"
             exit 0
           fi
-          curl -fsS -X POST "$HOOK" && echo " → triggered raif-simulator"
+          python3 tools/setup/render_ops.py deploy sim --skip-missing

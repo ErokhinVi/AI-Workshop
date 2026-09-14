@@ -1,83 +1,103 @@
 #!/usr/bin/env bash
-# tools/setup/sync-team-repos.sh — push team-template/ to each of the four
-# team GitHub repositories.
+# tools/setup/sync-team-repos.sh: залить team-template/ в репозитории команд.
 #
-# Usage:
-#   tools/setup/sync-team-repos.sh URL_A URL_B URL_C URL_D
+# Использование:
+#   tools/setup/sync-team-repos.sh            # все команды из teams.conf
+#   tools/setup/sync-team-repos.sh c d        # только team_c и team_d
+#   tools/setup/sync-team-repos.sh --dry-run  # собрать и показать, не пушить
 #
-# Example:
-#   tools/setup/sync-team-repos.sh \
-#       git@github.com:erokhinvi/ai-workshop-team-a.git \
-#       git@github.com:erokhinvi/ai-workshop-team-b.git \
-#       git@github.com:erokhinvi/ai-workshop-team-c.git \
-#       git@github.com:erokhinvi/ai-workshop-team-d.git
+# Для каждой команды:
+#   1. клонирует репозиторий по HTTPS (авторизация через gh auth git-credential);
+#   2. заменяет все, кроме .git, содержимым team-template/;
+#   3. подставляет в TEAM.md букву команды и URL ее сервисов и табло: из
+#      render-services.conf, а без него по схеме https://<prefix>-<буква>-<блок>.onrender.com;
+#   4. коммитит поверх истории и пушит в main. История не переписывается.
 #
-# What it does:
-#   For each URL in turn —
-#     1. Clone the (presumably empty) team repo into a temp dir.
-#     2. Mirror team-template/ contents into the working tree
-#        (overwrites everything except .git).
-#     3. Commit and push to main.
-#
-# Re-running this overwrites every team repo's main with team-template/. Use
-# only for the initial population OR for a full reset of all teams. For
-# incremental syncs, edit team-template/ and use a more surgical update.
+# Повторный запуск возвращает main каждой команды к шаблону: это и есть сброс
+# между прогонами. Во время воркшопа не запускать: откатит работу участников.
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  echo "usage: $0 URL_A URL_B URL_C URL_D" >&2
-  exit 2
-fi
-
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=teams.conf
+source "$ROOT/tools/setup/teams.conf"
 TEMPLATE="$ROOT/team-template"
-if [ ! -d "$TEMPLATE" ]; then
-  echo "team-template/ not found at $TEMPLATE" >&2
+SERVICES_CONF="${RENDER_SERVICES_CONF:-$ROOT/tools/setup/render-services.conf}"
+GIT=(git -c credential.helper= -c 'credential.helper=!gh auth git-credential')
+
+DRY_RUN=0
+if [ "${1:-}" = "--dry-run" ]; then
+  DRY_RUN=1
+  shift
+fi
+ONLY=" $* "
+
+AUTHOR_NAME="${COMMIT_NAME:-$(git config user.name || true)}"
+AUTHOR_EMAIL="${COMMIT_EMAIL:-$(git config user.email || true)}"
+if [ -z "$AUTHOR_NAME" ] || [ -z "$AUTHOR_EMAIL" ]; then
+  echo "нет подписи коммитов: задай COMMIT_NAME и COMMIT_EMAIL (teams.conf или окружение)" >&2
   exit 1
 fi
 
-LABELS=("team_a" "team_b")
-URLS=("$@")
+url_for() {  # url_for <буква|sim> <блок>
+  local found=""
+  if [ -f "$SERVICES_CONF" ]; then
+    found="$(awk -v l="$1" -v b="$2" '$1 == l && $2 == b { print $4; exit }' "$SERVICES_CONF")"
+  fi
+  if [ -n "$found" ]; then
+    echo "$found"
+  elif [ "$1" = sim ]; then
+    echo "https://${RENDER_PREFIX}-simulator.onrender.com"
+  else
+    echo "https://${RENDER_PREFIX}-$1-$2.onrender.com"
+  fi
+}
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-for i in 0 1 2 3; do
-  LABEL="${LABELS[$i]}"
-  URL="${URLS[$i]}"
+for entry in "${TEAMS[@]}"; do
+  letter="${entry%%:*}"
+  repo="${entry#*:}"
+  if [ "$ONLY" != "  " ] && [[ "$ONLY" != *" $letter "* ]]; then
+    continue
+  fi
+  url="https://github.com/${GH_OWNER}/${repo}.git"
+  dest="$WORK/$repo"
   echo
-  echo "=== ${LABEL}  ←  ${URL} ==="
+  echo "=== team_${letter} ← ${url} ==="
 
-  DEST="$WORK/$LABEL"
-  if ! git clone "$URL" "$DEST" 2>&1 | tail -5; then
-    echo "  ! could not clone $URL — does the repo exist on GitHub?" >&2
+  "${GIT[@]}" clone -q "$url" "$dest" 2>&1 | grep -v "empty repository" || true
+  if [ ! -d "$dest/.git" ]; then
+    echo "  ! не склонировался ${url}: репозиторий создан ? (tools/setup/create-team-repos.sh)" >&2
     exit 1
   fi
+  cd "$dest"
+  git symbolic-ref HEAD refs/heads/main
 
-  pushd "$DEST" >/dev/null
-
-  # Wipe everything except .git
   find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-
-  # Copy template content
   cp -R "$TEMPLATE/." .
 
-  # If the team repo is brand-new, the default branch may not be main yet.
-  # Force the new branch to be 'main'.
-  git symbolic-ref HEAD refs/heads/main 2>/dev/null || true
+  L="$letter" \
+  UR="$(url_for "$letter" retail)" UC="$(url_for "$letter" cib)" UB="$(url_for "$letter" backend)" \
+  US="$(url_for sim simulator)" \
+    perl -pi -e 's/<TEAM_SLUG>/$ENV{L}/g; s/<URL_RETAIL>/$ENV{UR}/g; s/<URL_CIB>/$ENV{UC}/g;
+                 s/<URL_BACKEND>/$ENV{UB}/g; s/<URL_SIMULATOR>/$ENV{US}/g' TEAM.md
 
   git add -A
   if git diff --cached --quiet; then
-    echo "  + no changes"
+    echo "  = совпадает с шаблоном, пушить нечего"
+  elif [ "$DRY_RUN" = 1 ]; then
+    git diff --cached --stat | tail -1
+    echo "  (dry-run: не пушу)"
   else
-    git commit -m "Initial team repo content from team-template/" >/dev/null
-    git push -u origin main
-    echo "  + pushed to main"
+    git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" \
+      commit -q -m "Reset team repo to team-template (team_${letter})"
+    "${GIT[@]}" push -q origin HEAD:main
+    echo "  + main = $(git rev-parse --short HEAD)"
   fi
-
-  popd >/dev/null
+  cd "$ROOT"
 done
 
 echo
-echo "Done. Now run tools/setup/add-submodules.sh to wire them into this orchestrator."
+echo "Готово."

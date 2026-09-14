@@ -1,0 +1,94 @@
+name: Workshop ops
+
+# Render и симулятор воркшопа из GitHub Actions. Раннеры GitHub видят
+# api.render.com и *.onrender.com, даже когда корпоративная сеть их режет.
+#
+# Запуск: вкладка Actions, Workshop ops, Run workflow. Или из терминала:
+#   gh workflow run workshop-ops.yml -R <owner>/<repo> -f command=status
+#   gh run watch -R <owner>/<repo>
+# Команды те же, что у tools/setup/render_ops.py (sim-start = sim start).
+#
+# Секреты репозитория ставит tools/setup/github-access.sh ops-secrets:
+#   RENDER_API_KEY, OPENAI_API_KEY, ADMIN_TOKEN, RENDER_OWNER_ID (если нужен).
+# Логи публичного репозитория видны всем: скрипт не печатает значения секретов,
+# GitHub дополнительно маскирует их в логах.
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Что сделать"
+        type: choice
+        default: status
+        options:
+          - status
+          - sim-state
+          - sim-start
+          - sim-stop
+          - sim-reset
+          - sim-evaluate
+          - deploy
+          - check
+          - provision
+          - env
+          - services
+          - plan
+          - suspend
+          - resume
+          - teardown
+      args:
+        description: "Аргументы: для deploy цели (a:cib sim), для plan тариф (starter)"
+        required: false
+        default: ""
+      confirm:
+        description: "Для teardown впиши DELETE"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workshop-ops
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: render_ops.py ${{ inputs.command }}
+        env:
+          OPS_COMMAND: ${{ inputs.command }}
+          OPS_ARGS: ${{ inputs.args }}
+          OPS_CONFIRM: ${{ inputs.confirm }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          RENDER_OWNER_ID: ${{ secrets.RENDER_OWNER_ID }}
+        run: |
+          set -euo pipefail
+          set -f
+          case "$OPS_ARGS" in
+            *[!a-z0-9:_\ -]*)
+              echo "::error::args: только латиница, цифры, двоеточие и пробел"
+              exit 2 ;;
+          esac
+          case "$OPS_COMMAND" in
+            sim-*)    set -- sim "${OPS_COMMAND#sim-}" ;;
+            teardown) set -- teardown --confirm "$OPS_CONFIRM" ;;
+            *)        set -- "$OPS_COMMAND" ;;
+          esac
+          # shellcheck disable=SC2086
+          python3 tools/setup/render_ops.py "$@" $OPS_ARGS
+
+      - name: Upload render-services.conf
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-services
+          path: tools/setup/render-services.conf
+          if-no-files-found: ignore
+          retention-days: 30

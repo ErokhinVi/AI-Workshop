@@ -29,3 +29,8 @@ _site/
 dashboard/events.jsonl
 
 # Personalized bootstrap scripts (contain embedded private SSH key — distribute via private channel)
+# живут вне репозитория, в ~/AI-Workshop-secrets/<WORKSHOP_ID> (tools/setup/make-bootstrap.py)
+workshop.env
+
+# ID и URL сервисов Render конкретного организатора (tools/setup/render_ops.py)
+tools/setup/render-services.conf

@@ -1,51 +1,46 @@
 #!/usr/bin/env bash
-# tools/setup/add-submodules.sh — wire the four team repos into this
-# orchestrator as submodules at team_a/, team_b/.
+# tools/setup/add-submodules.sh: подключить репозитории команд из
+# tools/setup/teams.conf сабмодулями team_<буква>/ в организаторском репо.
 #
-# Usage:
-#   tools/setup/add-submodules.sh URL_A URL_B URL_C URL_D
+# Использование:
+#   tools/setup/add-submodules.sh
 #
-# Idempotent: if a submodule already points at the same URL, it is left
-# alone; otherwise it is removed and re-added.
+# Идемпотентен: сабмодуль с тем же URL не трогает, с другим URL переподключает.
+# Запускать ПОСЛЕ sync-team-repos.sh: пустой репозиторий git submodule add не
+# подключит.
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  echo "usage: $0 URL_A URL_B URL_C URL_D" >&2
-  exit 2
-fi
-
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=teams.conf
+source "$ROOT/tools/setup/teams.conf"
 cd "$ROOT"
 
-LABELS=("team_a" "team_b")
-URLS=("$@")
+labels=()
+for entry in "${TEAMS[@]}"; do
+  letter="${entry%%:*}"
+  repo="${entry#*:}"
+  label="team_${letter}"
+  url="https://github.com/${GH_OWNER}/${repo}.git"
+  labels+=("$label")
+  echo "=== ${label} ← ${url} ==="
 
-for i in 0 1 2 3; do
-  LABEL="${LABELS[$i]}"
-  URL="${URLS[$i]}"
-  echo "=== $LABEL  ←  $URL ==="
-
-  if [ -e "$LABEL" ] || git config -f .gitmodules --get "submodule.$LABEL.url" >/dev/null 2>&1; then
-    # Already present in some form. If URL differs, deinit and remove.
-    CURRENT_URL="$(git config -f .gitmodules --get "submodule.$LABEL.url" 2>/dev/null || true)"
-    if [ "$CURRENT_URL" = "$URL" ]; then
-      echo "  + already wired with the same URL — skipping"
-      continue
-    fi
-    echo "  ~ removing existing $LABEL (was: ${CURRENT_URL:-not in .gitmodules})"
-    git submodule deinit -f "$LABEL" 2>/dev/null || true
-    git rm -rf "$LABEL" 2>/dev/null || rm -rf "$LABEL"
-    rm -rf ".git/modules/$LABEL"
+  current="$(git config -f .gitmodules --get "submodule.${label}.url" 2>/dev/null || true)"
+  if [ "$current" = "$url" ]; then
+    echo "  = уже подключен с этим URL"
+    continue
   fi
-
-  git submodule add -b main "$URL" "$LABEL"
+  if [ -n "$current" ] || [ -e "$label" ]; then
+    echo "  ~ был ${current:-не в .gitmodules}, переподключаю"
+    git submodule deinit -f "$label" 2>/dev/null || true
+    git rm -rf --cached "$label" >/dev/null 2>&1 || true
+    rm -rf "$label" ".git/modules/$label"
+    git config -f .gitmodules --remove-section "submodule.${label}" 2>/dev/null || true
+  fi
+  git submodule add -b main "$url" "$label"
 done
 
-# Refresh .gitmodules formatting and stage
-git add .gitmodules team_a team_b
-
+git add .gitmodules "${labels[@]}"
 echo
-echo "Submodules added. Review with 'git status' and commit when satisfied:"
-echo "  git commit -m 'wire four team submodules'"
-echo "  git push origin HEAD:main"
+echo "Сабмодули подключены. Проверь git status и закоммить:"
+echo "  git commit -m 'wire team submodules'"
