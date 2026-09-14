@@ -10,11 +10,11 @@
 
 # Инфраструктура и общие файлы — на организаторах воркшопа.
 /CLAUDE.md            @ErokhinVi
+/AGENTS.md            @ErokhinVi
 /ORGANIZER.md         @ErokhinVi
-/TEAM.md              @ErokhinVi
-/RULES.md             @ErokhinVi
+/SETUP.md             @ErokhinVi
+/RUNBOOK.md           @ErokhinVi
 /README.md            @ErokhinVi
-/render.yaml          @ErokhinVi
 /docker-compose.yml   @ErokhinVi
 /.github/             @ErokhinVi
 /.claude/             @ErokhinVi

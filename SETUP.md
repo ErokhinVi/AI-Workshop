@@ -1,233 +1,288 @@
-# SETUP.md — one-off setup for the four-team multi-repo workshop
+# SETUP.md: развернуть воркшоп с нуля
 
-> For the workshop organiser. Run once, before the workshop.
+Инструкция для агента (Claude Code, Codex), который помогает организатору.
+Человек заводит аккаунты, платит и выпускает ключи. Агент делает остальное и
+проверяет каждый шаг. Шаги и проверки не пропускать: в день воркшопа авторов
+рядом не будет, проводят ведущие по `RUNBOOK.md`.
 
-The workshop now lives across **five GitHub repositories**:
+Время: 2-3 часа работы плюс ожидание сборок. Начинать за неделю до
+воркшопа, генеральный прогон за 1-2 дня.
 
-- `ai-workshop` — this orchestrator (simulator, leaderboard, seed, tasks,
-  team-template, organiser docs, submodule pointers to the four teams);
-- `ai-workshop-team-a`, `-team-b`, `-team-c`, `-team-d` — one per team,
-  each containing three service blocks (`retail`, `cib`, `backend`).
+## Что получится
 
-What follows are the steps **I (Claude) cannot do for you** in this
-session, plus the helper scripts that take the bulk of the grunt work
-off your plate.
+- GitHub: этот оркестратор и по публичному репозиторию на команду.
+- Render: Postgres, симулятор с табло и по три сервиса на команду (retail,
+  cib, backend). 7 команд: 22 сервиса.
+- Установщики ноутбуков: пара скриптов (macOS, Windows) на команду со своим
+  deploy key. Лежат вне репозитория.
+- Табло: `https://<RENDER_PREFIX>-simulator.onrender.com`.
 
-## Step 1 — Create the five GitHub repositories (manual)
+Как это устроено внутри: `ORGANIZER.md`. День воркшопа: `RUNBOOK.md`.
 
-Create them as **empty private repos** under the organisation account
-you used before (e.g. `erokhinvi`):
+## Правила для агента
 
-- `ai-workshop` — public/private, your call. This is the orchestrator
-  repo (already exists; you're reading SETUP.md from it).
-- `ai-workshop-team-a`
-- `ai-workshop-team-b`
-- `ai-workshop-team-c`
-- `ai-workshop-team-d`
+- Аккаунты, карту, покупки и выпуск API-ключей делает человек. Ты говоришь,
+  где нажать, и ждешь.
+- Секреты живут в `~/AI-Workshop-secrets/<WORKSHOP_ID>/workshop.env` и в
+  секретах GitHub. Не печатай их, не вставляй в команды и коммиты. Ключи
+  человек вписывает в файл сам. Прислал ключ в чат: запиши в файл и напомни
+  перевыпустить его после воркшопа.
+- Скрипты `tools/setup` можно запускать повторно. Упало на середине: исправь
+  причину и запусти еще раз, ничего не задвоится.
+- `teardown`, `revoke` и сброс репозиториев команд только по прямой просьбе.
+- Во время воркшопа в репозитории команд не пушить.
 
-Do NOT add a README, .gitignore or license on creation — leave them
-truly empty so `sync-team-repos.sh` can push without fighting an
-initial commit.
+## Шаг 0. Спросить у человека
 
-## Step 2 — Generate one workshop SSH key pair (manual)
+Ответы не придумывать, они уйдут в `tools/setup/teams.conf`.
 
-Generate a single ed25519 keypair (you decided "one shared deploy key for
-all four team repos"). Locally:
+1. Сколько команд. По умолчанию 7 команд по 3 человека. При 20 участниках
+   в одной команде двое, третий блок берет ведущий стола.
+2. Где будут репозитории: GitHub-аккаунт или организация. Нужны права
+   создавать репозитории, deploy keys и секреты. В чужом личном аккаунте не
+   выйдет: коллаборатор не может ставить секреты и deploy keys.
+3. Кто платит за Render. Нужен аккаунт Render с картой организаторов, лучше
+   отдельный под воркшоп: его API-ключ попадет в репозитории команд.
+4. LLM для судьи и блока cib: OpenAI или любой OpenAI-совместимый провайдер
+   (base URL, модель), ключ с балансом.
+5. С какого компьютера работаем. Корпоративная сеть режет api.render.com и
+   *.onrender.com. Это не мешает: команды Render пойдут через GitHub Actions.
 
-```
-ssh-keygen -t ed25519 -C "raif-workshop-2026" -f ~/.ssh/raif_workshop -N ""
-```
+## Шаг 1. Инструменты
 
-This produces `~/.ssh/raif_workshop` (private) and
-`~/.ssh/raif_workshop.pub` (public).
-
-In each of the four **team** repos on GitHub: Settings → Deploy keys →
-Add deploy key:
-
-- Title: `raif-workshop-2026`
-- Key: paste the contents of `raif_workshop.pub`
-- **Allow write access:** ✓ (mandatory — participants commit through this key)
-
-Do NOT add the deploy key to the orchestrator repo — participants don't
-push there.
-
-After the workshop: delete the deploy key in all four team repos. Once
-deleted, the embedded private key in distributed bootstrap scripts is
-useless — which is the point.
-
-## Step 3 — Push team-template content to the four team repos
-
-In this orchestrator repo on your laptop, run:
-
-```
-tools/setup/sync-team-repos.sh \
-    git@github.com:erokhinvi/ai-workshop-team-a.git \
-    git@github.com:erokhinvi/ai-workshop-team-b.git \
-    git@github.com:erokhinvi/ai-workshop-team-c.git \
-    git@github.com:erokhinvi/ai-workshop-team-d.git
+```bash
+gh auth login -s repo,workflow
+tools/setup/doctor.sh
 ```
 
-Substitute your own org name if not `erokhinvi`. The script clones each
-empty team repo, mirrors `team-template/` into it, commits and pushes to
-`main`. After this all four team repos have identical starting state.
+Нужны git, gh, python3 3.9+, ssh-keygen, perl, curl. `doctor.sh` ничего не
+меняет. На этом шаге FAIL про workshop.env и warn про репозитории команд
+нормальны.
 
-## Step 4 — Wire the four team repos in as submodules
+## Шаг 2. Свой оркестратор
 
-Still in this orchestrator repo:
+Репозитории будут не у ErokhinVi: скопировать оркестратор к себе. Копия, а
+не fork: в форке Actions выключены до ручного включения.
 
-```
-tools/setup/add-submodules.sh \
-    git@github.com:erokhinvi/ai-workshop-team-a.git \
-    git@github.com:erokhinvi/ai-workshop-team-b.git \
-    git@github.com:erokhinvi/ai-workshop-team-c.git \
-    git@github.com:erokhinvi/ai-workshop-team-d.git
-
-git commit -m "wire four team submodules"
-git push origin HEAD:main
+```bash
+gh repo create <OWNER>/AI-Workshop --public
+git clone https://github.com/ErokhinVi/AI-Workshop.git
+cd AI-Workshop
+git remote rename origin upstream
+git remote add origin https://github.com/<OWNER>/AI-Workshop.git
 ```
 
-`.gitmodules` will be populated with the four submodule entries; the
-two directories `team_a/`, `team_b/` will appear
-at the orchestrator root.
+Уже работаешь в клоне: хватит двух последних команд `git remote`.
 
-## Step 5 — Personalise and distribute the laptop bootstrap (manual)
+Поправить `tools/setup/teams.conf`:
 
-The previous workshop's bootstrap scripts —
-`raif-workshop-setup.applescript` (macOS) and `raif-workshop-setup.cmd`
-(Windows) — are preserved in `_archive/tools/bootstrap/` and are the
-master source. They are NOT in `team-template/tools/bootstrap/` on
-purpose: they embed the workshop SSH private key and the clone URL of
-the (then) single repo, both of which need to be replaced per team.
+- `GH_OWNER`: аккаунт или организация;
+- `TEAMS`: `буква:репозиторий` на каждую команду;
+- `WORKSHOP_ID`: имя прогона, например `offsite-2026`;
+- `RENDER_PREFIX`: уникальный префикс сервисов, латиница и дефис;
+- `LLM_BASE_URL`, `LLM_MODEL`: если LLM не OpenAI.
 
-To personalise per team:
+Закоммитить и запушить: workflow в GitHub Actions читает `teams.conf` из
+репозитория.
 
-1. Copy the masters from `_archive/tools/bootstrap/`:
-   `raif-workshop-setup.applescript` and `raif-workshop-setup.cmd`.
-2. **Remove the team picker.** In the AppleScript, delete the "Pick your
-   team" dialog block (the one that sets `teamCode` to `team_a` /
-   `team_b`). In the .cmd, remove the `$teamA` / `$teamB` radio buttons
-   and the `$cfg.Team` derivation.
-3. Replace path operations that include `team_a/<block>` with `<block>`
-   (`team_a/retail/` → `retail/`, etc.).
-4. Replace the Claude / Codex template names from
-   `settings-team_a-<block>.json` → `settings-<block>.json` and
-   `config-team_a-<block>.toml` → `config-<block>.toml`.
-5. Replace the clone URL with the team-specific one (e.g.
-   `git@github.com:erokhinvi/ai-workshop-team-a.git`) and the local
-   destination folder name (e.g. `AI-Workshop-Team-A` to disambiguate
-   between teams if a participant ends up with several).
-6. Swap in the new workshop SSH **private** key into the heredoc /
-   `$PrivateKeyB64` block.
+```bash
+git add tools/setup/teams.conf
+git commit -m "Configure workshop"
+git push -u origin main
+```
 
-Produce **four pairs** of scripts — one per team. Distribute via private
-channel (AirDrop / corporate messenger) to that team's three members
-only.
+Проверка: `doctor.sh` пишет, что оркестратор есть, публичный, Actions включены.
 
-This step is fiddly and the .applescript file is UTF-16 — I (Claude) did
-not attempt to mutate the master bootstrap automatically because corrupting
-the encoding or the embedded base64 key would silently break participants'
-laptops on the day. If you want me to make a Python generator that does
-the per-team substitution in a follow-up session, ask.
+## Шаг 3. Секреты
 
-## Step 6 — Render Blueprints (manual, in Render UI)
+```bash
+python3 tools/setup/render_ops.py init-secrets
+```
 
-Create **one shared env group** once:
+Создаст `workshop.env` с правами 600 и готовым `ADMIN_TOKEN` (пароль админки
+табло). Два ключа человек вписывает сам:
 
-- New → Environment Group → name `ai-workshop-shared`
-- Set `OPENAI_API_KEY` and `ADMIN_TOKEN`
-- (Already in `render.yaml`: `OPENAI_BASE_URL`, `OPENAI_MODEL`.)
+- `RENDER_API_KEY`. На render.com: зарегистрироваться, в Workspace
+  Settings, Billing добавить карту. Потом Account Settings, API Keys,
+  Create API Key.
+- `OPENAI_API_KEY`: ключ LLM-провайдера.
 
-Then **five Blueprints** (one Render Blueprint per repo):
+Проверка: в разделе «Секреты» у `doctor.sh` нет FAIL.
 
-1. **Orchestrator.** New → Blueprint → connect `ai-workshop`. It picks up
-   the orchestrator `render.yaml` → creates `raif-simulator` +
-   `raif-workshop-db`.
-2. **Each team repo.** New → Blueprint → connect the team repo. Before
-   applying, edit `render.yaml` in the team repo to replace
-   `<TEAM_SLUG>` placeholders with the team letter (`a`, `b`, `c`, `d`):
+## Шаг 4. Репозитории команд
 
-   ```
-   sed -i 's/<TEAM_SLUG>/a/g' render.yaml      # in ai-workshop-team-a
-   git commit -am 'set team slug' && git push
-   ```
+```bash
+tools/setup/create-team-repos.sh --dry-run
+tools/setup/create-team-repos.sh
+tools/setup/sync-team-repos.sh
+```
 
-   Then apply the Blueprint → 3 web services per team.
+`create-team-repos.sh` создает недостающие публичные репозитории и снимает
+архив со старых. `sync-team-repos.sh` заливает в каждый `team-template/`.
+Деплоя пока нет: workflow в репозиториях команд пишет notice «нет переменной
+RENDER_SID_*», это нормально.
 
-After all four team Blueprints are applied, the Render URLs of all 12
-team services will be `https://raif-<a|b|c|d>-<retail|cib|backend>.onrender.com`,
-which is exactly what the orchestrator's `render.yaml` expects.
+Проверка: `doctor.sh` пишет «репозитории команд: все N есть, публичные».
 
-## Step 7 — Deploy hook secrets (manual)
+## Шаг 5. Render
 
-In **each team repo** on GitHub → Settings → Secrets and variables →
-Actions:
+Последняя строка `doctor.sh` говорит, как отсюда ходить в Render. Дальше
+`R <команда>` означает одно из двух:
 
-- `RENDER_HOOK_BACKEND` — copy from Render → that team's backend service → Settings → Deploy Hook
-- `RENDER_HOOK_CIB`
-- `RENDER_HOOK_RETAIL`
+- api.render.com доступен: `python3 tools/setup/render_ops.py <команда>`;
+- недоступен: `tools/setup/ops.sh <команда>`. Скрипт выполняет ту же
+  команду в GitHub Actions, ждет, печатает лог и скачивает
+  `render-services.conf`. Перед первым запуском один раз:
+  `tools/setup/github-access.sh ops-secrets`.
 
-In the **orchestrator** repo on GitHub:
+```bash
+R check
+R provision --dry-run
+R provision
+```
 
-- `RENDER_HOOK_SIMULATOR` — copy from Render → `raif-simulator` → Settings → Deploy Hook
+`check` показывает workspace. Их несколько: вписать нужный id в
+`RENDER_OWNER_ID` и для ops.sh повторить `github-access.sh ops-secrets`.
 
-## Step 8 — Smoke check
+`provision` создает Postgres, сервисы команд и симулятор, ставит им env,
+запускает первые сборки и пишет `tools/setup/render-services.conf`.
+Занимает 5-15 минут.
 
-1. From your laptop, in each team repo, make a trivial commit (e.g. touch
-   a comment in `retail/src/main.py`) and push. The team repo's Action
-   runs and triggers the right Render service. After ~2-4 minutes,
-   `https://raif-<t>-retail.onrender.com/health` returns 200 with the
-   new commit SHA.
-2. Visit `https://raif-simulator.onrender.com/` (the leaderboard). The
-   four team cards should be present.
-3. POST `/admin/start` with the admin token — the simulator baselines
-   all four teams and starts polling.
+Если упал:
 
-## Step 9 — On the workshop day
+- код выхода 75: Render ограничил частоту запросов, повторить через
+  указанное время;
+- ошибка про repo: репозитории должны быть публичными; не помогло, человек
+  подключает GitHub в Render (Account Settings, Git Credentials);
+- ошибка про оплату или тариф: в workspace нет карты.
 
-Hand each team member their personalised bootstrap. They double-click,
-pick a block (`retail` / `cib` / `backend`), type their name, and the
-laptop is ready. The AI assistant follows the participant onboarding
-from each team repo's `CLAUDE.md` automatically.
+Проверка через 10 минут:
 
-The leaderboard URL is the same for everyone. Show it on a big screen.
+```bash
+R status
+```
 
-## After the workshop
+У всех сервисов `/health` 200, у симулятора «БД есть». Сборка упала
+(`build_failed`): лог в Render, сервис, Logs.
 
-- Delete the workshop SSH deploy key in all four team repos.
-- Optionally delete the four team repos (or archive them for keepsakes).
-- Drop the free Postgres in Render (or wait for the 90-day auto-expire).
+## Шаг 6. Связать команды с Render
 
-## What I (Claude) did vs what's left for you
+```bash
+tools/setup/github-access.sh render
+tools/setup/sync-team-repos.sh
+```
 
-Done in this session (committed in this orchestrator repo):
+`render` кладет в каждый репозиторий команды секрет `RENDER_API_KEY` и
+переменные `RENDER_SID_*`: без них сохранения участников не деплоятся.
+`sync-team-repos.sh` вписывает настоящие URL сервисов и табло в `TEAM.md`
+команд, эти адреса агенты показывают участникам.
 
-- Moved the old two-team monorepo content into `_archive/`.
-- Created `team-template/` with a clean single-team layout: three blocks
-  with paths stripped of `team_a/` prefix, isolation templates without
-  `team_b` deny rules, single-team `CLAUDE.md` / `AGENTS.md` / `TEAM.md`
-  / `RULES.md` / `README.md`, single-team `render.yaml` and
-  `docker-compose.yml`, per-team `deploy-render.yml`, and
-  `tools/cowork-onboard.py` that no longer asks for a team picker.
-- Generalised `simulator/` to N teams via `TEAM_NAMES` env var; all
-  hardcoded `team_a/team_b` removed in code, tests updated and passing
-  (39 tests green).
-- Updated the orchestrator's `render.yaml`, `docker-compose.yml`,
-  `.github/workflows/deploy-render.yml`, `README.md`, `CLAUDE.md`,
-  `ORGANIZER.md`, `DEPLOY.md` for the four-team multi-repo layout.
-- Added `.gitmodules` placeholder and two helper scripts under
-  `tools/setup/`.
+Проверка деплоя из репозитория команды (подставь репозиторий первой команды):
 
-Manual steps (you):
+```bash
+gh workflow run deploy-render.yml -R <OWNER>/team_1 -f services=all
+gh run list -R <OWNER>/team_1 -w deploy-render.yml -L 1
+```
 
-- **Steps 1, 2, 6, 7** — creating GitHub repos, generating SSH key,
-  setting up Render Blueprints, configuring secrets. Web-UI work I can't
-  do.
-- **Steps 3, 4** — running the two helper scripts I wrote (one-line
-  invocations).
-- **Step 5** — personalising the four pairs of bootstrap scripts. I
-  deliberately did not touch the master .applescript/.cmd because the
-  UTF-16 / embedded base64 key is risky to mutate without verifying
-  byte-by-byte. The diff is small (team picker out, paths shortened,
-  template names changed) — comfortable for a focused 1-2 hour session.
-  If you want a generator for it, that's a clean follow-up task.
-- **Step 8** — smoke check before the workshop.
+Run зеленый, в логе каждого блока «Render принял деплой». Через 5 минут
+`R status`: у `a:*` свежий деплой в статусе `live`.
+
+Проверка симулятора:
+
+```bash
+R sim start
+R sim state
+R sim stop
+```
+
+У всех команд 500 клиентов, на табло та же картина. `sim stop` замораживает
+табло до дня воркшопа.
+
+## Шаг 7. Установщики и ключи ноутбуков
+
+```bash
+python3 tools/setup/make-bootstrap.py
+tools/setup/github-access.sh keys
+```
+
+`make-bootstrap.py` создает по ключу на команду и пару установщиков в
+`~/AI-Workshop-secrets/<WORKSHOP_ID>/team_<буква>/`:
+`raif-workshop-setup.applescript` (macOS) и `raif-workshop-setup.cmd`
+(Windows). `keys` вешает публичные ключи на репозитории команд как deploy
+key с правом записи.
+
+Проверка ключа первой команды:
+
+```bash
+ssh -i ~/AI-Workshop-secrets/<WORKSHOP_ID>/keys/team_a -o IdentitiesOnly=yes -p 443 -T git@ssh.github.com
+```
+
+Ответ: `Hi <OWNER>/team_1! You've successfully authenticated`.
+
+Раздача: пара скриптов команды только ее участникам, лично (AirDrop,
+флешка). Не в чаты, не в почту, не в репозиторий: в скрипте ключ с правом
+push. CI оркестратора падает, если ключ попал в репозиторий.
+
+## Шаг 8. Ноутбуки участников
+
+На каждом ноутбуке:
+
+- git (на macOS Command Line Tools: `xcode-select --install`);
+- Claude Code (десктоп Claude или CLI) или Codex (десктоп ChatGPT или CLI)
+  с входом в подписку;
+- сеть до claude.ai и anthropic.com или chatgpt.com и openai.com, до
+  github.com, ssh.github.com:443, raw.githubusercontent.com, *.onrender.com.
+
+Установщик: двойной клик, выбрать блок, ввести имя. Он кладет ключ,
+настраивает SSH через порт 443, клонирует репозиторий команды и включает
+изоляцию блока. Дальше участник открывает папку репозитория в Claude или
+Codex и пишет «привет»: агент сам проводит онбординг.
+
+Проверка: на ноутбуке открываются табло и retail своей команды, агент в
+онбординге называет блок участника.
+
+## Шаг 9. Генеральный прогон
+
+За 1-2 дня до воркшопа:
+
+1. `R status`: все 200.
+2. `R sim start`.
+3. Три ноутбука одной команды, три человека по блокам, мини-фича за 20-30
+   минут, например экран «мой баланс» сквозь три блока.
+4. Сохранения доезжают до Render за 2-4 минуты, табло двигается, в ленте
+   событий есть объяснение.
+5. После: `R sim stop` и сброс репозитория команды
+   `tools/setup/sync-team-repos.sh a`.
+
+## Деньги
+
+Порядок цен, перед оплатой сверить на render.com/pricing:
+
+- web-сервис Starter около $7 в месяц, списание пропорционально времени:
+  22 сервиса на неделю около $40;
+- Postgres basic_256mb около $6 в месяц;
+- сборки расходуют build minutes workspace: за 3 часа 7 команд делают сотни
+  сборок, лимит проверить в Billing;
+- LLM: судья зовется на каждое изменение команды, для gpt-4o-mini это копейки.
+
+Сразу после воркшопа `R suspend`, после разбора `R teardown --confirm DELETE`
+(через ops.sh: `teardown DELETE`). Подробно в `RUNBOOK.md`.
+
+## Шпаргалка
+
+| Что | Команда |
+|---|---|
+| проверить компьютер и аккаунты | `tools/setup/doctor.sh` |
+| создать репозитории команд | `tools/setup/create-team-repos.sh` |
+| залить или сбросить шаблон команд | `tools/setup/sync-team-repos.sh [буквы]` |
+| секреты оркестратора для Actions | `tools/setup/github-access.sh ops-secrets` |
+| RENDER_API_KEY и RENDER_SID_* в команды | `tools/setup/github-access.sh render` |
+| deploy keys команд | `tools/setup/github-access.sh keys` |
+| установщики ноутбуков | `python3 tools/setup/make-bootstrap.py` |
+| создать все на Render | `R provision` |
+| поменял teams.conf или ключ LLM | `R env` (для ops.sh сначала push и `ops-secrets`) |
+| здоровье сервисов | `R status` |
+| пересобрать | `R deploy a:cib sim` |
+| тариф | `R plan starter` |
+| табло | `R sim state`, `start`, `stop`, `reset`, `evaluate` |
+| после воркшопа | `github-access.sh revoke`, `R suspend`, `R teardown --confirm DELETE` |

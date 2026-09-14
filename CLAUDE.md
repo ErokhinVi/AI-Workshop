@@ -1,54 +1,37 @@
-# CLAUDE.md — organiser orchestrator
+# CLAUDE.md: оркестратор AI-воркшопа
 
-> This file is read automatically when Claude Code starts in the organiser
-> repository. The user here is Vitaly Erokhin or Nerses Bagiyan — the
-> workshop organisers. Talk technically, no simplifications.
+Claude Code читает этот файл в репозитории организатора. Перед тобой
+организатор или ведущий воркшопа: говори технически, без упрощений.
+Участник попал сюда по ошибке: отправь его в репозиторий его команды.
 
-## What this repo is
+## Что человек хочет и куда идти
 
-The orchestrator for the Raiffeisen AI workshop:
+| Задача | Куда |
+|---|---|
+| развернуть воркшоп с нуля или заново | `SETUP.md`, по шагам и с проверками |
+| провести день воркшопа, табло, поломки | `RUNBOOK.md` |
+| понять устройство, поменять правила оценки | `ORGANIZER.md` |
+| поменять то, что видят участники | `team-template/` (сменил `CONTRACT.md`: обнови `simulator/src/baseline.py`), потом `tools/setup/sync-team-repos.sh`, только до воркшопа |
+| поменять симулятор или табло | `simulator/`, тесты, push в main деплоит симулятор |
 
-- two team submodules at `team_a/`, `team_b/` —
-  each pointing to a separate GitHub repository of one team;
-- the customer simulator + leaderboard in `simulator/`;
-- the seed dataset and the task briefs;
-- the canonical team-repo template in `team-template/`;
-- helper scripts in `tools/setup/`.
+## Правила
 
-Participant onboarding lives in each team repo (see
-`team-template/CLAUDE.md`), not here. If by mistake a participant ends up
-in this orchestrator repo, point them at their team's repo.
+- Все настройки воркшопа в `tools/setup/teams.conf`. Имена команд, аккаунт
+  GitHub и префикс Render в скриптах и доках не хардкодить.
+- Секреты только в `~/AI-Workshop-secrets/<WORKSHOP_ID>/workshop.env` и в
+  секретах GitHub. Не печатать, не коммитить, не вставлять в команды.
+- Готовые установщики ноутбука содержат приватные ключи: только вне
+  репозитория.
+- Аккаунты, карту, покупки и выпуск ключей делает человек.
+- `teardown`, `revoke` и сброс репозиториев команд только по прямой просьбе.
+- Во время воркшопа не пушить в репозитории команд.
+- Из корпоративной сети api.render.com и *.onrender.com закрыты: Render
+  через `tools/setup/ops.sh`, он работает в GitHub Actions.
 
-## Quick references
+## Проверки перед коммитом
 
-- `ORGANIZER.md` — full workshop format, four teams, multi-repo layout
-- `DEPLOY.md` — Render deploy flow (per-team-repo + simulator)
-- `SETUP.md` — manual one-off steps to set up the four team repos and the simulator
-- `docs/superpowers/specs/` — design specs (still describe the previous two-team layout; refresh if needed)
-- `docs/superpowers/plans/` — implementation plans
-
-## When the organiser asks for changes
-
-- Changes to **participant-facing** content (block code, isolation
-  templates, bootstrap, team-side docs) → edit `team-template/`, then push
-  to each of the four team repositories via `tools/setup/sync-team-repos.sh`
-  (or via direct `git push` from each working clone).
-- Changes to **simulator / leaderboard / seed / tasks / organiser docs** →
-  edit here; `git push` to `main` triggers the Render deploy hook of
-  `raif-simulator` automatically.
-- Adding a fifth team or renaming a team → edit `.gitmodules`,
-  `render.yaml` (env var `TEAM_NAMES` + URL set) and `simulator/` if needed
-  (it's parametric on TEAMS).
-
-## Submodules quick reference
-
+```bash
+python3 -m unittest discover -s tools/setup/tests
+cd simulator && python3 -m pytest -q
+python3 tools/setup/check_no_keys.py
 ```
-git submodule update --init --recursive    # first init after clone
-git submodule update --remote              # pull latest team commits
-git add team_a team_b && git commit -m "bump team submodules"
-```
-
-The simulator is **not** dependent on the submodule state being current
-— it polls team services over the network by their Render URLs. The
-submodule pointers in this repo are mostly documentation: they let an
-organiser-side agent jump between team codebases without re-cloning.

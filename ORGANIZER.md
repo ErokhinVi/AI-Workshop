@@ -1,216 +1,176 @@
-# ORGANIZER.md — brief for the workshop organiser
+# ORGANIZER.md: как устроен воркшоп
 
-> This file is for **Vitaly Erokhin** and **Nerses Bagiyan** (the
-> organisers). The participant onboarding lives in each team's repo (in
-> `CLAUDE.md` / `AGENTS.md` of `team-template/`). With organisers we talk
-> technically, no simplifications.
+Для организаторов и их агентов. Развернуть: `SETUP.md`. Провести: `RUNBOOK.md`.
 
-## Workshop format
+## Формат
 
-AI workshop for the Raiffeisen bank board. Twelve board members are split
-into **four teams of three**. A team is not one bank — it is **three
-service blocks**: `retail` (the customer-facing mobile bank), `cib`
-(corporate and business logic), `backend` (the data core). One participant
-— one block. All four teams receive an **identical set of blocks** and
-**in parallel, independently** solve the **same task** announced by the
-host out loud.
+Участники делятся на команды по три человека. Команда = банк из трех
+сервисных блоков, у каждого участника один блок:
 
-A feature is done only when all three blocks of the team have done their
-part and connected. Block links: retail → backend (data),
-retail → cib (decision), cib → backend (customer data). Inside the team
-the three participants agree out loud. There is no link between teams —
-that is the point of the competition.
+- `retail`: мобильный банк клиента, UI и тонкий слой, своих данных нет;
+- `cib`: каталог продуктов и логика решений, зовет LLM для объяснений;
+- `backend`: клиенты, транзакции, остатки, базовый API.
 
-Customers are simulated against each bank. After a deploy the simulator
-scores all three blocks of the team together and moves the customer base
-up or down — with a human-readable rationale. The leaderboard shows the
-four teams' scores head to head.
+Связи: retail → backend (данные), retail → cib (решение), cib → backend
+(данные клиента). Фича готова, когда все три блока сделали свою часть и
+соединились. Все команды стартуют с одинакового банка и решают одну задачу,
+объявленную вслух, параллельно и независимо. Связи между командами нет.
 
-## Multi-repository layout
-
-Each team works in its **own** GitHub repository (so one team's commits,
-PRs and issues never leak to another). The organiser orchestrates the
-whole thing from this repo:
+## Репозитории
 
 ```
-ai-workshop                       (this orchestrator repo)
-├── team_a/        submodule → ai-workshop-team-a
-├── team_b/        submodule → ai-workshop-team-b
-├── simulator/     customer simulator + leaderboard (deployed from here)
-├── seed/          shared customer base for all four teams
-├── tasks/         task briefs (the host announces which one)
-├── docs/          design specs and implementation plans
-├── team-template/ canonical contents of ONE team repo — the source of truth
-└── tools/setup/   sync-team-repos.sh, add-submodules.sh
+<OWNER>/AI-Workshop           оркестратор, этот репозиторий
+  simulator/                  симулятор клиентов и табло (FastAPI, Postgres)
+  team-template/              содержимое репозитория одной команды, источник истины
+  seed/                       клиенты, транзакции, кредитная история
+  tasks/                      рамка задачи (сама задача объявляется вслух)
+  tools/setup/                сетап и эксплуатация, все читают teams.conf
+  tools/bootstrap/            мастер-установщики ноутбука, без ключей
+  team_a/, team_b/            сабмодули на репозитории команд, для удобства
+  _archive/, docs/            прошлые схемы и дизайн-доки
+<OWNER>/team_1 ... team_N     по публичному репозиторию на команду
 ```
 
-Each team repo is structurally identical at the starting line. The
-content of `team-template/` is the single source of truth — when something
-participant-facing changes, edit there and propagate to all four team
-repos via `tools/setup/sync-team-repos.sh`.
+Репозитории команд публичные: симулятор читает их `CONTRACT.md` через
+raw.githubusercontent.com без токена, Render собирает их без подключения
+GitHub.
 
-## Repository layout (per team repo)
+Все, что видят участники, правится в `team-template/` и разливается
+`tools/setup/sync-team-repos.sh`. Скрипт перезаписывает main команд, поэтому
+только до воркшопа.
 
-| Path | Purpose |
-|---|---|
-| `retail/`, `cib/`, `backend/` | three service blocks (FastAPI, Docker), each with `CONTRACT.md` declaring exposed endpoints |
-| `seed/` | local copy of the customer dataset, used by the team's backend block |
-| `tasks/` | task briefs |
-| `.claude/templates/settings-{retail,cib,backend}.json` | Claude permission profiles, one per block |
-| `.codex/templates/config-{retail,cib,backend}.toml` | Codex permission profiles, one per block |
-| `CLAUDE.md`, `AGENTS.md`, `TEAM.md`, `RULES.md`, `README.md` | participant-facing docs |
-| `tools/cowork-onboard.py` | sandbox onboarding for the agent (SSH key, git config, WORKSHOP_BLOCK) |
-| `tools/bootstrap/raif-workshop-setup.{applescript,cmd}` | laptop setup scripts (regenerated per workshop, see SETUP.md) |
-| `render.yaml` | Render Blueprint for the team's three services |
-| `.github/workflows/deploy-render.yml` | per-team deploy hook on push to main |
-| `docker-compose.yml` | local dev: the team's three blocks |
+## Render
 
-## How the customer simulator works
-
-1. **Trigger — pull model.** Roughly every 30 seconds the simulator polls
-   `/health` of all twelve bank blocks (3 × 4 teams) and reads git commits
-   from the responses. A new commit on any block of a team → an evaluation
-   round for that team.
-2. **Probe.** A closed set of HTTP checks across three blocks of the
-   committing team: backend (exposes a customer, accepts and lists
-   applications), cib (a credit product in the catalogue, a decision
-   endpoint, separation of strong vs weak applicants), retail (a credit
-   tab in the UI, an end-to-end application, a human-readable decline
-   rationale, a transfer regression).
-3. **Judge — rubric + formula.** Each team is judged in an **independent
-   LLM call** (parallel `asyncio.gather`), `temperature=0`. The LLM scores
-   the team against **10 criteria** (3 backend + 3 cib + 4 retail); the
-   customer count is computed by a deterministic formula in code (`B0=500`,
-   `GAIN=0.6`, `RUBRIC_MAX=20`). If the LLM is unavailable — scripted
-   fallback over the same checks. The simulator never stalls.
-4. **Leaderboard** is built into the simulator: four customer bases and an
-   event feed with rationales.
-
-Manual control: `POST /admin/start`, `POST /admin/evaluate` (round on
-demand), `POST /admin/stop`, `POST /admin/reset` (reset to baseline) —
-with an `X-Admin-Token` header.
-
-Generalising to a different number of teams: change the env var
-`TEAM_NAMES` (comma-separated list) and provide three `<PREFIX>_*_URL`
-env vars per team (prefix = first letter of the team suffix, uppercase).
-Code in `simulator/src/main.py` and `judge.py` is fully parametric.
-
-## Render — 13 web services (4 × 3 + simulator) + Postgres
-
-Each team repo deploys its own three services from its own `render.yaml`.
-The orchestrator repo deploys only the simulator.
-
-| Service | Repo | URL |
+| Сервис | Собирается из | Env |
 |---|---|---|
-| `raif-a-{backend,cib,retail}` | ai-workshop-team-a | `https://raif-a-*.onrender.com` |
-| `raif-b-{backend,cib,retail}` | ai-workshop-team-b | `https://raif-b-*.onrender.com` |
-| `raif-c-{backend,cib,retail}` | ai-workshop-team-c | `https://raif-c-*.onrender.com` |
-| `raif-d-{backend,cib,retail}` | ai-workshop-team-d | `https://raif-d-*.onrender.com` |
-| `raif-simulator` | ai-workshop (this repo) | `https://raif-simulator.onrender.com` |
+| `<prefix>-<буква>-backend` | репозиторий команды, `backend/Dockerfile` | `TEAM_NAME` |
+| `<prefix>-<буква>-cib` | репозиторий команды, `cib/Dockerfile` | `TEAM_NAME`, `BACKEND_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` |
+| `<prefix>-<буква>-retail` | репозиторий команды, `retail/Dockerfile` | `TEAM_NAME`, `BACKEND_URL`, `CIB_URL` |
+| `<prefix>-simulator` | оркестратор, `simulator/Dockerfile` | `TEAM_NAMES`, `<БУКВА>_REPO`, `<БУКВА>_BACKEND_URL`, `<БУКВА>_CIB_URL`, `<БУКВА>_RETAIL_URL`, `OPENAI_*`, `ADMIN_TOKEN`, `DATABASE_URL`, все из `SIM_ENV` |
+| `<prefix>-db` | Postgres | |
 
-Plus Postgres `raif-workshop-db` (free) — used only by the simulator: it
-stores the four teams' customer base and the event log.
+Все создает и держит в соответствии с `teams.conf` скрипт
+`tools/setup/render_ops.py`. Env в интерфейсе Render руками не правят:
+меняют teams.conf или секреты и запускают `render_ops.py env`, он обновит
+изменившиеся сервисы и передеплоит только их. `RENDER_GIT_COMMIT` Render
+подставляет сам, блоки отдают его в `/health`.
 
-Deployment details — `DEPLOY.md`. Free-plan concurrent web service cap is
-a real risk at 13 services; see "Risk: Render free-plan cap" below.
+Автодеплоя у сервисов нет, деплой запускают workflow:
 
-## Two agents: Claude Code and Codex
+```
+участник просит сохранить → агент: git push в main репозитория команды
+  → Actions «Deploy services via Render API»: какие папки блоков изменились
+  → POST api.render.com/v1/services/<RENDER_SID_блока>/deploys, секрет RENDER_API_KEY
+  → Render собирает блок, 2-4 минуты
+  → симулятор раз в POLL_INTERVAL_S видит новый коммит в /health блока
+  → снимок, живые вызовы, LLM-судья → база клиентов команды → табло
+```
 
-A participant can work in either Claude Code or Codex — their choice.
-Block isolation is the same in spirit for both, but implemented with
-different mechanisms:
+У каждого блока свой job со своей concurrency-группой: при общей группе
+GitHub вытеснял средний из трех близких пушей, и блок молча не выезжал.
 
-- **Claude** reads `CLAUDE.md`, isolation lives in
-  `.claude/settings.local.json` (deny/allow by path). Bootstrap copies
-  it from `.claude/templates/settings-<block>.json`.
-- **Codex** reads `AGENTS.md` (a thin wrapper that defers to `CLAUDE.md`),
-  isolation is a permission profile in `.codex/config.toml`. Bootstrap
-  copies it from `.codex/templates/config-<block>.toml` and marks the
-  repo folder as trusted in `~/.codex/config.toml` (otherwise Codex
-  doesn't load the project config). Enforcement is the Codex OS sandbox
-  (Seatbelt / ACL).
+Симулятор деплоится так же: push в `simulator/` оркестратора запускает
+«Deploy simulator via Render API».
 
-Since each team lives in a separate GitHub repository, the "other team is
-invisible" property is provided **by repo separation itself**, not by
-deny rules — the participant doesn't have the other team's code on disk
-at all. The templates only have to police the boundaries between blocks
-of the same team.
+«Workshop ops» (`.github/workflows/workshop-ops.yml`) выполняет любую
+команду `render_ops.py` на раннере GitHub: так Render управляется из сети,
+где он закрыт. Из терминала его запускает `tools/setup/ops.sh`.
 
-Claude and Codex templates are twins — when you edit block access, edit
-both.
+## Симулятор и судья
 
-Two Codex profile settings are critical (without them Codex breaks):
+1. Опрос: раз в `POLL_INTERVAL_S` секунд `/health` всех блоков. Новый коммит
+   у любого блока команды запускает раунд оценки этой команды.
+2. Снимок: `CONTRACT.md` трех блоков по коммиту, HTML главного экрана retail,
+   живые вызовы ручек, объявленных в контрактах заголовками `### METHOD /path`.
+   Снимок сравнивается с нулевой точкой: ручками шаблона, зашитыми в
+   `simulator/src/baseline.py`, поэтому перезапуск симулятора оценку не
+   сдвигает. Меняешь `CONTRACT.md` в `team-template/`: обнови и `baseline.py`,
+   тест `test_baseline_matches_template` сверяет их.
+3. Судья: отдельный вызов LLM на команду, `temperature=0`, без сравнения с
+   соперниками. Оси 0-2: новая функциональность, ценность для клиента,
+   доведенность, сквозность (множитель), хранение в backend, ширина, отделка
+   UI. Удобство 0-10. LLM недоступен: запасная оценка `generic_fallback` по
+   diff контрактов, табло не встает.
+4. Формула в `simulator/src/scoring.py`: старт 500, пол 50, дельта равна
+   изменению ценности, пустой коммит базу не двигает. Поломки штрафует код, а
+   не модель: регрессия базовых функций, 5xx объявленной ручки, недоступный
+   блок.
+5. Состояние в Postgres: перезапуск симулятора счет не теряет.
 
-- The read base is `":root" = "read"` (NOT `:minimal`). The Codex sandbox
-  enforces at the OS level; with the narrow `:minimal` base the agent
-  cannot even find `git` in `/usr/bin`.
-- Write into `.git` — `".git" = "write"`. Without it `git commit` fails
-  on `.git/index.lock`.
+Админка: `POST /admin/start`, `stop`, `reset`, `evaluate`, `set-base` с
+заголовком `X-Admin-Token`. Удобнее через `render_ops.py sim ...`; старт
+есть и кнопкой на табло.
 
-Network for push is enabled in the profile (`[permissions.*.network]
-enabled = true`).
+### Ручки симулятора
 
-**Verification status:** on macOS a full run has been done — Codex sees
-git, writes only into its block, doesn't read the other team, and saving
-to the shared pile works. **On Windows it hasn't been verified yet** —
-run it before the workshop (there the Codex sandbox uses ACLs / restricted
-tokens, behaviour may differ).
+Задаются в `SIM_ENV` файла `teams.conf`, применяются `render_ops.py env`.
 
-Separately for push on the corporate network: GitHub is reachable via SSH
-only on port 443 (`ssh.github.com`), port 22 is closed. That is an ssh
-channel thing, agent-independent. Installers already wire access via 443
-(`HostName ssh.github.com`, `Port 443` in `~/.ssh/config`), so push from
-a clean setup goes through without hiccups. For manual setup or a stale
-config, diagnostics and fix are in `team-template/CLAUDE.md` (section
-"Git and the shared pile").
+| Переменная | В коде | В teams.conf | Что |
+|---|---|---|---|
+| `STAGNATION_GRACE_S` | 3600 | | сколько секунд простоя прощается |
+| `STAGNATION_RATE_PER_MIN` | 1.5 | 0 | утечка клиентов в минуту после простоя |
+| `REGRESSION_COST` | 120 | | штраф за сломанную базовую функцию |
+| `BROKEN_ENDPOINT_COST` | 60 | | штраф за 5xx выкаченной ручки |
+| `UNREACHABLE_BLOCK_COST` | 90 | | штраф за недоступный блок |
+| `CEIL` | 1000 | 10000 | потолок базы |
+| `STATIONARY_FLOW` | 0 | | доля ценности на каждый раунд |
+| `POLL_INTERVAL_S` | 30 | | период опроса блоков |
+| `LLM_TIMEOUT_S` | 30 | | таймаут вызова LLM |
+| `ACTIVE_TASK` | пусто | | подсказка судье, какую задачу предлагали |
 
-## One-off setup (manual steps for the organiser)
+## Изоляция блоков
 
-See `SETUP.md` for the full checklist. In short:
+- Claude Code читает `CLAUDE.md` команды, изоляция в
+  `.claude/settings.local.json`, это копия `.claude/templates/settings-<блок>.json`.
+- Codex читает `AGENTS.md`, изоляция в профиле `.codex/config.toml`, это копия
+  `.codex/templates/config-<блок>.toml`. Папка репозитория помечена trusted в
+  `~/.codex/config.toml`. Критично: база чтения `":root" = "read"` (с
+  `:minimal` Codex не находит git) и запись в `.git` (иначе не пишется
+  `.git/index.lock`). Проверено на macOS, на Windows не проверялось.
+- Другие команды не видны без всяких правил: их репозиториев нет на диске.
 
-1. Create five GitHub repositories: `ai-workshop`, `ai-workshop-team-a`,
-   `-team-b`, `-team-c`, `-team-d`.
-2. Generate one workshop SSH key pair; add the **public** key as a
-   **deploy key with write access** in each of the four team repos.
-3. Push `team-template/` content to each of the four team repos via
-   `tools/setup/sync-team-repos.sh`.
-4. From this orchestrator repo, run `tools/setup/add-submodules.sh` to
-   wire the four team repos in as submodules.
-5. Personalise the master bootstrap scripts (one variant per team) and
-   distribute to participants.
-6. Create one Render Blueprint per team repo (3 services each) and one
-   Blueprint for the orchestrator (simulator + Postgres). Set
-   `OPENAI_API_KEY` and `ADMIN_TOKEN` in the shared env group.
-7. Add deploy-hook secrets: per team repo —
-   `RENDER_HOOK_{BACKEND,CIB,RETAIL}`; in the orchestrator —
-   `RENDER_HOOK_SIMULATOR`.
+Шаблоны Claude и Codex близнецы: правишь доступы в одном, правь и в другом.
 
-## Risk: Render free-plan cap
+## Ноутбук участника
 
-13 web services at once will likely hit the free-plan concurrent web
-service cap on a single account. Fallbacks:
+Установщик собирает `tools/setup/make-bootstrap.py`, пару на команду. Скрипт:
 
-- merge `cib` and `backend` into a single service per team — drops it to
-  9 services (still 3 over the typical cap),
-- use a second Render account for two of the four teams,
-- pay for a Starter plan for the workshop day (cheapest reliable path).
+1. кладет deploy key команды в `~/.ssh/raif_workshop`;
+2. дописывает в `~/.ssh/config` выход на GitHub через `ssh.github.com:443`,
+   порт 22 в корпоративной сети закрыт;
+3. ставит глобальные git user.name и user.email участника;
+4. проверяет `ssh -T git@github.com`;
+5. клонирует репозиторий команды;
+6. пишет `.git/raif-workshop-info` с блоком и именем, его читает
+   `tools/cowork-onboard.py` при старте агента;
+7. включает изоляцию блока для Claude и Codex.
 
-Verify the actual limit on your account before the workshop — this is
-non-trivial at 4 × 3 + 1 services.
+Ключ у каждой команды свой: GitHub не разрешает один deploy key на два
+репозитория, а ключ аккаунта в скрипт класть нельзя. Готовые скрипты лежат
+вне репозитория, `tools/setup/check_no_keys.py` в CI не пустит ключ в
+репозиторий.
 
-## What NOT to do
+## Безопасность
 
-- Don't let the teams peek at each other — repo separation is the main
-  guarantee, the deny rules inside templates are a secondary belt for
-  same-team sibling blocks only.
-- Don't let a participant edit a sibling block of their own team — wired
-  into permissions; only their `CONTRACT.md` is readable.
-- Don't hand teams the implementation — the task arrives as a brief, they
-  solve it with the agent themselves.
+- В репозиториях команд лежит `RENDER_API_KEY`. Участник с правом push может
+  его достать, поменяв workflow. Поэтому аккаунт Render отдельный под
+  воркшоп, а ключ удаляется сразу после.
+- Deploy keys снимаются после воркшопа: `github-access.sh revoke`.
+- Логи Actions публичного репозитория видны всем: скрипты не печатают
+  секреты, GitHub дополнительно их маскирует.
+- `ADMIN_TOKEN` знают организатор и ведущий табло.
 
-## Links
+## Разработка
 
-- Full design (older, two-team): `docs/superpowers/specs/2026-05-17-three-block-teams-design.md`
-- Implementation plan (older, two-team): `docs/superpowers/plans/2026-05-17-three-block-teams.md`
-- Deployment: `DEPLOY.md`
-- One-off setup: `SETUP.md`
+```bash
+python3 -m unittest discover -s tools/setup/tests   # render_ops.py против фейкового Render API
+cd simulator && python3 -m pytest -q                # симулятор и судья
+python3 tools/setup/check_no_keys.py                # приватных ключей в репозитории нет
+```
+
+`docker-compose.yml`: Postgres и симулятор для локальной отладки.
+
+## История
+
+- `REHEARSAL-2026-06-02.md`: прогон на двух командах и найденные грабли.
+- `docs/superpowers/`: дизайн-доки, частью про старую схему на две команды.
