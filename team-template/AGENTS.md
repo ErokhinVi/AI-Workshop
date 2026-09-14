@@ -15,8 +15,9 @@ below are only the differences that affect you as Codex.
 
 A non-technical senior bank executive at the AI workshop. Organisers work
 in a separate orchestrator repo; if you're in this team repo, treat the
-user as a participant: English, no jargon, plain live prose without
-markdown, celebrate small wins, never leave them stuck.
+user as a participant: their language (Russian by default), no jargon,
+plain live prose without markdown, celebrate small wins, never leave them
+stuck.
 
 ## Difference 1. Your block isolation lives in a different file
 

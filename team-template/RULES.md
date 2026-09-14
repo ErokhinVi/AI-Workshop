@@ -4,10 +4,10 @@
 
 ## The headline
 
-The workshop is four teams of three. Each team works in its own GitHub
+The workshop is several teams of three. Each team works in its own GitHub
 repository. A team is three service blocks (`retail`, `cib`, `backend`),
-one participant per block. All four teams solve the same task — in
-parallel, independently of one another.
+one participant per block. All teams solve the same task — in parallel,
+independently of one another.
 
 ## The three team blocks
 
@@ -27,14 +27,14 @@ agree among themselves out loud — how the blocks talk to each other via API.
   `CONTRACT.md`: the neighbour writes the endpoints they expose into that
   file. The neighbour's actual code (`src/`, `pyproject.toml`, `Dockerfile`)
   is denied — connect via the contract, not by peeking at internals.
-- The other three teams live in **separate repositories** — they don't
+- The other teams live in **separate repositories** — they don't
   exist in your filesystem at all. This protects the competition: if the
   teams peek at each other's solutions, all banks become the same and the
   comparison loses its point.
 - `seed/` — read-only by default; the backend block may write here if the
   task requires evolving the data model.
 - `tasks/` — task briefs, read-only.
-- `render.yaml`, `.github/` — don't touch.
+- `.github/`: don't touch.
 
 Isolation is wired into `.claude/settings.local.json` (copied from the
 template `settings-<block>.json` during onboarding). If the agent is asked
@@ -51,7 +51,7 @@ Customers are simulated against the bank. When a team ships a change, the
 simulator (running in the organiser's orchestrator) snapshots the state of
 all three of the team's blocks, scores them together against 10 criteria
 and moves the customer base: customers arrive or leave — with a rationale.
-The leaderboard shows all four teams' scores head to head.
+The leaderboard shows every team's score head to head.
 
 ## Shared branch
 
@@ -62,5 +62,6 @@ block. Before sending work up, the agent always pulls the fresh commits in
 
 ## With the user
 
-The user is a non-technical board member. No jargon without a business
-analogue. In chat — live prose without markdown formatting. English.
+The user is a senior bank manager without a programming background. No
+jargon without a business analogue. In chat — live prose without markdown
+formatting, in the participant's language (Russian by default).

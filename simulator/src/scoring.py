@@ -59,13 +59,14 @@ UI_POLISH_WEIGHT = 18.0
 # Цена регрессии базовой функции (например, сломанных переводов) в клиентах.
 # Сохранена как именованная константа; конкретный штраф собирает main через
 # `outage_cost` по фактам `probe.assess_regression`.
-REGRESSION_COST = 120.0
+REGRESSION_COST = float(os.environ.get("REGRESSION_COST", "120.0"))
 
 # Цена выкаченной, но падающей ручки (5xx) и недоступного блока — в клиентах.
 # Бьёт независимо от стадии фичи: «сделано криво» отпугивает клиентов, тогда как
 # «ещё не сделано» (404) — нет (за это `outage_cost` не штрафует, см. probe).
-BROKEN_ENDPOINT_COST = 60.0
-UNREACHABLE_BLOCK_COST = 90.0
+# Все три цены env-настраиваемы: смягчить воркшоп, не трогая код.
+BROKEN_ENDPOINT_COST = float(os.environ.get("BROKEN_ENDPOINT_COST", "60.0"))
+UNREACHABLE_BLOCK_COST = float(os.environ.get("UNREACHABLE_BLOCK_COST", "90.0"))
 
 # Стационарный поток ОТКЛЮЧЁН по умолчанию (0.0). Раньше каждый коммит-раунд
 # сдвигал базу ещё и на долю текущей ценности — из-за этого даже пустой коммит

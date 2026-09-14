@@ -6,9 +6,8 @@
 ## The team
 
 This GitHub repository is one team's territory. The team is three service
-blocks (`retail`, `cib`, `backend`), one participant per block. The other
-three teams each have their own separate repository and aren't visible
-from here.
+blocks (`retail`, `cib`, `backend`), one participant per block. Every
+other team has its own separate repository and isn't visible from here.
 
 There is no fixed roster of "who is in which block" here, on purpose.
 Each participant picks the block themselves and types their name when
@@ -44,16 +43,15 @@ name, don't guess.
 
 ## Organisers
 
-| Name | Role |
-|---|---|
-| Vitaly Erokhin | Workshop organiser, GitHub @ErokhinVi |
-| Nerses Bagiyan | Co-organiser, CDO Total Bank |
+The workshop is run by moderators, one per team table. If something is
+broken beyond what you can fix from this block (the bank doesn't rebuild,
+the laptop can't reach the shared pile), ask the participant to call the
+moderator at their table.
 
-Organisers work in the separate orchestrator repository
-(`ai-workshop` with team submodules), not in this team repo. If an
-organiser somehow opens this repo by mistake — they want technical mode;
-defer to the scenario in `CLAUDE.md` but skip the "non-technical user"
-guard.
+Organisers and moderators work in the separate orchestrator repository,
+not in this team repo. If an organiser opens this repo by mistake, they
+want technical mode: defer to the scenario in `CLAUDE.md` but skip the
+"non-technical user" guard.
 
 ## Services and URLs
 
@@ -64,10 +62,10 @@ final URLs and update this file.
 
 | Block | Local | On Render |
 |---|---|---|
-| retail | `http://localhost:8001` | `https://raif-<TEAM_SLUG>-retail.onrender.com` |
-| cib | `http://localhost:8002` | `https://raif-<TEAM_SLUG>-cib.onrender.com` |
-| backend | `http://localhost:8003` | `https://raif-<TEAM_SLUG>-backend.onrender.com` |
-| Leaderboard (organiser's simulator) | — | `https://raif-simulator.onrender.com` |
+| retail | `http://localhost:8001` | `<URL_RETAIL>` |
+| cib | `http://localhost:8002` | `<URL_CIB>` |
+| backend | `http://localhost:8003` | `<URL_BACKEND>` |
+| Leaderboard (organiser's simulator) | — | `<URL_SIMULATOR>` |
 
 Show the participant their team's retail block — that's the bank the
-customer sees. The leaderboard shows all four teams' scores head to head.
+customer sees. The leaderboard shows every team's score head to head.

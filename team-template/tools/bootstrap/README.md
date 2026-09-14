@@ -1,6 +1,6 @@
 # tools/bootstrap — starter scripts for participants' laptops
 
-These files configure a board member's laptop for the Raiffeisen AI
+These files configure a participant's laptop for the Raiffeisen AI
 workshop in a couple of minutes: workshop SSH key, git identity, cloned
 repo and `.git/raif-workshop-info` (read by `tools/cowork-onboard.py` on
 the agent's first launch).
@@ -37,15 +37,15 @@ The script:
 
 ## How the scripts are generated (organiser-side)
 
-The orchestrator repo ships a master pair of scripts and a small generator
-that:
+The orchestrator repo ships a master pair of scripts and a generator,
+`tools/setup/make-bootstrap.py`, that for every team:
 
-1. takes the workshop SSH **private** key (the one with deploy-write access
-   to all four team repositories),
-2. takes one team's clone URL (e.g. `git@github.com:erokhinvi/ai-workshop-team-a.git`),
-3. produces a customised `.applescript` and `.cmd` for that team.
+1. creates the team's own SSH key (a deploy key with write access to this
+   team repository only),
+2. bakes in this team's clone URL,
+3. produces a customised `.applescript` and `.cmd` outside the repository.
 
-See the orchestrator repo's `SETUP.md` for the generator invocation.
+See the orchestrator repo's `SETUP.md` for the whole flow.
 
 ## Tool dependencies on the participant's laptop
 

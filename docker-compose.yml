@@ -23,7 +23,7 @@ services:
     build: { context: ., dockerfile: simulator/Dockerfile }
     container_name: raif-simulator
     environment:
-      TEAM_NAMES: team_a,team_b,team_c,team_d
+      TEAM_NAMES: team_a,team_b,team_c,team_d,team_e,team_f,team_g
       A_RETAIL_URL: http://host.docker.internal:8001
       A_CIB_URL: http://host.docker.internal:8002
       A_BACKEND_URL: http://host.docker.internal:8003
@@ -36,6 +36,15 @@ services:
       D_RETAIL_URL: http://host.docker.internal:8031
       D_CIB_URL: http://host.docker.internal:8032
       D_BACKEND_URL: http://host.docker.internal:8033
+      E_RETAIL_URL: http://host.docker.internal:8041
+      E_CIB_URL: http://host.docker.internal:8042
+      E_BACKEND_URL: http://host.docker.internal:8043
+      F_RETAIL_URL: http://host.docker.internal:8051
+      F_CIB_URL: http://host.docker.internal:8052
+      F_BACKEND_URL: http://host.docker.internal:8053
+      G_RETAIL_URL: http://host.docker.internal:8061
+      G_CIB_URL: http://host.docker.internal:8062
+      G_BACKEND_URL: http://host.docker.internal:8063
       DATABASE_URL: postgres://sim:sim@postgres:5432/simulator
       ADMIN_TOKEN: localdev
       POLL_INTERVAL_S: "30"

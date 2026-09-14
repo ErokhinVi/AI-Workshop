@@ -14,8 +14,8 @@
   .meta{font-size:12px;color:var(--dim);margin-bottom:22px;
         display:flex;gap:18px;flex-wrap:wrap;align-items:center}
   .meta .now{color:var(--text);font-variant-numeric:tabular-nums}
-  .teams{display:flex;gap:20px;flex-wrap:wrap}
-  .team{flex:1;min-width:300px;background:var(--panel);
+  .teams{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .team{min-width:0;background:var(--panel);
         border:1px solid var(--rule);border-radius:10px;padding:22px;
         position:relative}
   .team.leader{border-color:#5a5314;box-shadow:0 0 0 1px #5a5314 inset}
@@ -99,8 +99,8 @@
 "use strict";
 const fmt = n => Number(n||0).toLocaleString('ru-RU');
 const signed = n => (n > 0 ? '+' : (n < 0 ? '−' : '±')) + fmt(Math.abs(n));
-const LABEL = {team_a:'Команда A', team_b:'Команда B',
-  team_c:'Команда C', team_d:'Команда D'};
+// team_a → «Команда A». Сколько команд, решает TEAM_NAMES симулятора.
+const LABEL = t => /^team_[a-z]$/.test(t) ? 'Команда ' + t.slice(5).toUpperCase() : t;
 const FSTATE = {absent:'фича не начата',
   partial:'фича в сборке', working:'фича работает'};
 
@@ -144,7 +144,7 @@ function teamCard(name, v, isLeader){
   const fromStart = `<div class="from-start ${dfsCls}">${signed(dfs)} от старта (${fmt(v.client_base_start)})</div>`;
   const crown = isLeader ? '<div class="crown">★ лидер</div>' : '';
   return `<div class="team${isLeader?' leader':''}">${crown}
-    <h2>${LABEL[name]||name}</h2>
+    <h2>${LABEL(name)}</h2>
     <div class="base">${fmt(v.client_base)}</div>
     ${fromStart}
     <div class="badges">${fs}${score}${rels}${stags}${idle}</div>
@@ -156,7 +156,7 @@ function eventRow(e){
   const time = e.ts ? MSK_TIME.format(new Date(e.ts)) : '—';
   return `<div class="ev">
     <span class="time">${time}</span>
-    <span class="t">${LABEL[e.team]||e.team}</span>
+    <span class="t">${LABEL(e.team)}</span>
     <span class="body"><span class="d ${cls}">${signed(e.delta)}</span>${e.reason||''}<span class="j">[${e.judge||'?'}]</span></span>
   </div>`;
 }
@@ -211,7 +211,7 @@ async function tick(){
   if(allSame) leader = null;
 
   document.getElementById('leader-line').innerHTML = leader
-    ? `<span>лидирует <b style="color:var(--raiff)">${LABEL[leader]}</b> (${signed(leadDfs)} клиентов)</span>`
+    ? `<span>лидирует <b style="color:var(--raiff)">${LABEL(leader)}</b> (${signed(leadDfs)} клиентов)</span>`
     : '<span>пока ничья</span>';
 
   document.getElementById('teams').innerHTML =
