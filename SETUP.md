@@ -256,13 +256,34 @@ GitLab. Не в чаты, не в почту, не в публичный реп�
 - сеть до claude.ai и anthropic.com или chatgpt.com и openai.com, до
   github.com, ssh.github.com:443, raw.githubusercontent.com, *.onrender.com.
 
-Установщик: двойной клик, выбрать блок, ввести имя. Он кладет ключ,
+Установщик: двойной клик, выбрать команду, блок, ввести имя. Он кладет ключ,
 настраивает SSH через порт 443, клонирует репозиторий команды и включает
 изоляцию блока. Дальше участник открывает папку репозитория в Claude или
 Codex и пишет «привет»: агент сам проводит онбординг.
 
 Проверка: на ноутбуке открываются табло и retail своей команды, агент в
 онбординге называет блок участника.
+
+## Шаг 8б. Доступ ведущих: только GitHub
+
+Ведущие делают все через пульт Workshop ops, ключи на руки не получают.
+
+1. Приватный репозиторий ведущих (`HOSTS_REPO` в teams.conf):
+   `gh repo create <OWNER>/<HOSTS_REPO> --private`.
+2. Человек выпускает fine-grained PAT: github.com, Settings, Developer
+   settings, Fine-grained tokens. Resource owner: `<OWNER>`. Repositories:
+   оркестратор, репозиторий ведущих и все репозитории команд. Permissions:
+   Administration, Contents, Secrets, Variables, Workflows: Read and write.
+   Срок: до недели после воркшопа. Токен в workshop.env как
+   `WORKSHOP_GH_TOKEN`.
+3. `tools/setup/github-access.sh ops-secrets`: в секреты оркестратора уйдут
+   все ключи, PAT и ключи команд (`TEAM_DEPLOY_KEYS`).
+4. `tools/setup/ops.sh installer`: установщик и README с адресами в
+   репозитории ведущих.
+5. `tools/setup/github-access.sh hosts <логин> ...`: приглашения ведущим во
+   все репозитории воркшопа. Приняли: видят пульт, логи и установщик.
+
+Проверка: ведущий запускает `status` в Actions оркестратора, run зеленый.
 
 ## Шаг 9. Генеральный прогон
 
