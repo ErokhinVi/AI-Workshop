@@ -1,8 +1,10 @@
 # Workshop task
 
-The specific task — what exactly your team adds to the bank — is **announced
-by the host out loud** at the start of the workshop. It isn't written here
-on purpose.
+The workshop runs in **three stages**, one feature per stage. The specific
+task of each stage — what exactly your team adds to the bank — is
+**announced by the host out loud** when the stage starts. It isn't written
+here on purpose. The score keeps growing across all three stages: a new
+feature must not break the ones built before.
 
 ## The shared frame
 

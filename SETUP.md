@@ -209,11 +209,13 @@ python3 tools/setup/make-bootstrap.py
 tools/setup/github-access.sh keys
 ```
 
-`make-bootstrap.py` создает по ключу на команду и пару установщиков в
-`~/AI-Workshop-secrets/<WORKSHOP_ID>/team_<буква>/`:
-`raif-workshop-setup.applescript` (macOS) и `raif-workshop-setup.cmd`
-(Windows). `keys` вешает публичные ключи на репозитории команд как deploy
-key с правом записи.
+`make-bootstrap.py` создает по ключу на команду и один установщик на все
+команды: `~/AI-Workshop-secrets/<WORKSHOP_ID>/raif-workshop-setup.applescript`
+(macOS) и `raif-workshop-setup.cmd` (Windows). В первом окне участник
+выбирает команду (Team 1…7, номер стола), потом блок и имя. На ноутбук
+ложится ключ только выбранной команды. `keys` вешает публичные ключи на
+репозитории команд как deploy key с правом записи. Сменили `TEAMS` в
+teams.conf: пересобрать, список в окне выбора обновится сам.
 
 Проверка ключа первой команды:
 
@@ -223,9 +225,15 @@ ssh -i ~/AI-Workshop-secrets/<WORKSHOP_ID>/keys/team_a -o IdentitiesOnly=yes -p 
 
 Ответ: `Hi <OWNER>/team_1! You've successfully authenticated`.
 
-Раздача: пара скриптов команды только ее участникам, лично (AirDrop,
-флешка). Не в чаты, не в почту, не в репозиторий: в скрипте ключ с правом
-push. CI оркестратора падает, если ключ попал в репозиторий.
+Раздача: лично (AirDrop, флешка) или ведущим через приватный проект в
+GitLab. Не в чаты, не в почту, не в публичный репозиторий: в скрипте ключи
+всех команд с правом push. Кто их достанет, сможет пушить в чужую команду,
+читать чужие репозитории можно и так, они публичные. CI оркестратора
+падает, если ключ попал в репозиторий.
+
+Правишь установщик: исходник macOS `tools/bootstrap/raif-workshop-setup.sh`,
+после правки `python3 tools/setup/make-bootstrap.py --refresh-master` (вшивает
+его в мастер-AppleScript, тест сверяет) и пересборка.
 
 ## Шаг 8. Ноутбуки участников
 

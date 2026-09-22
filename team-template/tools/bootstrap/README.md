@@ -15,19 +15,20 @@ the agent's first launch).
 
 | File | Platform | How it runs |
 |---|---|---|
-| `raif-workshop-setup.applescript` | macOS | Double-click → Script Editor → Run (Cmd+R) → pick block, type your name → Terminal opens automatically with the bootstrap script. |
-| `raif-workshop-setup.cmd` | Windows 10/11 | Double-click → SmartScreen "More info → Run anyway" → pick block and type your name in the WinForms window → everything happens in one console window. |
+| `raif-workshop-setup.applescript` | macOS | Double-click → Script Editor → Run (Cmd+R) → pick team and block, type your name → Terminal opens automatically with the bootstrap script. |
+| `raif-workshop-setup.cmd` | Windows 10/11 | Double-click → SmartScreen "More info → Run anyway" → pick team and block and type your name in the WinForms window → everything happens in one console window. |
 
-There is no team picker in these scripts: the team identity is determined
-by which team repo they were generated for. Each participant picks
-**block** (`retail` / `cib` / `backend`) themselves and types their name.
+One installer serves every team. Each participant picks the **team** (the
+number on their table), the **block** (`retail` / `cib` / `backend`) and
+types their name. The installer carries every team's deploy key and drops
+only the picked team's key, then clones only that team's repo.
 The slug used for the git email and the participant id is derived from the
 typed name (lowercased ASCII letters, digits and dashes); for non-ASCII
 input the slug is roughly transliterated.
 
 The script:
 
-1. Drops the embedded SSH key into `~/.ssh/raif_workshop` with current-user-only permissions.
+1. Drops the picked team's SSH key into `~/.ssh/raif_workshop` with current-user-only permissions.
 2. Appends a block to `~/.ssh/config` (marker `# raif-workshop-2026`) so GitHub uses this key and routes through port 443 (`HostName ssh.github.com`, `Port 443`) — the corporate network blocks plain SSH port 22, otherwise push/pull would hang on a timeout.
 3. Sets `git config --global user.name` and `user.email` to the picked participant.
 4. Calls `ssh -T git@github.com` and waits for `successfully authenticated`.
@@ -38,12 +39,12 @@ The script:
 ## How the scripts are generated (organiser-side)
 
 The orchestrator repo ships a master pair of scripts and a generator,
-`tools/setup/make-bootstrap.py`, that for every team:
+`tools/setup/make-bootstrap.py`, that:
 
-1. creates the team's own SSH key (a deploy key with write access to this
+1. creates each team's own SSH key (a deploy key with write access to that
    team repository only),
-2. bakes in this team's clone URL,
-3. produces a customised `.applescript` and `.cmd` outside the repository.
+2. bakes in the list of teams with their clone URLs,
+3. produces one `.applescript` and one `.cmd` outside the repository.
 
 See the orchestrator repo's `SETUP.md` for the whole flow.
 

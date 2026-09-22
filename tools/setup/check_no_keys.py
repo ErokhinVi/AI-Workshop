@@ -2,8 +2,9 @@
 """tools/setup/check_no_keys.py: упасть, если в репозитории лежит приватный ключ.
 
 Проверяет все отслеживаемые git файлы: PEM/OpenSSH-заголовок в тексте, а в
-установщиках ноутбука еще и base64-пейлоад (AppleScript `set bashB64`, .cmd
-`$PrivateKeyB64`). Ключ внутри base64 обычный поиск по репозиторию не видит.
+установщиках ноутбука еще и base64 (AppleScript `set bashB64`, в .cmd любая
+строка base64 в кавычках, например ключи команд `$TeamKeysB64`). Ключ внутри
+base64 обычный поиск по репозиторию не видит.
 
 Запуск: python3 tools/setup/check_no_keys.py  (его же гоняет CI на каждый push)
 """
@@ -20,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PEM = re.compile(rb"-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----")
 APPLESCRIPT_B64 = re.compile(r'set bashB64 to "([A-Za-z0-9+/=]+)"')
-CMD_B64 = re.compile(r"\$PrivateKeyB64 = '([A-Za-z0-9+/=]{40,})'")
+CMD_B64 = re.compile(r"'([A-Za-z0-9+/=]{40,})'")
 
 
 def decode_text(data: bytes) -> str:

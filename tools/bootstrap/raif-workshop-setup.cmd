@@ -70,6 +70,14 @@ $SshKeyPath       = Join-Path $SshDir   'raif_workshop'
 $SshConfig        = Join-Path $SshDir   'config'
 $SshConfigMarker  = '# raif-workshop-2026'
 
+# >>> teams: tools/setup/make-bootstrap.py fills this in from tools/setup/teams.conf
+$Teams = @()
+# <<< teams
+
+# >>> keys: tools/setup/make-bootstrap.py puts every team's deploy key here (base64)
+$TeamKeysB64 = @{}
+# <<< keys
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 $StartedAt         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 $script:TotalSteps = 10
@@ -327,33 +335,26 @@ function Show-WorkshopPicker {
   $form.Font            = New-Object Drawing.Font('Segoe UI', 10)
 
   $teamLabel = New-Object Windows.Forms.Label
-  $teamLabel.Text     = 'Your team:'
+  $teamLabel.Text     = 'Your team (the number on your table):'
   $teamLabel.Location = New-Object Drawing.Point(18, 15)
   $teamLabel.Size     = New-Object Drawing.Size(470, 22)
   $form.Controls.Add($teamLabel)
 
-  $teamA = New-Object Windows.Forms.RadioButton
-  $teamA.Text     = 'Team A'
-  $teamA.Location = New-Object Drawing.Point(28, 40)
-  $teamA.Size     = New-Object Drawing.Size(220, 24)
-  $teamA.Checked  = $true
-  $form.Controls.Add($teamA)
-
-  $teamB = New-Object Windows.Forms.RadioButton
-  $teamB.Text     = 'Team B'
-  $teamB.Location = New-Object Drawing.Point(260, 40)
-  $teamB.Size     = New-Object Drawing.Size(220, 24)
-  $form.Controls.Add($teamB)
+  $teamBox = New-Object Windows.Forms.ListBox
+  $teamBox.Location = New-Object Drawing.Point(28, 40)
+  $teamBox.Size     = New-Object Drawing.Size(460, 140)
+  foreach ($t in $Teams) { [void]$teamBox.Items.Add($t.Label) }
+  $form.Controls.Add($teamBox)
 
   $blockLabel = New-Object Windows.Forms.Label
   $blockLabel.Text     = 'Your block:'
-  $blockLabel.Location = New-Object Drawing.Point(18, 80)
+  $blockLabel.Location = New-Object Drawing.Point(18, 190)
   $blockLabel.Size     = New-Object Drawing.Size(470, 22)
   $form.Controls.Add($blockLabel)
 
   $blockBox = New-Object Windows.Forms.ListBox
-  $blockBox.Location = New-Object Drawing.Point(28, 105)
-  $blockBox.Size     = New-Object Drawing.Size(460, 90)
+  $blockBox.Location = New-Object Drawing.Point(28, 215)
+  $blockBox.Size     = New-Object Drawing.Size(460, 66)
   [void]$blockBox.Items.AddRange(@(
     'Retail — customer mobile bank',
     'CIB — corporate and business logic',
@@ -364,24 +365,18 @@ function Show-WorkshopPicker {
 
   $nameLabel = New-Object Windows.Forms.Label
   $nameLabel.Text     = 'Your name and surname (used to sign your commits):'
-  $nameLabel.Location = New-Object Drawing.Point(18, 210)
+  $nameLabel.Location = New-Object Drawing.Point(18, 292)
   $nameLabel.Size     = New-Object Drawing.Size(470, 22)
   $form.Controls.Add($nameLabel)
 
   $nameBox = New-Object Windows.Forms.TextBox
-  $nameBox.Location = New-Object Drawing.Point(28, 235)
+  $nameBox.Location = New-Object Drawing.Point(28, 317)
   $nameBox.Size     = New-Object Drawing.Size(460, 28)
   $form.Controls.Add($nameBox)
 
-  $hostBox = New-Object Windows.Forms.CheckBox
-  $hostBox.Text     = "I'm the workshop host (full repo access, no block isolation)"
-  $hostBox.Location = New-Object Drawing.Point(28, 280)
-  $hostBox.Size     = New-Object Drawing.Size(460, 24)
-  $form.Controls.Add($hostBox)
-
   $ok = New-Object Windows.Forms.Button
   $ok.Text         = 'Go'
-  $ok.Location     = New-Object Drawing.Point(290, 370)
+  $ok.Location     = New-Object Drawing.Point(290, 372)
   $ok.Size         = New-Object Drawing.Size(95, 32)
   $ok.DialogResult = [Windows.Forms.DialogResult]::OK
   $form.Controls.Add($ok)
@@ -389,7 +384,7 @@ function Show-WorkshopPicker {
 
   $cancel = New-Object Windows.Forms.Button
   $cancel.Text         = 'Cancel'
-  $cancel.Location     = New-Object Drawing.Point(395, 370)
+  $cancel.Location     = New-Object Drawing.Point(395, 372)
   $cancel.Size         = New-Object Drawing.Size(95, 32)
   $cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
   $form.Controls.Add($cancel)
@@ -398,14 +393,13 @@ function Show-WorkshopPicker {
   $result = $form.ShowDialog()
   if ($result -ne [Windows.Forms.DialogResult]::OK) { return $null }
 
+  if ($teamBox.SelectedIndex -lt 0) { return @{ Error = 'no-team' } }
   $name = ($nameBox.Text).Trim()
   if (-not $name) { return @{ Error = 'empty-name' } }
 
-  $team = if ($teamA.Checked) { 'team_a' } else { 'team_b' }
+  $team = $Teams[$teamBox.SelectedIndex].Code
   $blockMap = @{ 0 = 'retail'; 1 = 'cib'; 2 = 'backend' }
   $block = $blockMap[$blockBox.SelectedIndex]
-
-  if ($hostBox.Checked) { $team = 'host'; $block = 'host' }
 
   return @{
     Team        = $team
@@ -414,8 +408,14 @@ function Show-WorkshopPicker {
   }
 }
 
+if ($Teams.Count -eq 0) {
+  Die 'Script is unsigned: no teams and keys inside. Organiser: build it with tools/setup/make-bootstrap.py.'
+}
 $picked = Show-WorkshopPicker
 if ($null -eq $picked) { Write-Host 'Cancelled.'; exit 0 }
+if ($picked.Error -eq 'no-team') {
+  Die 'No team picked. Run the script again and pick the number on your table.'
+}
 if ($picked.Error -eq 'empty-name') {
   Die 'Name is empty. Run the script again and type your name and surname.'
 }
@@ -435,23 +435,24 @@ $cfg = @{
   Participant = $slugRaw
 }
 
-switch ($cfg.Team) {
-  'team_a' { $RepoUrl = 'git@github.com:ErokhinVi/team_1.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_1' }
-  'team_b' { $RepoUrl = 'git@github.com:ErokhinVi/team_2.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_2' }
-  'host'   { $RepoUrl = 'git@github.com:ErokhinVi/AI-Workshop.git'; $RepoDir = Join-Path $env:USERPROFILE 'AI-Workshop' }
-}
+$teamRow = $Teams | Where-Object { $_.Code -eq $cfg.Team } | Select-Object -First 1
+$RepoUrl = 'git@github.com:' + $teamRow.Repo + '.git'
+$RepoDir = Join-Path $env:USERPROFILE ($teamRow.Repo.Split('/')[1])
 Info ('REPO_URL:  ' + $RepoUrl)
 Info ('REPO_DIR:  ' + $RepoDir)
-$teamHuman  = @{ 'team_a' = 'Team A'; 'team_b' = 'Team B'; 'host' = 'Host' }[$cfg.Team]
-$blockHuman = @{ 'retail' = 'Retail — customer mobile bank'; 'cib' = 'CIB — corporate and business logic'; 'backend' = 'Backend — bank data core'; 'host' = '—' }[$cfg.Block]
+$teamHuman  = $teamRow.Label
+$blockHuman = @{ 'retail' = 'Retail — customer mobile bank'; 'cib' = 'CIB — corporate and business logic'; 'backend' = 'Backend — bank data core' }[$cfg.Block]
 Ok ('Participant: ' + $cfg.Name + '  (' + $teamHuman + ' · ' + $blockHuman + ')')
 
-# ── 3. SSH key (embedded, base64 — keeps secret-scanners quiet) ──────────────
-Step 'Dropping the workshop SSH key'
+# ── 3. SSH key of the picked team (embedded, base64) ─────────────────────────
+Step ('Dropping the SSH key of ' + $teamHuman)
 if (-not (Test-Path $SshDir)) { New-Item -ItemType Directory -Path $SshDir | Out-Null }
 Info ('Folder: ' + $SshDir)
 
-$PrivateKeyB64 = '__PRIVATE_KEY_B64_HERE__'
+$PrivateKeyB64 = $TeamKeysB64[$cfg.Team]
+if (-not $PrivateKeyB64) {
+  Die ('No key for ' + $teamHuman + ' inside this script. Organiser: rebuild it with tools/setup/make-bootstrap.py.')
+}
 $PrivateKey = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PrivateKeyB64))
 
 # OpenSSH expects LF line endings, no BOM
@@ -504,7 +505,7 @@ Info ('Participant: ' + $cfg.Name)
 Info ('Email:       ' + $cfg.Email)
 Info ('Team:        ' + $teamHuman + ' (' + $cfg.Team + ')')
 Info ('Block:       ' + $blockHuman)
-if ($cfg.Team -ne 'host') { Info ('Block folder: ' + $cfg.Block + '\') }
+Info ('Block folder: ' + $cfg.Block + '\')
 
 & git config --global user.name  $cfg.Name  | Out-Null
 & git config --global user.email $cfg.Email | Out-Null
@@ -563,10 +564,7 @@ Note ('HEAD:   ' + $headLine)
 Step 'Installing block isolation — edits restricted to your block'
 $claudeDir = Join-Path $RepoDir '.claude'
 $tpl = Join-Path $claudeDir ('templates\settings-' + $cfg.Block + '.json')
-if ($cfg.Team -eq 'host') {
-  Info 'Host mode — no isolation installed'
-  Ok 'Full access to the whole repository'
-} elseif (Test-Path $tpl) {
+if (Test-Path $tpl) {
   Copy-Item -LiteralPath $tpl -Destination (Join-Path $claudeDir 'settings.local.json') -Force
   Ok 'Claude isolation active: .claude\settings.local.json'
   Note ('template: settings-' + $cfg.Block + '.json')
@@ -580,10 +578,7 @@ if ($cfg.Team -eq 'host') {
 Step 'Installing Codex isolation (if anyone uses Codex instead of Claude)'
 $codexDir = Join-Path $RepoDir '.codex'
 $codexTpl = Join-Path $codexDir ('templates\config-' + $cfg.Block + '.toml')
-if ($cfg.Team -eq 'host') {
-  Info 'Host mode — no Codex isolation installed'
-  Ok 'Full access to the whole repository'
-} elseif (Test-Path $codexTpl) {
+if (Test-Path $codexTpl) {
   Copy-Item -LiteralPath $codexTpl -Destination (Join-Path $codexDir 'config.toml') -Force
   Ok 'Codex isolation active: .codex\config.toml'
   Note ('template: config-' + $cfg.Block + '.toml')
@@ -664,12 +659,8 @@ Write-Host ('  Project HEAD:     ' + $headLine)
 Write-Host ('  SSH fingerprint:  ' + $fp)
 Write-Host ''
 Write-Host '  Block isolation:' -ForegroundColor DarkGray
-if ($cfg.Team -eq 'host') {
-  Write-Host '  You are the host — full access, no block isolation.' -ForegroundColor DarkGray
-} else {
-  Write-Host '  You see and edit only your block. The other team is not' -ForegroundColor DarkGray
-  Write-Host '  visible — you can only reach it by visiting its public site.' -ForegroundColor DarkGray
-}
+Write-Host '  You see and edit only your block. Other teams are not' -ForegroundColor DarkGray
+Write-Host '  visible — you can only reach them through their public sites.' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  Files the script created or updated:'
 Write-Host ('    ✓ ' + $SshKeyPath + '  (workshop private key)')
@@ -678,12 +669,8 @@ Write-Host ('    ✓ ' + (Join-Path $env:USERPROFILE '.gitconfig') + '  (git --g
 Write-Host ('    ✓ ' + $keyInGit + '  (key copy for Claude)')
 Write-Host ('    ✓ ' + $infoInGit + '  (meta-info for Claude)')
 Write-Host ('    ✓ ' + (Join-Path $gitDir 'config') + '  (local signature + core.sshCommand)')
-if ($cfg.Team -eq 'host') {
-  Write-Host '    · no block isolation installed (host)'
-} else {
-  Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (Claude block isolation)')
-  Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (Codex block isolation)')
-}
+Write-Host ('    ✓ ' + (Join-Path $claudeDir 'settings.local.json') + '  (Claude block isolation)')
+Write-Host ('    ✓ ' + (Join-Path $codexDir 'config.toml') + '  (Codex block isolation)')
 Write-Host ''
 Write-Host '  What''s next:'
 if (Test-Path (Join-Path $MinGitDir 'cmd\git.exe')) {
@@ -702,6 +689,9 @@ if (Test-Path (Join-Path $MinGitDir 'cmd\git.exe')) {
 Write-Host ''
 Write-Host '  (The older flow with the "claude" command in a terminal still works —'
 Write-Host '   open the folder in a terminal and type "claude".)'
+Write-Host ''
+Write-Host '  To switch to another block later: save your work (ask the agent),'
+Write-Host '  then run this setup again and pick the new block.'
 Write-Host ''
 Write-Host '  If you use Codex instead of Claude: open the project folder in Codex'
 Write-Host '  and write a first message — block isolation is already in place'

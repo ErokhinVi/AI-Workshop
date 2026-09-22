@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""tools/setup/make-bootstrap.py: собрать установщики ноутбука по командам.
+"""tools/setup/make-bootstrap.py: собрать установщик ноутбука на все команды.
 
-Берет мастер-скрипты tools/bootstrap/raif-workshop-setup.{applescript,cmd} и для
-каждой команды из tools/setup/teams.conf собирает пару, где:
-  - выбора команды нет, команда прошита;
-  - клонируется репозиторий этой команды;
-  - вшит приватный deploy key этой команды. Ключ свой на каждый репозиторий:
-    GitHub не дает повесить один deploy key на два репозитория. Ключ аккаунта
-    в скрипт класть нельзя: он открывает все репозитории аккаунта.
+Один установщик на воркшоп, пара файлов: raif-workshop-setup.applescript (macOS)
+и raif-workshop-setup.cmd (Windows). Участник выбирает в первом окне команду
+из tools/setup/teams.conf, потом блок и имя. В установщик вшиты deploy keys
+всех команд, на ноутбук ложится только ключ выбранной: deploy key открывает
+один репозиторий. Ключ аккаунта в скрипт класть нельзя: он открывает все
+репозитории аккаунта.
 
-Ключи и готовые скрипты лежат ВНЕ репозитория, в папке секретов
-(~/AI-Workshop-secrets/<WORKSHOP_ID> или $WORKSHOP_SECRETS): в них приватный
-ключ с правом push. В репозиторий не коммитить (CI проверяет
-tools/setup/check_no_keys.py), раздавать лично: AirDrop, флешка.
+Ключи и готовый установщик лежат ВНЕ репозитория, в папке секретов
+(~/AI-Workshop-secrets/<WORKSHOP_ID> или $WORKSHOP_SECRETS): в них приватные
+ключи с правом push. В репозиторий не коммитить (CI проверяет
+tools/setup/check_no_keys.py), раздавать лично: AirDrop, флешка. Кто достанет
+ключи из установщика, сможет пушить в репозитории чужих команд. Читать их
+можно и так: репозитории публичные, иначе Render и судья их не видят.
+
+Исходники: tools/bootstrap/raif-workshop-setup.sh (bash, его AppleScript
+запускает в Terminal), .applescript и .cmd. В мастерах ключей нет.
 
 Использование:
-  python3 tools/setup/make-bootstrap.py                 # все команды
-  python3 tools/setup/make-bootstrap.py --only a c      # часть команд
-  python3 tools/setup/make-bootstrap.py --scrub-master  # вычистить ключи из скриптов в репо
+  python3 tools/setup/make-bootstrap.py                   # собрать установщик
+  python3 tools/setup/make-bootstrap.py --refresh-master  # вшить .sh в мастер-AppleScript
+  python3 tools/setup/make-bootstrap.py --scrub-master    # вычистить ключи из скриптов в репо
 
 Нет ключа команды: создается ssh-keygen ed25519. Повесить публичные ключи на
 репозитории команд: tools/setup/github-access.sh keys.
@@ -32,30 +36,54 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from workshop_conf import ConfError, load_conf
+from workshop_conf import Conf, ConfError, load_conf
 
 ROOT = Path(__file__).resolve().parents[2]
+MASTER_SH = ROOT / "tools/bootstrap/raif-workshop-setup.sh"
 MASTER_AS = ROOT / "tools/bootstrap/raif-workshop-setup.applescript"
 MASTER_CMD = ROOT / "tools/bootstrap/raif-workshop-setup.cmd"
+OUT_NAMES = ("raif-workshop-setup.applescript", "raif-workshop-setup.cmd")
 SCRUB_GLOBS = ("tools/bootstrap/*.applescript", "tools/bootstrap/*.cmd",
                "_archive/tools/bootstrap/*.applescript", "_archive/tools/bootstrap/*.cmd")
 
-KEY_PLACEHOLDER = "__PRIVATE_KEY_HERE__"          # мастер bash сам падает на нем
-KEY_B64_PLACEHOLDER = "__PRIVATE_KEY_B64_HERE__"
 B64_RE = re.compile(r'(set bashB64 to ")([A-Za-z0-9+/=]+)(")')
-HEREDOC_RE = re.compile(r"(<<'WORKSHOP_PRIVATE_KEY_EOF'\n)(.*?)(\nWORKSHOP_PRIVATE_KEY_EOF\n)", re.S)
-CMD_KEY_RE = re.compile(r"(\$PrivateKeyB64 = ')([^']*)(')")
+AS_NAMES_RE = re.compile(r"set teamNames to \{[^}\r\n]*\}")
+AS_CODES_RE = re.compile(r"set teamCodes to \{[^}\r\n]*\}")
+SH_KEY_RE = re.compile(r"<<'WORKSHOP_KEY_(TEAM_[A-Z])'\n(.*?)\nWORKSHOP_KEY_\1\n", re.S)
+CMD_KEY_RE = re.compile(r"'(team_[a-z])' = '([A-Za-z0-9+/=]+)'")
+# Старый формат, один ключ на скрипт: только чтобы --scrub-master чистил архив.
+LEGACY_HEREDOC_RE = re.compile(r"(<<'WORKSHOP_PRIVATE_KEY_EOF'\n)(.*?)(\nWORKSHOP_PRIVATE_KEY_EOF\n)", re.S)
+LEGACY_CMD_KEY_RE = re.compile(r"(\$PrivateKeyB64 = ')([^']*)(')")
+LEGACY_KEY_PLACEHOLDER = "__PRIVATE_KEY_HERE__"
+LEGACY_KEY_B64_PLACEHOLDER = "__PRIVATE_KEY_B64_HERE__"
+
+SH_TEAMS_EMPTY = "TEAM_TABLE='\n__TEAMS_HERE__\n'\n"
+SH_KEYS_EMPTY = ("write_team_key() {  # write_team_key <team code> <file>: that team's private key → file\n"
+                 "  case \"$1\" in\n"
+                 "    *) return 1 ;;\n"
+                 "  esac\n"
+                 "}\n")
+CMD_TEAMS_EMPTY = "$Teams = @()\n"
+CMD_KEYS_EMPTY = "$TeamKeysB64 = @{}\n"
 
 
 class BuildError(RuntimeError):
     pass
 
 
-def replace_once(text: str, old: str, new: str, where: str) -> str:
-    count = text.count(old)
+def block_re(name: str) -> re.Pattern[str]:
+    """Блок между строками `# >>> name...` и `# <<< name`: его пишет сборщик."""
+    return re.compile(rf"(# >>> {name}\b[^\n]*\n)(.*?)(# <<< {name}\n)", re.S)
+
+
+def set_block(text: str, name: str, body: str, where: str) -> str:
+    pattern = block_re(name)
+    newline = "\r\n" if "\r\n" in text else "\n"
+    flat = text.replace("\r\n", "\n")
+    result, count = pattern.subn(lambda m: m.group(1) + body + m.group(3), flat)
     if count != 1:
-        raise BuildError(f"{where}: ожидал ровно одно вхождение {old!r}, нашел {count}")
-    return text.replace(old, new)
+        raise BuildError(f"{where}: ожидал ровно один блок `# >>> {name}`, нашел {count}")
+    return result.replace("\n", newline)
 
 
 def sub_once(pattern: re.Pattern[str], repl: str, text: str, where: str) -> str:
@@ -101,163 +129,200 @@ def ensure_key(keys_dir: Path, letter: str, comment: str) -> Path:
     return key
 
 
+def team_label(letter: str) -> str:
+    """team_a → Team 1: номер стола. Табло симулятора считает так же."""
+    return f"Team {ord(letter) - ord('a') + 1}"
+
+
+# ── bash (его запускает AppleScript) ────────────────────────────────────────
+
+def build_bash(bash: str, conf: Conf, keys: dict[str, str]) -> str:
+    where = MASTER_SH.name
+    rows = "".join(f"team_{letter} {conf.owner}/{repo} {team_label(letter)}\n" for letter, repo in conf.teams)
+    bash = set_block(bash, "teams", f"TEAM_TABLE='\n{rows}'\n", where)
+    cases = []
+    for letter, _repo in conf.teams:
+        tag = f"WORKSHOP_KEY_TEAM_{letter.upper()}"
+        cases.append(f"    team_{letter})\n"
+                     f"      cat > \"$2\" <<'{tag}'\n"
+                     f"{keys[letter].rstrip(chr(10))}\n"
+                     f"{tag}\n"
+                     f"      ;;\n")
+    body = ("write_team_key() {  # write_team_key <team code> <file>: that team's private key → file\n"
+            "  case \"$1\" in\n"
+            + "".join(cases)
+            + "    *) return 1 ;;\n"
+            "  esac\n"
+            "}\n")
+    return set_block(bash, "keys", body, where)
+
+
 # ── macOS ────────────────────────────────────────────────────────────────────
 
-def build_bash(bash: str, owner: str, letter: str, repo: str, key_text: str) -> str:
-    where = "bash-пейлоад"
-    upper = letter.upper()
-    match = HEREDOC_RE.search(bash)
-    if not match:
-        raise BuildError(f"{where}: не нашел heredoc с ключом")
-    bash = bash[:match.start(2)] + key_text.rstrip("\n") + bash[match.end(2):]
-    bash = replace_once(bash, 'team_a|team_b|host) TEAM="${TEAM_ARG}" ;;',
-                        f'team_{letter}|host) TEAM="${{TEAM_ARG}}" ;;', where)
-    bash = replace_once(bash, "Expected: team_a | team_b | host.",
-                        f"Expected: team_{letter} | host.", where)
-    bash = replace_once(
-        bash,
-        '  team_a) REPO_URL="git@github.com:ErokhinVi/team_1.git"; REPO_DIR="${HOME}/team_1" ;;\n'
-        '  team_b) REPO_URL="git@github.com:ErokhinVi/team_2.git"; REPO_DIR="${HOME}/team_2" ;;\n',
-        f'  team_{letter}) REPO_URL="git@github.com:{owner}/{repo}.git"; REPO_DIR="${{HOME}}/{repo}" ;;\n',
-        where)
-    bash = replace_once(bash, '  team_a) TEAM_HUMAN="Team A" ;;\n  team_b) TEAM_HUMAN="Team B" ;;\n',
-                        f'  team_{letter}) TEAM_HUMAN="Team {upper}" ;;\n', where)
-    return bash
+def as_list(items: list[str]) -> str:
+    return "{" + ", ".join(f'"{item}"' for item in items) + "}"
 
 
-def build_applescript(master: Path, out: Path, owner: str, letter: str, repo: str,
-                      key_text: str) -> str:
+def build_applescript(master: Path, out: Path, conf: Conf, bash: str) -> None:
     text, bom = read_utf16(master)
     where = master.name
     match = B64_RE.search(text)
     if not match:
         raise BuildError(f"{where}: не нашел set bashB64")
-    bash = base64.b64decode(match.group(2)).decode("utf-8")
-    bash = build_bash(bash, owner, letter, repo, key_text)
     new_b64 = base64.b64encode(bash.encode("utf-8")).decode("ascii")
     text = text[:match.start(2)] + new_b64 + text[match.end(2):]
-
-    team_block = re.compile(r"-- 1\. Team\r?\n.*?end if", re.S)
-    newline = "\r\n" if "\r\n" in text else "\n"
-    text = sub_once(team_block, f'-- 1. Team: fixed in this script{newline}\tset teamCode to "team_{letter}"',
-                    text, where)
-    text = replace_once(text, 'set dlgTitle to "Raif AI Workshop — laptop setup"',
-                        f'set dlgTitle to "Raif AI Workshop — Team {letter.upper()} laptop setup"', where)
-    text = text.replace("Pick your team and block", "Pick your block")
+    text = sub_once(AS_NAMES_RE, "set teamNames to " + as_list([team_label(l) for l, _ in conf.teams]), text, where)
+    text = sub_once(AS_CODES_RE, "set teamCodes to " + as_list([f"team_{l}" for l, _ in conf.teams]), text, where)
     write_utf16(out, text, bom)
-    return bash
 
 
 # ── Windows ──────────────────────────────────────────────────────────────────
 
-def build_cmd(master: Path, out: Path, owner: str, letter: str, repo: str, key_text: str) -> None:
+def build_cmd(master: Path, out: Path, conf: Conf, keys: dict[str, str]) -> None:
     text = master.read_bytes().decode("utf-8")
     where = master.name
-    nl = "\r\n" if "\r\n" in text else "\n"
-    upper = letter.upper()
-    key_b64 = base64.b64encode(key_text.encode("utf-8")).decode("ascii")
-    text = sub_once(CMD_KEY_RE, f"$PrivateKeyB64 = '{key_b64}'", text, where)
-    text = replace_once(text, "$teamA.Text     = 'Team A'", f"$teamA.Text     = 'Team {upper}'", where)
-    team_b_block = re.compile(r"  \$teamB = New-Object Windows\.Forms\.RadioButton.*?"
-                              r"\$form\.Controls\.Add\(\$teamB\)\r?\n\r?\n", re.S)
-    text = sub_once(team_b_block, "", text, where)
-    text = replace_once(text, "$team = if ($teamA.Checked) { 'team_a' } else { 'team_b' }",
-                        f"$team = 'team_{letter}'", where)
-    text = replace_once(
-        text,
-        "  'team_a' { $RepoUrl = 'git@github.com:ErokhinVi/team_1.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_1' }" + nl
-        + "  'team_b' { $RepoUrl = 'git@github.com:ErokhinVi/team_2.git'; $RepoDir = Join-Path $env:USERPROFILE 'team_2' }" + nl,
-        f"  'team_{letter}' {{ $RepoUrl = 'git@github.com:{owner}/{repo}.git'; $RepoDir = Join-Path $env:USERPROFILE '{repo}' }}" + nl,
-        where)
-    text = replace_once(text, "@{ 'team_a' = 'Team A'; 'team_b' = 'Team B'; 'host' = 'Host' }",
-                        f"@{{ 'team_{letter}' = 'Team {upper}'; 'host' = 'Host' }}", where)
-    text = text.replace("Pick your team and block", "Pick your block")
+    teams = "".join(f"  @{{ Code = 'team_{letter}'; Repo = '{conf.owner}/{repo}'; Label = '{team_label(letter)}' }}\n"
+                    for letter, repo in conf.teams)
+    text = set_block(text, "teams", f"$Teams = @(\n{teams})\n", where)
+    keys_b64 = "".join(f"  'team_{letter}' = '{base64.b64encode(keys[letter].encode('utf-8')).decode('ascii')}'\n"
+                       for letter, _repo in conf.teams)
+    text = set_block(text, "keys", f"$TeamKeysB64 = @{{\n{keys_b64}}}\n", where)
     out.write_bytes(text.encode("utf-8"))
 
 
 # ── проверки ────────────────────────────────────────────────────────────────
 
-def verify(out_dir: Path, owner: str, letter: str, repo: str, expected_fp: str) -> list[str]:
-    notes = []
-    text, _ = read_utf16(out_dir / "raif-workshop-setup.applescript")
-    bash = base64.b64decode(B64_RE.search(text).group(2)).decode("utf-8")  # type: ignore[union-attr]
+def payload_of(applescript: Path) -> str:
+    text, _ = read_utf16(applescript)
+    match = B64_RE.search(text)
+    if not match:
+        raise BuildError(f"{applescript.name}: не нашел set bashB64")
+    return base64.b64decode(match.group(2)).decode("utf-8")
+
+
+def verify(out_dir: Path, conf: Conf, fingerprints: dict[str, str]) -> None:
+    bash = payload_of(out_dir / OUT_NAMES[0])
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as tmp:
         tmp.write(bash)
     subprocess.run(["bash", "-n", tmp.name], check=True)
     Path(tmp.name).unlink()
-    mac_fp = fingerprint_of_private(HEREDOC_RE.search(bash).group(2))  # type: ignore[union-attr]
-    cmd_text = (out_dir / "raif-workshop-setup.cmd").read_bytes().decode("utf-8")
-    win_fp = fingerprint_of_private(
-        base64.b64decode(CMD_KEY_RE.search(cmd_text).group(2)).decode("utf-8"))  # type: ignore[union-attr]
-    if mac_fp != expected_fp or win_fp != expected_fp:
-        raise BuildError(f"team_{letter}: отпечаток ключа в скриптах не совпал с ключом команды")
-    if f"git@github.com:{owner}/{repo}.git" not in bash or f"git@github.com:{owner}/{repo}.git" not in cmd_text:
-        raise BuildError(f"team_{letter}: в скриптах нет репозитория {owner}/{repo}")
-    if 'set teamCode to "team_' + letter + '"' not in text:
-        raise BuildError(f"team_{letter}: команда не прошита в AppleScript")
-    notes.append(f"bash -n ок, ключ {expected_fp} в обоих скриптах")
-    return notes
+    mac = {code.lower(): key for code, key in SH_KEY_RE.findall(bash)}
+    cmd_text = (out_dir / OUT_NAMES[1]).read_bytes().decode("utf-8")
+    win = {code: base64.b64decode(b64).decode("utf-8") for code, b64 in CMD_KEY_RE.findall(cmd_text)}
+    as_text, _ = read_utf16(out_dir / OUT_NAMES[0])
+    for letter, repo in conf.teams:
+        code = f"team_{letter}"
+        for platform, found in (("macOS", mac), ("Windows", win)):
+            if code not in found or fingerprint_of_private(found[code]) != fingerprints[letter]:
+                raise BuildError(f"{code}: в установщике {platform} нет ключа команды или он чужой")
+        row = f"{code} {conf.owner}/{repo} {team_label(letter)}"
+        if row not in bash or f"Repo = '{conf.owner}/{repo}'" not in cmd_text:
+            raise BuildError(f"{code}: в установщике нет репозитория {conf.owner}/{repo}")
+        if f'"{code}"' not in as_text or f'"{team_label(letter)}"' not in as_text:
+            raise BuildError(f"{code}: команды нет в списке выбора AppleScript")
+    extra = (set(mac) | set(win)) - {f"team_{letter}" for letter, _ in conf.teams}
+    if extra:
+        raise BuildError(f"в установщике лишние ключи: {', '.join(sorted(extra))}")
+
+
+# ── мастер-скрипты в репозитории ────────────────────────────────────────────
+
+def refresh_master(conf: Conf) -> None:
+    """Вшить tools/bootstrap/raif-workshop-setup.sh в мастер-AppleScript как есть, без ключей."""
+    text, bom = read_utf16(MASTER_AS)
+    match = B64_RE.search(text)
+    if not match:
+        raise BuildError(f"{MASTER_AS.name}: не нашел set bashB64")
+    new_b64 = base64.b64encode(MASTER_SH.read_bytes()).decode("ascii")
+    text = text[:match.start(2)] + new_b64 + text[match.end(2):]
+    text = sub_once(AS_NAMES_RE, "set teamNames to " + as_list([team_label(l) for l, _ in conf.teams]), text, MASTER_AS.name)
+    text = sub_once(AS_CODES_RE, "set teamCodes to " + as_list([f"team_{l}" for l, _ in conf.teams]), text, MASTER_AS.name)
+    write_utf16(MASTER_AS, text, bom)
+    print(f"  {MASTER_AS.relative_to(ROOT)}: вшит {MASTER_SH.relative_to(ROOT)}, команд {len(conf.teams)}")
+
+
+def scrub_bash(bash: str) -> str:
+    if block_re("keys").search(bash):
+        bash = block_re("keys").sub(lambda m: m.group(1) + SH_KEYS_EMPTY + m.group(3), bash)
+    if block_re("teams").search(bash):
+        bash = block_re("teams").sub(lambda m: m.group(1) + SH_TEAMS_EMPTY + m.group(3), bash)
+    return LEGACY_HEREDOC_RE.sub(lambda m: m.group(1) + LEGACY_KEY_PLACEHOLDER + m.group(3), bash)
 
 
 def scrub_master() -> None:
     for pattern in SCRUB_GLOBS:
         for path in sorted(ROOT.glob(pattern)):
+            rel = path.relative_to(ROOT)
             if path.suffix == ".applescript":
                 text, bom = read_utf16(path)
                 match = B64_RE.search(text)
                 if not match:
-                    print(f"  ? {path.relative_to(ROOT)}: нет bashB64, пропускаю")
+                    print(f"  ? {rel}: нет bashB64, пропускаю")
                     continue
                 bash = base64.b64decode(match.group(2)).decode("utf-8")
-                key = HEREDOC_RE.search(bash)
-                if not key or key.group(2) == KEY_PLACEHOLDER:
-                    print(f"  = {path.relative_to(ROOT)}: ключа нет")
+                clean = scrub_bash(bash)
+                if clean == bash:
+                    print(f"  = {rel}: ключа нет")
                     continue
-                bash = bash[:key.start(2)] + KEY_PLACEHOLDER + bash[key.end(2):]
-                new_b64 = base64.b64encode(bash.encode("utf-8")).decode("ascii")
+                new_b64 = base64.b64encode(clean.encode("utf-8")).decode("ascii")
                 write_utf16(path, text[:match.start(2)] + new_b64 + text[match.end(2):], bom)
             else:
                 text = path.read_bytes().decode("utf-8")
-                if not CMD_KEY_RE.search(text) or CMD_KEY_RE.search(text).group(2) == KEY_B64_PLACEHOLDER:  # type: ignore[union-attr]
-                    print(f"  = {path.relative_to(ROOT)}: ключа нет")
+                clean = text.replace("\r\n", "\n")
+                if block_re("keys").search(clean):
+                    clean = block_re("keys").sub(lambda m: m.group(1) + CMD_KEYS_EMPTY + m.group(3), clean)
+                clean = LEGACY_CMD_KEY_RE.sub(lambda m: m.group(1) + LEGACY_KEY_B64_PLACEHOLDER + m.group(3), clean)
+                if "\r\n" in text:
+                    clean = clean.replace("\n", "\r\n")
+                if clean == text:
+                    print(f"  = {rel}: ключа нет")
                     continue
-                path.write_bytes(CMD_KEY_RE.sub(lambda m: m.group(1) + KEY_B64_PLACEHOLDER + m.group(3),
-                                                text).encode("utf-8"))
-            print(f"  - {path.relative_to(ROOT)}: ключ заменен плейсхолдером")
+                path.write_bytes(clean.encode("utf-8"))
+            print(f"  - {rel}: ключи заменены плейсхолдерами")
+
+
+def build(conf: Conf, out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.chmod(0o700)
+    keys_dir = out_dir / "keys"
+    keys: dict[str, str] = {}
+    fingerprints: dict[str, str] = {}
+    lines = ["# deploy keys воркшопа: команда, репозиторий, отпечаток. Повесить: tools/setup/github-access.sh keys"]
+    for letter, repo in conf.teams:
+        key = ensure_key(keys_dir, letter, f"workshop-{conf.workshop_id}-team_{letter}")
+        keys[letter] = key.read_text()
+        fingerprints[letter] = fingerprint_of_private(keys[letter])
+        lines.append(f"team_{letter} {conf.owner}/{repo} {fingerprints[letter]}")
+    bash = build_bash(MASTER_SH.read_text(encoding="utf-8"), conf, keys)
+    build_applescript(MASTER_AS, out_dir / OUT_NAMES[0], conf, bash)
+    build_cmd(MASTER_CMD, out_dir / OUT_NAMES[1], conf, keys)
+    for name in OUT_NAMES:
+        (out_dir / name).chmod(0o600)
+    verify(out_dir, conf, fingerprints)
+    (out_dir / "deploy-keys.txt").write_text("\n".join(lines) + "\n")
+    return out_dir
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", nargs="*", default=None, help="буквы команд")
-    parser.add_argument("--out", type=Path, default=None, help="куда класть ключи и скрипты (по умолчанию папка секретов)")
+    parser.add_argument("--out", type=Path, default=None, help="куда класть ключи и установщик (по умолчанию папка секретов)")
+    parser.add_argument("--refresh-master", action="store_true")
     parser.add_argument("--scrub-master", action="store_true")
     args = parser.parse_args()
 
     if args.scrub_master:
         scrub_master()
         return
-
     conf = load_conf()
-    out_dir = args.out or conf.secrets_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.chmod(0o700)
-    keys_dir = out_dir / "keys"
-    lines = ["# deploy keys воркшопа: команда, репозиторий, отпечаток. Повесить: tools/setup/github-access.sh keys"]
+    if args.refresh_master:
+        refresh_master(conf)
+        return
+    out_dir = build(conf, args.out or conf.secrets_dir)
     for letter, repo in conf.teams:
-        if args.only and letter not in args.only:
-            continue
-        key = ensure_key(keys_dir, letter, f"workshop-{conf.workshop_id}-team_{letter}")
-        key_text = key.read_text()
-        fp = fingerprint_of_private(key_text)
-        team_dir = out_dir / f"team_{letter}"
-        team_dir.mkdir(exist_ok=True)
-        build_applescript(MASTER_AS, team_dir / "raif-workshop-setup.applescript", conf.owner, letter, repo, key_text)
-        build_cmd(MASTER_CMD, team_dir / "raif-workshop-setup.cmd", conf.owner, letter, repo, key_text)
-        notes = verify(team_dir, conf.owner, letter, repo, fp)
-        print(f"team_{letter} → {conf.owner}/{repo}: {'; '.join(notes)}")
-        lines.append(f"team_{letter} {conf.owner}/{repo} {fp}")
-    (out_dir / "deploy-keys.txt").write_text("\n".join(lines) + "\n")
-    print(f"\nГотово: {out_dir}\nПовесить deploy keys: tools/setup/github-access.sh keys")
+        print(f"  {team_label(letter)} = team_{letter} → {conf.owner}/{repo}")
+    print(f"\nГотово, установщик на {len(conf.teams)} команд, ключи сверены в обоих файлах:\n"
+          f"  {out_dir / OUT_NAMES[0]}\n  {out_dir / OUT_NAMES[1]}\n"
+          f"Повесить deploy keys: tools/setup/github-access.sh keys")
 
 
 if __name__ == "__main__":

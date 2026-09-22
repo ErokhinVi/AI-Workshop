@@ -10,13 +10,15 @@ blocks (`retail`, `cib`, `backend`), one participant per block. Every
 other team has its own separate repository and isn't visible from here.
 
 There is no fixed roster of "who is in which block" here, on purpose.
-Each participant picks the block themselves and types their name when
-setting their laptop up — in `tools/bootstrap/raif-workshop-setup.applescript`
-(macOS) or `raif-workshop-setup.cmd` (Windows). The choice is written into
+Each participant picks the team, the block and types their name when
+setting their laptop up — in `raif-workshop-setup.applescript` (macOS) or
+`raif-workshop-setup.cmd` (Windows), one installer for every team. The
+installer clones only the picked team's repo, so the team identity is
+the repo the agent works in. The block choice is written into
 `.git/raif-workshop-info` (`WORKSHOP_BLOCK`, `WORKSHOP_PARTICIPANT`),
-where `tools/cowork-onboard.py` reads it when the agent starts. The team
-identity is determined by which repo the participant cloned — not by a
-picker.
+where `tools/cowork-onboard.py` reads it when the agent starts. A
+participant may switch blocks between stages: save the work, run the
+installer again and pick the new block.
 
 ## What each block does
 

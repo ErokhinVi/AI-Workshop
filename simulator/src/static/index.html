@@ -99,8 +99,9 @@
 "use strict";
 const fmt = n => Number(n||0).toLocaleString('ru-RU');
 const signed = n => (n > 0 ? '+' : (n < 0 ? '−' : '±')) + fmt(Math.abs(n));
-// team_a → «Команда A». Сколько команд, решает TEAM_NAMES симулятора.
-const LABEL = t => /^team_[a-z]$/.test(t) ? 'Команда ' + t.slice(5).toUpperCase() : t;
+// team_a → «Команда 1»: номер стола и репозиторий team_1, так же пишет
+// установщик ноутбука. Сколько команд, решает TEAM_NAMES симулятора.
+const LABEL = t => /^team_[a-z]$/.test(t) ? 'Команда ' + (t.charCodeAt(5) - 96) : t;
 const FSTATE = {absent:'фича не начата',
   partial:'фича в сборке', working:'фича работает'};
 
