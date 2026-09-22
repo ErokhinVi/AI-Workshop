@@ -36,12 +36,13 @@ on:
           - suspend
           - resume
           - teardown
+          - drop
       args:
-        description: "Аргументы: для deploy цели (a:cib sim), для plan тариф (starter)"
+        description: "Аргументы: для deploy цели (a:cib sim), для plan тариф (starter), для drop имена"
         required: false
         default: ""
       confirm:
-        description: "Для teardown впиши DELETE"
+        description: "Для teardown и drop впиши DELETE"
         required: false
         default: ""
 
@@ -79,6 +80,7 @@ jobs:
           case "$OPS_COMMAND" in
             sim-*)    set -- sim "${OPS_COMMAND#sim-}" ;;
             teardown) set -- teardown --confirm "$OPS_CONFIRM" ;;
+            drop)     set -- drop --confirm "$OPS_CONFIRM" ;;
             *)        set -- "$OPS_COMMAND" ;;
           esac
           # shellcheck disable=SC2086

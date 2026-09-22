@@ -155,6 +155,10 @@ R provision
 - ошибка про repo: репозитории должны быть публичными; не помогло, человек
   подключает GitHub в Render (Account Settings, Git Credentials);
 - ошибка про оплату или тариф: в workspace нет карты.
+- `Hobby Tier is limited to 25 services`: в workspace есть чужие сервисы,
+  выключенные тоже считаются. `R check` их перечислит. Удалить по прямой
+  просьбе человека: `R drop <имена> --confirm DELETE` (через ops.sh:
+  `drop DELETE <имена>`), либо перейти на тариф Professional.
 
 Проверка через 10 минут:
 
@@ -285,4 +289,5 @@ Codex и пишет «привет»: агент сам проводит онб�
 | пересобрать | `R deploy a:cib sim` |
 | тариф | `R plan starter` |
 | табло | `R sim state`, `start`, `stop`, `reset`, `evaluate` |
+| освободить лимит Hobby | `R drop <имена> --confirm DELETE` |
 | после воркшопа | `github-access.sh revoke`, `R suspend`, `R teardown --confirm DELETE` |

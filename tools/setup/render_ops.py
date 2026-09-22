@@ -25,6 +25,7 @@
   plan <тариф>               сменить тариф всех web-сервисов: free, starter
   suspend | resume           усыпить или разбудить web-сервисы воркшопа
   teardown --confirm DELETE  удалить сервисы и Postgres воркшопа
+  drop <имя ...> --confirm DELETE   удалить чужие сервисы workspace (лимит Hobby 25)
   sim state|start|stop|reset|evaluate   табло и админка симулятора
 
 Коды выхода: 0 ок, 1 ошибка, 75 Render ограничил частоту запросов (повтори позже).
@@ -567,6 +568,28 @@ class Workshop:
         if path.exists():
             path.unlink()
 
+    def drop(self, names: list[str], confirm: str) -> None:
+        """Удалить чужие сервисы и базы workspace по именам: освободить лимит Hobby."""
+        if confirm != "DELETE":
+            raise OpsError("drop безвозвратно удаляет сервисы и базы из workspace. Запусти с --confirm DELETE")
+        ours = {t.name for t in self.targets} | {f"{self.conf.prefix}-db"}
+        if set(names) & ours:
+            raise OpsError(f"{', '.join(sorted(set(names) & ours))}: это воркшоп, для него teardown")
+        owner = self.owner_id()
+        services = {s.get("name"): s for s in self.render.list_all("/services", "service")
+                    if s.get("ownerId") in (None, owner)}
+        databases = {p.get("name"): p for p in self.render.list_all("/postgres", "postgres")
+                     if p.get("ownerId") in (None, owner)}
+        for name in names:
+            if name in services:
+                self.render.call("DELETE", f"/services/{services[name]['id']}")
+                log(f"- {name}")
+            elif name in databases:
+                self.render.call("DELETE", f"/postgres/{databases[name]['id']}")
+                log(f"- {name} (postgres)")
+            else:
+                log(f"? {name}: в workspace нет")
+
     def check(self) -> None:
         code, _ = fetch(self.render.base + "/owners", timeout=20)
         if code == 0:
@@ -675,6 +698,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("suspend")
     sub.add_parser("resume")
     sub.add_parser("teardown").add_argument("--confirm", default="")
+    drop = sub.add_parser("drop")
+    drop.add_argument("names", nargs="+")
+    drop.add_argument("--confirm", default="")
     sub.add_parser("sim").add_argument("action", choices=SIM_ACTIONS)
     args = parser.parse_args(argv)
 
@@ -704,6 +730,8 @@ def main(argv: list[str] | None = None) -> int:
             workshop.suspend(args.command)
         elif args.command == "teardown":
             workshop.teardown(args.confirm)
+        elif args.command == "drop":
+            workshop.drop(args.names, args.confirm)
         elif args.command == "sim":
             workshop.sim(args.action)
         return 0

@@ -366,6 +366,25 @@ class RenderOpsTest(unittest.TestCase):
         self.assertIn("чужих сервисов и баз в workspace: 1", output)
         self.assertIn("raif-simulator  web_service  suspended  создан 2026-06-02", output)
 
+    def test_drop_removes_only_named_foreign_services(self):
+        self.run_ops("provision")
+        self.fake.services["srv-old"] = {"id": "srv-old", "name": "raif-simulator", "ownerId": "tea-1",
+                                         "serviceDetails": {}}
+        self.fake.postgres["dpg-old"] = {"id": "dpg-old", "name": "raif-workshop-db", "ownerId": "tea-1",
+                                         "status": "suspended"}
+        code, output = self.run_ops("drop", "raif-simulator", "raif-workshop-db")
+        self.assertEqual(code, 1, output)
+        self.assertIn("srv-old", self.fake.services)
+        code, output = self.run_ops("drop", "ws-a-cib", "--confirm", "DELETE")
+        self.assertEqual(code, 1, output)
+        self.assertIn("teardown", output)
+        code, output = self.run_ops("drop", "raif-simulator", "raif-workshop-db", "nope", "--confirm", "DELETE")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("srv-old", self.fake.services)
+        self.assertNotIn("dpg-old", self.fake.postgres)
+        self.assertEqual(len(self.fake.services), 7)
+        self.assertIn("? nope", output)
+
     def test_several_workspaces_need_owner_id(self):
         self.fake.owners.append({"id": "usr-2", "name": "Personal", "type": "user"})
         code, output = self.run_ops("check")

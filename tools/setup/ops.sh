@@ -12,6 +12,7 @@
 #   tools/setup/ops.sh deploy a:cib sim
 #   tools/setup/ops.sh sim start        (или sim-start)
 #   tools/setup/ops.sh teardown DELETE
+#   tools/setup/ops.sh drop DELETE raif-a-backend raif-simulator
 # Нужны секреты оркестратора: tools/setup/github-access.sh ops-secrets.
 
 set -euo pipefail
@@ -33,7 +34,7 @@ if [ "$command" = sim ]; then
   shift
 fi
 confirm=""
-if [ "$command" = teardown ]; then
+if [ "$command" = teardown ] || [ "$command" = drop ]; then
   confirm="${1:-}"
   [ $# -gt 0 ] && shift
 fi
