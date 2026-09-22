@@ -138,6 +138,15 @@ class CfProxyTest(unittest.TestCase):
         self.assertIn("HTTP 403", str(caught.exception))
         self.assertNotIn("wrong", str(caught.exception))
 
+    def test_conf_rebuilds_url_file_without_deploying(self) -> None:
+        self.deploy()
+        (self.tmp / "proxy-urls.conf").unlink()
+        self.fake.calls.clear()
+        with redirect_stdout(io.StringIO()):
+            cf_proxy.write_conf(cf_proxy.Cloudflare(TOKEN))
+        self.assertTrue(all(method == "GET" for method, _path in self.fake.calls))
+        self.assertEqual(len(cf_proxy.read_proxy_conf()), 3)
+
     def test_delete_removes_every_worker(self) -> None:
         self.deploy()
         with redirect_stdout(io.StringIO()):

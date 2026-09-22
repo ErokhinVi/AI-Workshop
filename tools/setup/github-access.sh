@@ -10,8 +10,13 @@
 #       RENDER_SID_CIB, RENDER_SID_RETAIL из tools/setup/render-services.conf.
 #       Без них workflow деплоя в репозитории команды ничего не деплоит.
 #   tools/setup/github-access.sh ops-secrets [--dry-run]
-#       оркестратор: секреты RENDER_API_KEY, OPENAI_API_KEY, ADMIN_TOKEN
-#       (и RENDER_OWNER_ID, если задан) для workflow Workshop ops.
+#       оркестратор: секреты для workflow Workshop ops. RENDER_API_KEY,
+#       OPENAI_API_KEY, ADMIN_TOKEN, CLOUDFLARE_API_TOKEN, WORKSHOP_GH_TOKEN (PAT
+#       владельца на репозитории команд и ведущих), TEAM_DEPLOY_KEYS (ключи команд
+#       для сборки установщика в Actions), RENDER_OWNER_ID, если задан.
+#   tools/setup/github-access.sh hosts <логин GitHub>... [--dry-run]
+#       ведущие: соавторы оркестратора, репозитория ведущих и всех репозиториев
+#       команд. GitHub пришлет каждому приглашение на почту.
 #   tools/setup/github-access.sh revoke      [--dry-run]
 #       после воркшопа: снять deploy keys воркшопа и RENDER_API_KEY у команд.
 #
@@ -25,10 +30,16 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/tools/setup/teams.conf"
 
 COMMAND="${1:-}"
+[ $# -gt 0 ] && shift
 DRY_RUN=0
-if [ "${2:-}" = "--dry-run" ]; then
-  DRY_RUN=1
-fi
+ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = "--dry-run" ]; then
+    DRY_RUN=1
+  else
+    ARGS+=("$arg")
+  fi
+done
 SECRETS_DIR="${WORKSHOP_SECRETS:-$HOME/AI-Workshop-secrets/$WORKSHOP_ID}"
 ENV_FILE="$SECRETS_DIR/workshop.env"
 SERVICES_CONF="${RENDER_SERVICES_CONF:-$ROOT/tools/setup/render-services.conf}"
@@ -125,21 +136,45 @@ RENDER_API_KEY"*)
     ;;
   ops-secrets)
     repo="${GH_OWNER}/${ORCHESTRATOR_REPO}"
-    for name in RENDER_API_KEY OPENAI_API_KEY ADMIN_TOKEN RENDER_OWNER_ID; do
+    for name in RENDER_API_KEY ADMIN_TOKEN OPENAI_API_KEY CLOUDFLARE_API_TOKEN WORKSHOP_GH_TOKEN RENDER_OWNER_ID; do
       value="$(secret "$name")"
       if [ -z "$value" ]; then
-        [ "$name" = RENDER_OWNER_ID ] && continue
-        if [ "$name" = OPENAI_API_KEY ]; then
-          echo "  внимание: OPENAI_API_KEY пуст, судья и cib без LLM. Впиши ключ и повтори ops-secrets"
-          continue
-        fi
-        die "нет $name: заполни $ENV_FILE или задай в окружении"
+        case "$name" in
+          RENDER_API_KEY|ADMIN_TOKEN) die "нет $name: заполни $ENV_FILE или задай в окружении" ;;
+          OPENAI_API_KEY) echo "  внимание: OPENAI_API_KEY пуст, судья и cib без LLM" ;;
+          CLOUDFLARE_API_TOKEN) echo "  внимание: CLOUDFLARE_API_TOKEN пуст, команды proxy в Actions не заработают" ;;
+          WORKSHOP_GH_TOKEN) echo "  внимание: WORKSHOP_GH_TOKEN пуст, installer, team-access, team-reset и revoke в Actions не заработают" ;;
+        esac
+        continue
       fi
       set_secret "$repo" "$name" "$value"
     done
+    if [ -d "$SECRETS_DIR/keys" ]; then
+      # macOS tar без COPYFILE_DISABLE кладет в архив служебные ._файлы
+      keys_b64="$(COPYFILE_DISABLE=1 tar -czf - -C "$SECRETS_DIR" --exclude '._*' keys | base64 | tr -d '\n')"
+      set_secret "$repo" TEAM_DEPLOY_KEYS "$keys_b64"
+    else
+      echo "  внимание: нет $SECRETS_DIR/keys, TEAM_DEPLOY_KEYS не поставлен: сначала make-bootstrap.py"
+    fi
+    ;;
+  hosts)
+    [ ${#ARGS[@]} -gt 0 ] || die "укажи логины GitHub ведущих: github-access.sh hosts login1 login2"
+    repos=("$ORCHESTRATOR_REPO")
+    [ -n "${HOSTS_REPO:-}" ] && repos+=("$HOSTS_REPO")
+    for entry in "${TEAMS[@]}"; do
+      repos+=("${entry#*:}")
+    done
+    for user in "${ARGS[@]}"; do
+      gh api "users/$user" --jq .login >/dev/null 2>&1 || die "на GitHub нет пользователя $user"
+      for repo in "${repos[@]}"; do
+        echo "+ $user → ${GH_OWNER}/${repo}"
+        [ "$DRY_RUN" = 1 ] || gh api -X PUT "repos/${GH_OWNER}/${repo}/collaborators/${user}" \
+          -f permission=push >/dev/null
+      done
+    done
     ;;
   *)
-    sed -n '2,20p' "$0"
+    sed -n '2,26p' "$0"
     exit 2
     ;;
 esac

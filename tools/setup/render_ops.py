@@ -27,6 +27,7 @@
   teardown --confirm DELETE  удалить сервисы и Postgres воркшопа
   drop <имя ...> --confirm DELETE   удалить чужие сервисы workspace (лимит Hobby 25)
   sim state|start|stop|reset|evaluate   табло и админка симулятора
+  logs <цель> [app|build|request|all]   последние 100 строк логов сервиса: 3:cib, sim
 
 Коды выхода: 0 ок, 1 ошибка, 75 Render ограничил частоту запросов (повтори позже).
 """
@@ -55,6 +56,9 @@ API_BASE = "https://api.render.com/v1"
 PAGE = 100
 BLOCKS = ("backend", "cib", "retail")  # backend первым: cib и retail получают его URL
 SIM_ACTIONS = ("state", "start", "stop", "reset", "evaluate")
+LOG_KINDS = ("app", "build", "request", "all")
+# Логи уходят в Actions публичного репозитория: строки, похожие на секреты, прячем.
+SECRET_RE = re.compile(r"(postgres(?:ql)?://\S+|\bsk-[\w-]{8,}|\brnd_\w{8,}|Bearer\s+\S+)")
 EX_TEMPFAIL = 75
 
 CORP_HINT = ("Из корпоративной сети api.render.com и *.onrender.com закрыты: запусти то же "
@@ -633,6 +637,24 @@ class Workshop:
         for name, kind, state, created in sorted(foreign):
             log(f"  {name}  {kind}  {state}  создан {created}".rstrip())
 
+    def logs(self, spec: str, kind: str = "app") -> None:
+        targets = self.select([spec])
+        if len(targets) != 1:
+            raise OpsError(f"logs: нужна одна цель, например 3:cib или sim, а {spec!r} это {len(targets)} сервиса")
+        target = targets[0]
+        service = self.services().get(target.name)
+        if not service:
+            raise OpsError(f"нет сервиса {target.name}: сначала provision")
+        query = {"ownerId": self.owner_id(), "resource": [service["id"]], "limit": 100, "direction": "backward"}
+        if kind != "all":
+            query["type"] = [kind]
+        data = self.render.call("GET", "/logs", query=query) or {}
+        entries = sorted(data.get("logs") or [], key=lambda e: e.get("timestamp", ""))
+        log(f"{target.key} ({target.name}), логи {kind}: строк {len(entries)}")
+        for entry in entries:
+            message = SECRET_RE.sub("***", str(entry.get("message", "")).rstrip())
+            log(f"{str(entry.get('timestamp', ''))[:19].replace('T', ' ')}  {message}")
+
     def sim(self, action: str) -> None:
         base = (os.environ.get("SIM_URL") or "").rstrip("/") or self.url(self.by_key["sim"])
         if action == "state":
@@ -705,6 +727,9 @@ def main(argv: list[str] | None = None) -> int:
     drop.add_argument("names", nargs="+")
     drop.add_argument("--confirm", default="")
     sub.add_parser("sim").add_argument("action", choices=SIM_ACTIONS)
+    logs = sub.add_parser("logs")
+    logs.add_argument("target")
+    logs.add_argument("kind", nargs="?", default="app", choices=LOG_KINDS)
     args = parser.parse_args(argv)
 
     try:
@@ -737,6 +762,8 @@ def main(argv: list[str] | None = None) -> int:
             workshop.drop(args.names, args.confirm)
         elif args.command == "sim":
             workshop.sim(args.action)
+        elif args.command == "logs":
+            workshop.logs(args.target, args.kind)
         return 0
     except (OpsError, ConfError) as exc:
         print(f"ошибка: {exc}", file=sys.stderr, flush=True)

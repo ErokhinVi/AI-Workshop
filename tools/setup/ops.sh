@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# tools/setup/ops.sh: выполнить команду render_ops.py в GitHub Actions и дождаться.
+# tools/setup/ops.sh: выполнить команду пульта в GitHub Actions и дождаться.
 #
 # Для компьютеров, откуда api.render.com и *.onrender.com недоступны
 # (корпоративная сеть). Запускает workflow Workshop ops в оркестраторе, ждет
-# конца, печатает вывод render_ops.py и скачивает render-services.conf, если run
+# конца, печатает вывод команды и скачивает render-services.conf, если run
 # его выложил.
 #
 # Использование: tools/setup/ops.sh <команда> [аргументы]
 #   tools/setup/ops.sh status
-#   tools/setup/ops.sh provision
 #   tools/setup/ops.sh deploy 3:cib sim   (3 = команда 3, она же c)
-#   tools/setup/ops.sh sim start        (или sim-start)
+#   tools/setup/ops.sh logs 3:cib build
+#   tools/setup/ops.sh sim start          (или sim-start)
+#   tools/setup/ops.sh team-reset RESET 3
+#   tools/setup/ops.sh installer
 #   tools/setup/ops.sh teardown DELETE
 #   tools/setup/ops.sh drop DELETE raif-a-backend raif-simulator
-# Нужны секреты оркестратора: tools/setup/github-access.sh ops-secrets.
+# Все команды: tools/setup/ops-dispatch.sh. Секреты: github-access.sh ops-secrets.
 
 set -euo pipefail
 
@@ -24,7 +26,7 @@ REPO="$GH_OWNER/$ORCHESTRATOR_REPO"
 WORKFLOW="workshop-ops.yml"
 
 if [ $# -lt 1 ]; then
-  sed -n '2,16p' "$0"
+  sed -n '2,18p' "$0"
   exit 2
 fi
 command="$1"
@@ -34,7 +36,8 @@ if [ "$command" = sim ]; then
   shift
 fi
 confirm=""
-if [ "$command" = teardown ] || [ "$command" = drop ]; then
+if [ "$command" = teardown ] || [ "$command" = drop ] || [ "$command" = revoke ] \
+   || [ "$command" = team-reset ]; then
   confirm="${1:-}"
   [ $# -gt 0 ] && shift
 fi
@@ -67,7 +70,7 @@ gh run watch "$run" -R "$REPO" --interval 5 --exit-status >/dev/null 2>&1 || sta
 # Вывод шага render_ops.py: без колонок job/step, BOM, времени, цветов, шапки
 # шага и служебных ##[error] (текст ошибки скрипт печатает и так).
 gh run view "$run" -R "$REPO" --log 2>/dev/null | awk -F '\t' '
-  $2 ~ /render_ops/ {
+  $2 ~ /^ops / {
     line = $3
     sub(/^[^0-9]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]*Z ?/, "", line)
     gsub(/\033\[[0-9;]*m/, "", line)

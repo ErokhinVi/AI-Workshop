@@ -3,7 +3,7 @@
 #
 # Использование:
 #   tools/setup/sync-team-repos.sh            # все команды из teams.conf
-#   tools/setup/sync-team-repos.sh c d        # только team_c и team_d
+#   tools/setup/sync-team-repos.sh 3 4        # только команды 3 и 4 (они же c и d)
 #   tools/setup/sync-team-repos.sh --dry-run  # собрать и показать, не пушить
 #
 # Для каждой команды:
@@ -32,7 +32,14 @@ if [ "${1:-}" = "--dry-run" ]; then
   DRY_RUN=1
   shift
 fi
-ONLY=" $* "
+SEL=()
+for sel in "$@"; do
+  case "$sel" in
+    [1-9]) sel="$(printf '%s' "$sel" | tr '1-9' 'a-i')" ;;  # номер команды = номер стола
+  esac
+  SEL+=("$sel")
+done
+ONLY=" ${SEL[*]:-} "
 
 AUTHOR_NAME="${COMMIT_NAME:-$(git config user.name || true)}"
 AUTHOR_EMAIL="${COMMIT_EMAIL:-$(git config user.email || true)}"

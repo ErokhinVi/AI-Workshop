@@ -1,17 +1,20 @@
 name: Workshop ops
 
-# Render и симулятор воркшопа из GitHub Actions. Раннеры GitHub видят
-# api.render.com и *.onrender.com, даже когда корпоративная сеть их режет.
+# Пульт воркшопа: Render, симулятор, прокси workers.dev, репозитории команд,
+# установщик ноутбука. Раннеры GitHub видят api.render.com и *.onrender.com,
+# даже когда корпоративная сеть их режет. Ведущему достаточно роли соавтора
+# этого репозитория: все ключи лежат в секретах, на руках ничего не нужно.
 #
-# Запуск: вкладка Actions, Workshop ops, Run workflow. Или из терминала:
-#   gh workflow run workshop-ops.yml -R <owner>/<repo> -f command=status
-#   gh run watch -R <owner>/<repo>
-# Команды те же, что у tools/setup/render_ops.py (sim-start = sim start).
+# Запуск: вкладка Actions, Workshop ops, Run workflow. Из терминала:
+#   tools/setup/ops.sh <команда> [аргументы]
+# Что делает каждая команда: tools/setup/ops-dispatch.sh, таблица в RUNBOOK.md.
 #
-# Секреты репозитория ставит tools/setup/github-access.sh ops-secrets:
-#   RENDER_API_KEY, OPENAI_API_KEY, ADMIN_TOKEN, RENDER_OWNER_ID (если нужен).
-# Логи публичного репозитория видны всем: скрипт не печатает значения секретов,
-# GitHub дополнительно маскирует их в логах.
+# Секреты ставит владелец: tools/setup/github-access.sh ops-secrets.
+#   RENDER_API_KEY, OPENAI_API_KEY, ADMIN_TOKEN, CLOUDFLARE_API_TOKEN,
+#   WORKSHOP_GH_TOKEN (PAT владельца на репозитории команд и ведущих),
+#   TEAM_DEPLOY_KEYS (ключи команд), RENDER_OWNER_ID (если нужен).
+# Логи публичного репозитория видны всем: скрипты не печатают значения секретов,
+# GitHub дополнительно их маскирует, logs прячет строки, похожие на секреты.
 
 on:
   workflow_dispatch:
@@ -25,9 +28,15 @@ on:
           - sim-state
           - sim-start
           - sim-stop
-          - sim-reset
           - sim-evaluate
+          - sim-reset
           - deploy
+          - logs
+          - team-reset
+          - team-access
+          - proxy
+          - proxy-check
+          - installer
           - check
           - provision
           - env
@@ -35,14 +44,15 @@ on:
           - plan
           - suspend
           - resume
+          - revoke
           - teardown
           - drop
       args:
-        description: "Аргументы: для deploy цели (3:cib sim, 3 это номер команды), для plan тариф (starter), для drop имена"
+        description: "deploy и logs: 3:cib или sim, logs еще build. team-reset: номера команд или all. plan: тариф. drop: имена"
         required: false
         default: ""
       confirm:
-        description: "Для teardown и drop впиши DELETE"
+        description: "team-reset: RESET. revoke, teardown, drop: DELETE"
         required: false
         default: ""
 
@@ -60,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: render_ops.py ${{ inputs.command }}
+      - name: ops ${{ inputs.command }}
         env:
           OPS_COMMAND: ${{ inputs.command }}
           OPS_ARGS: ${{ inputs.args }}
@@ -69,22 +79,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           RENDER_OWNER_ID: ${{ secrets.RENDER_OWNER_ID }}
-        run: |
-          set -euo pipefail
-          set -f
-          case "$OPS_ARGS" in
-            *[!a-z0-9:_\ -]*)
-              echo "::error::args: только латиница, цифры, двоеточие и пробел"
-              exit 2 ;;
-          esac
-          case "$OPS_COMMAND" in
-            sim-*)    set -- sim "${OPS_COMMAND#sim-}" ;;
-            teardown) set -- teardown --confirm "$OPS_CONFIRM" ;;
-            drop)     set -- drop --confirm "$OPS_CONFIRM" ;;
-            *)        set -- "$OPS_COMMAND" ;;
-          esac
-          # shellcheck disable=SC2086
-          python3 tools/setup/render_ops.py "$@" $OPS_ARGS
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WORKSHOP_GH_TOKEN: ${{ secrets.WORKSHOP_GH_TOKEN }}
+          TEAM_DEPLOY_KEYS: ${{ secrets.TEAM_DEPLOY_KEYS }}
+        run: tools/setup/ops-dispatch.sh
 
       - name: Upload render-services.conf
         if: always()

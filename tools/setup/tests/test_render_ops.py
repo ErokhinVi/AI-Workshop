@@ -55,6 +55,7 @@ class FakeRender:
         self.taken: set = set()      # имена, которым Render выдаст URL с суффиксом
         self.rate_limit: list = []   # Retry-After для ближайших запросов к API
         self.health: dict = {}       # хост сервиса -> код /health
+        self.logs: list = []         # записи /v1/logs: resource, type, message, timestamp
         self.sim_state = {"workshop_started": False, "workshop_started_at": None,
                           "teams": {"team_a": {"client_base": 540, "delta_from_start": 40,
                                                "feature_state": "working", "releases": 2,
@@ -159,6 +160,17 @@ def make_handler(fake: FakeRender):
                 if rest in (["suspend"], ["resume"]) and method == "POST":
                     service["suspended"] = "suspended" if rest == ["suspend"] else "not_suspended"
                     return self._send(202)
+            if parts == ["logs"] and method == "GET":
+                if not query.get("ownerId") or not query.get("resource"):
+                    return self._send(400, {"message": "ownerId and resource required"})
+                kinds = query.get("type")
+                found = [e for e in fake.logs if e["resource"] in query["resource"]
+                         and (not kinds or e["type"] in kinds)]
+                found.sort(key=lambda e: e["timestamp"], reverse=query.get("direction") == ["backward"])
+                return self._send(200, {"hasMore": False, "logs": [
+                    {"id": str(i), "message": e["message"], "timestamp": e["timestamp"],
+                     "labels": [{"name": "resource", "value": e["resource"]}, {"name": "type", "value": e["type"]}]}
+                    for i, e in enumerate(found[:int(query.get("limit", ["100"])[0])])]})
             if parts == ["postgres"] and method == "GET":
                 return self._page(list(fake.postgres.values()), "postgres", query)
             if parts == ["postgres"] and method == "POST":
@@ -412,6 +424,27 @@ class RenderOpsTest(unittest.TestCase):
         code, output = self.run_ops("deploy", "z")
         self.assertEqual(code, 1, output)
         code, output = self.run_ops("deploy", "9")
+        self.assertEqual(code, 1, output)
+
+    def test_logs_show_one_service_oldest_first_without_secrets(self):
+        self.run_ops("provision")
+        sid = self.fake.by_name("ws-b-cib")["id"]
+        other = self.fake.by_name("ws-b-retail")["id"]
+        self.fake.logs = [
+            {"resource": sid, "type": "build", "timestamp": "2026-10-09T10:00:02Z", "message": "ERROR: pip failed"},
+            {"resource": sid, "type": "build", "timestamp": "2026-10-09T10:00:01Z",
+             "message": "connect postgresql://u:secret@db/x with Bearer abc.def"},
+            {"resource": sid, "type": "app", "timestamp": "2026-10-09T10:05:00Z", "message": "app line"},
+            {"resource": other, "type": "build", "timestamp": "2026-10-09T10:00:03Z", "message": "not mine"},
+        ]
+        code, output = self.run_ops("logs", "2:cib", "build")
+        self.assertEqual(code, 0, output)
+        self.assertLess(output.index("connect ***"), output.index("ERROR: pip failed"))
+        self.assertNotIn("secret", output)
+        self.assertNotIn("abc.def", output)
+        self.assertNotIn("not mine", output)
+        self.assertNotIn("app line", output)
+        code, output = self.run_ops("logs", "2")
         self.assertEqual(code, 1, output)
 
     def test_deploy_skip_missing_before_provision(self):

@@ -11,6 +11,7 @@
 Использование:
   python3 tools/setup/cf_proxy.py deploy [--subdomain имя]  # поддомен, воркеры, proxy-urls.conf
   python3 tools/setup/cf_proxy.py check                     # /health каждого сервиса через прокси
+  python3 tools/setup/cf_proxy.py conf                      # только записать proxy-urls.conf, без раскатки
   python3 tools/setup/cf_proxy.py urls                      # адреса для людей
   python3 tools/setup/cf_proxy.py delete --confirm DELETE   # после воркшопа
 
@@ -141,6 +142,23 @@ def read_proxy_conf() -> list[tuple[str, str, str, str]]:
     return rows
 
 
+def save_rows(rows: list[tuple[str, str, str, str]]) -> None:
+    header = f"# буква блок адрес-из-корпсети адрес-на-Render; cf_proxy.py, {time.strftime('%Y-%m-%d %H:%M')}\n"
+    PROXY_CONF.write_text(header + "".join(" ".join(row) + "\n" for row in rows))
+    where = PROXY_CONF.relative_to(ROOT) if PROXY_CONF.is_relative_to(ROOT) else PROXY_CONF
+    print(f"записал {where}: прокси {len(rows)}")
+
+
+def write_conf(cf: Cloudflare) -> None:
+    """proxy-urls.conf по уже раскатанным воркерам: имена воркеров детерминированы."""
+    account = account_id(cf)
+    sub = (cf.call("GET", f"/accounts/{account}/workers/subdomain").get("result") or {}).get("subdomain")
+    if not sub:
+        raise CfError("у аккаунта нет поддомена workers.dev: сначала cf_proxy.py deploy")
+    save_rows([(letter, block, f"https://{worker_name(letter, block)}.{sub}.workers.dev", target)
+               for letter, block, target in services()])
+
+
 def deploy(cf: Cloudflare, conf: Conf, wanted: str) -> None:
     account = account_id(cf)
     sub = ensure_subdomain(cf, account, wanted)
@@ -159,10 +177,7 @@ def deploy(cf: Cloudflare, conf: Conf, wanted: str) -> None:
         url = f"https://{name}.{sub}.workers.dev"
         rows.append((letter, block, url, target))
         print(f"  {name:<16} {url}  → {target}")
-    header = f"# буква блок адрес-из-корпсети адрес-на-Render; cf_proxy.py, {time.strftime('%Y-%m-%d %H:%M')}\n"
-    PROXY_CONF.write_text(header + "".join(" ".join(row) + "\n" for row in rows))
-    where = PROXY_CONF.relative_to(ROOT) if PROXY_CONF.is_relative_to(ROOT) else PROXY_CONF
-    print(f"записал {where}: прокси {len(rows)}")
+    save_rows(rows)
 
 
 def check() -> int:
@@ -207,6 +222,7 @@ def main() -> int:
     p_deploy.add_argument("--subdomain", default=None)
     sub.add_parser("check")
     sub.add_parser("urls")
+    sub.add_parser("conf")
     p_delete = sub.add_parser("delete")
     p_delete.add_argument("--confirm", default="")
     args = parser.parse_args()
@@ -223,6 +239,8 @@ def main() -> int:
     cf = Cloudflare(token)
     if args.command == "deploy":
         deploy(cf, conf, args.subdomain or conf.prefix)
+    elif args.command == "conf":
+        write_conf(cf)
     elif args.command == "delete":
         if args.confirm != "DELETE":
             raise ConfError("delete удаляет все прокси: добавь --confirm DELETE")

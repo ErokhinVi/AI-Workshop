@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONF = ROOT / "tools/setup/teams.conf"
-SCALARS = ("GH_OWNER", "ORCHESTRATOR_REPO", "WORKSHOP_ID", "RENDER_PREFIX", "RENDER_REGION",
+SCALARS = ("GH_OWNER", "ORCHESTRATOR_REPO", "HOSTS_REPO", "WORKSHOP_ID", "RENDER_PREFIX", "RENDER_REGION",
            "RENDER_PLAN", "RENDER_DB_PLAN", "LLM_BASE_URL", "LLM_MODEL", "COMMIT_NAME", "COMMIT_EMAIL")
 SECRET_KEYS = ("RENDER_API_KEY", "OPENAI_API_KEY", "ADMIN_TOKEN", "RENDER_OWNER_ID", "CLOUDFLARE_API_TOKEN")
 
@@ -46,6 +46,7 @@ class Conf:
     sim_env: dict = field(default_factory=dict)
     commit_name: str = ""
     commit_email: str = ""
+    hosts_repo: str = ""
 
     @property
     def secrets_dir(self) -> Path:
@@ -110,6 +111,7 @@ def load_conf(path: Path | None = None) -> Conf:
         sim_env=sim_env,
         commit_name=values.get("COMMIT_NAME", ""),
         commit_email=values.get("COMMIT_EMAIL", ""),
+        hosts_repo=pick("HOSTS_REPO", r"[A-Za-z0-9._-]*"),
     )
 
 

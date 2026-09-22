@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""tools/setup/hosts_kit.py: собрать папку для ведущих: ссылки, пульт, ключи, установщик.
+"""tools/setup/hosts_kit.py: содержимое приватного репозитория ведущих (HOSTS_REPO в teams.conf).
 
-Пишет в указанную папку (обычно клон приватного репозитория ведущих):
-  README.md                     табло и сервисы, пульт, ключи, что делать если сломалось
-  workshop.env                  секреты воркшопа из папки секретов
-  installer/raif-workshop-setup.{applescript,cmd}   установщик ноутбука (make-bootstrap.py)
+Пишет в указанную папку (клон репозитория ведущих):
+  README.md       табло и сервисы, пульт в Actions оркестратора, что делать если сломалось
+  installer/      установщик ноутбука из папки секретов (make-bootstrap.py)
 
-В папке ключи: только приватный репозиторий, не публичный и не чаты. Скрипт
-ничего не пушит, пушит человек или агент по его просьбе.
+Секретов в README нет: ключи лежат в секретах оркестратора, ведущие пользуются
+ими через workflow Workshop ops. В установщике приватные ключи команд, поэтому
+репозиторий ведущих приватный. Скрипт ничего не пушит, это делает команда
+installer в Workshop ops или человек.
 
 Использование:
   python3 tools/setup/hosts_kit.py <папка>
@@ -20,18 +21,11 @@ import sys
 import time
 from pathlib import Path
 
-from workshop_conf import ROOT, SECRET_KEYS, Conf, ConfError, load_conf, load_secrets
+from workshop_conf import ROOT, Conf, ConfError, load_conf
 
 SERVICES_CONF = ROOT / "tools/setup/render-services.conf"
 PROXY_CONF = ROOT / "tools/setup/proxy-urls.conf"
 INSTALLERS = ("raif-workshop-setup.applescript", "raif-workshop-setup.cmd")
-KEY_ROLES = {
-    "RENDER_API_KEY": "все сервисы воркшопа на Render",
-    "OPENAI_API_KEY": "OpenRouter: судья табло и блок cib",
-    "ADMIN_TOKEN": "админка табло, кнопка «Начать воркшоп»",
-    "CLOUDFLARE_API_TOKEN": "прокси workers.dev",
-    "RENDER_OWNER_ID": "workspace Render, если ключ видит несколько",
-}
 
 
 def table(path: Path, url_column: int) -> dict[tuple[str, str], str]:
@@ -44,10 +38,11 @@ def table(path: Path, url_column: int) -> dict[tuple[str, str], str]:
     return found
 
 
-def readme(conf: Conf, secrets: dict[str, str]) -> str:
+def readme(conf: Conf) -> str:
     render = table(SERVICES_CONF, 3)
     proxy = table(PROXY_CONF, 2)
     orchestrator = f"https://github.com/{conf.owner}/{conf.orchestrator_repo}"
+    ops = f"{orchestrator}/actions/workflows/workshop-ops.yml"
 
     def row(what: str, letter: str, block: str) -> str:
         return f"| {what} | {proxy.get((letter, block), 'нет')} | {render.get((letter, block), 'нет')} |"
@@ -55,17 +50,15 @@ def readme(conf: Conf, secrets: dict[str, str]) -> str:
     rows = [row("Табло", "sim", "simulator")]
     rows += [row(f"Команда {n}, retail", letter, "retail") for n, (letter, _repo) in enumerate(conf.teams, 1)]
     repos = ", ".join(f"[{repo}](https://github.com/{conf.owner}/{repo})" for _letter, repo in conf.teams)
-    keys = "\n".join(f"| {name} | {role} | {'есть' if secrets.get(name) else 'пусто'} |"
-                     for name, role in KEY_ROLES.items()
-                     if name in SECRET_KEYS and (secrets.get(name) or name != "RENDER_OWNER_ID"))
-    return f"""# Воркшоп {conf.workshop_id}: доступы ведущих
+    return f"""# Воркшоп {conf.workshop_id}: для ведущих
 
-Здесь ключи воркшопа. Файлы не пересылать и не выкладывать.
-Собрано {time.strftime('%Y-%m-%d %H:%M')} скриптом `tools/setup/hosts_kit.py` из {orchestrator}.
+Все управление воркшопом в GitHub, отдельных ключей на руках не нужно.
+Пульт: {ops} → Run workflow. Нужна роль соавтора, ее выдает организатор.
+Собрано {time.strftime('%Y-%m-%d %H:%M')} командой `installer`.
 
 ## Табло и сервисы
 
-Сеть банка режет `*.onrender.com`. Адреса `workers.dev` идут через прокси и открываются отовсюду.
+Сеть банка режет `*.onrender.com`, адреса `workers.dev` открываются отовсюду.
 С ноутбуков воркшопа (там VPN) и из дома работают оба.
 
 | Что | Из сети банка | Напрямую Render |
@@ -77,32 +70,30 @@ def readme(conf: Conf, secrets: dict[str, str]) -> str:
 
 ## Пульт
 
-{orchestrator}/actions/workflows/workshop-ops.yml → Run workflow → поле `command`.
-Нужен доступ на запись в {conf.owner}/{conf.orchestrator_repo}. Результат в Summary рана через минуту-две.
+{ops} → Run workflow → `command`, при нужде `args` и `confirm`. Результат в Summary рана через минуту-две.
 
-| Что нужно | command | args |
-|---|---|---|
-| здоровье всех сервисов | `status` | |
-| начать воркшоп, всем по 500 клиентов | `sim-start` | |
-| счет и последние события | `sim-state` | |
-| пересчитать сейчас, не ждать | `sim-evaluate` | |
-| заморозить табло | `sim-stop` | |
-| пересобрать блок команды | `deploy` | `3:cib` (команда 3, блок cib) или `sim` |
+| Что нужно | command | args | confirm |
+|---|---|---|---|
+| здоровье всех сервисов | `status` | | |
+| начать воркшоп, всем по 500 клиентов | `sim-start` | | |
+| счет и последние события | `sim-state` | | |
+| пересчитать сейчас, не ждать | `sim-evaluate` | | |
+| заморозить табло | `sim-stop` | | |
+| пересобрать блок команды | `deploy` | `3:cib` или `sim` | |
+| логи блока: почему упал или не собрался | `logs` | `3:cib` или `3:cib build` | |
+| вернуть репозиторий команды к старту, только по просьбе команды | `team-reset` | `3` | `RESET` |
+| починить ключи и доступ к Render в репозиториях команд | `team-access` | | |
+| пересобрать прокси workers.dev | `proxy` | | |
+| пересобрать установщик в этом репозитории | `installer` | | |
+| после воркшопа: усыпить сервисы | `suspend` | | |
+| после воркшопа: снять ключи команд | `revoke` | | `DELETE` |
 
-Без GitHub, из дома или с VPN: склонировать {orchestrator}, положить `workshop.env` в
-`~/AI-Workshop-secrets/{conf.workshop_id}/` и запускать `python3 tools/setup/render_ops.py status`.
-Команды те же, `sim start` вместо `sim-start`.
-
-## Ключи: workshop.env
-
-| Ключ | Что открывает | Сейчас |
-|---|---|---|
-{keys}
+Кнопка «Начать воркшоп» на самом табло просит админ-токен. Без токена: `sim-start` в пульте, табло оживет само.
 
 ## Установщик ноутбука
 
-`installer/raif-workshop-setup.applescript` для Mac, `.cmd` для Windows.
-Двойной клик → Run → номер команды, блок, имя. Дальше скрипт все делает сам в Terminal.
+`installer/raif-workshop-setup.applescript` для Mac, `.cmd` для Windows: открыть файл на GitHub → Download raw file.
+На ноутбуке двойной клик → Run → номер команды, блок, имя. Дальше скрипт все делает сам в Terminal.
 В файле ключи всех команд: только на ноутбуки воркшопа, не в чаты.
 Сменить блок: попросить агента сохранить работу и запустить установщик еще раз.
 
@@ -110,16 +101,12 @@ def readme(conf: Conf, secrets: dict[str, str]) -> str:
 
 Полная таблица в {orchestrator}/blob/main/RUNBOOK.md
 
-- блок не обновился за 5 минут: репозиторий команды на GitHub → Actions. Красный run: открыть лог
+- блок не обновился за 5 минут: репозиторий команды → Actions. Красный run: `logs` с args `3:cib build`
 - табло стоит: `sim-state`, воркшоп идет ? Нет: `sim-start`. Идет: `sim-evaluate`
 - табло не открывается: `status`, потом `deploy` с args `sim`. Счет лежит в базе, не пропадет
 - объяснения в ленте табло однотипные: кончился баланс OpenRouter, табло считает запасной формулой
 
-## После воркшопа
-
-`sim-stop` и скриншот табло. Дальше организатор снимает ключи команд
-(`tools/setup/github-access.sh revoke`), усыпляет сервисы (`suspend`) и удаляет ключи Render,
-OpenRouter и Cloudflare.
+Без организатора не сделать: пополнить OpenRouter, поменять ключи Render, OpenRouter и Cloudflare, выдать доступ новому ведущему.
 """
 
 
@@ -129,12 +116,8 @@ def main() -> int:
         return 2
     out = Path(sys.argv[1]).expanduser()
     conf = load_conf()
-    secrets = load_secrets(conf)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "README.md").write_text(readme(conf, secrets), encoding="utf-8")
-    env = "".join(f"{name}={secrets.get(name, '')}\n" for name in SECRET_KEYS)
-    (out / "workshop.env").write_text(f"# секреты воркшопа {conf.workshop_id}, {time.strftime('%Y-%m-%d')}\n{env}")
-    (out / "workshop.env").chmod(0o600)
+    (out / "README.md").write_text(readme(conf), encoding="utf-8")
     (out / "installer").mkdir(exist_ok=True)
     missing = []
     for name in INSTALLERS:
@@ -143,11 +126,12 @@ def main() -> int:
             shutil.copy2(source, out / "installer" / name)
         else:
             missing.append(name)
-    print(f"собрал {out}: README.md, workshop.env, installer/")
+    print(f"собрал {out}: README.md, installer/")
     if missing:
         print(f"  нет установщика ({', '.join(missing)}): python3 tools/setup/make-bootstrap.py")
+        return 1
     if not PROXY_CONF.is_file():
-        print("  нет адресов workers.dev: python3 tools/setup/cf_proxy.py deploy")
+        print("  нет адресов workers.dev: python3 tools/setup/cf_proxy.py conf")
     return 0
 
 

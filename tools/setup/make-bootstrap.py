@@ -118,8 +118,10 @@ def fingerprint_of_private(key_text: str) -> str:
     return out.split()[1]
 
 
-def ensure_key(keys_dir: Path, letter: str, comment: str) -> Path:
+def ensure_key(keys_dir: Path, letter: str, comment: str, must_exist: bool = False) -> Path:
     key = keys_dir / f"team_{letter}"
+    if not key.exists() and must_exist:
+        raise BuildError(f"нет ключа {key}: новый ключ не висит на GitHub, установщик с ним не пустит")
     if not key.exists():
         keys_dir.mkdir(parents=True, exist_ok=True)
         keys_dir.chmod(0o700)
@@ -281,7 +283,7 @@ def scrub_master() -> None:
             print(f"  - {rel}: ключи заменены плейсхолдерами")
 
 
-def build(conf: Conf, out_dir: Path) -> Path:
+def build(conf: Conf, out_dir: Path, keys_must_exist: bool = False) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_dir.chmod(0o700)
     keys_dir = out_dir / "keys"
@@ -289,7 +291,7 @@ def build(conf: Conf, out_dir: Path) -> Path:
     fingerprints: dict[str, str] = {}
     lines = ["# deploy keys воркшопа: команда, репозиторий, отпечаток. Повесить: tools/setup/github-access.sh keys"]
     for letter, repo in conf.teams:
-        key = ensure_key(keys_dir, letter, f"workshop-{conf.workshop_id}-team_{letter}")
+        key = ensure_key(keys_dir, letter, f"workshop-{conf.workshop_id}-team_{letter}", keys_must_exist)
         keys[letter] = key.read_text()
         fingerprints[letter] = fingerprint_of_private(keys[letter])
         lines.append(f"team_{letter} {conf.owner}/{repo} {fingerprints[letter]}")
@@ -308,6 +310,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None, help="куда класть ключи и установщик (по умолчанию папка секретов)")
     parser.add_argument("--refresh-master", action="store_true")
     parser.add_argument("--scrub-master", action="store_true")
+    parser.add_argument("--keys-must-exist", action="store_true",
+                        help="не создавать ключи, упасть без них (Actions: ключи из секрета)")
     args = parser.parse_args()
 
     if args.scrub_master:
@@ -317,7 +321,7 @@ def main() -> None:
     if args.refresh_master:
         refresh_master(conf)
         return
-    out_dir = build(conf, args.out or conf.secrets_dir)
+    out_dir = build(conf, args.out or conf.secrets_dir, args.keys_must_exist)
     for letter, repo in conf.teams:
         print(f"  {team_label(letter)} = team_{letter} → {conf.owner}/{repo}")
     print(f"\nГотово, установщик на {len(conf.teams)} команд, ключи сверены в обоих файлах:\n"
