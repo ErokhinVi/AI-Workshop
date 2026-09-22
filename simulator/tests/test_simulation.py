@@ -406,3 +406,20 @@ def test_unreachable_bank_drops_base(monkeypatch):
     out = asyncio.run(m.evaluate_round(snaps, {"team_a"}))
     assert out["team_a"]["judge"] == "unreachable"
     assert out["team_a"]["delta"] < 0
+
+
+def test_only_committed_teams_are_judged(monkeypatch):
+    # вердикт по командам без нового коммита не нужен: не жжём на них судью
+    _reset(datetime.now(timezone.utc))
+    judged: list[set] = []
+
+    async def fake_judge(snaps, baselines=None, *, active_task=""):
+        judged.append(set(snaps))
+        block = {"new_functionality": 2, "client_value": 2, "completeness": 2,
+                 "cross_block": 2, "convenience": 8, "feature_state": "working",
+                 "reason": "тест", "judge": "llm"}
+        return {team: dict(block) for team in snaps}
+
+    monkeypatch.setattr(m, "judge_round", fake_judge)
+    _run_commit("team_b", contract="NEW")
+    assert judged == [{"team_b"}]

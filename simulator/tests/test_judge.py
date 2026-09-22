@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
-from src import llm
+from src import judge, llm
 from src.judge import (
     _build_team_prompt,
     classify_feature,
@@ -438,3 +439,106 @@ def test_prompt_has_no_liveness_section_without_probe():
     cur = _snap({"backend": "old", "cib": "old", "retail": "NEW"})
     prompt = _build_team_prompt(cur, base, cur["regression"], "")
     assert "работоспособности НОВОЙ фичи" not in prompt
+
+
+# --- шум судьи: медиана, общий вердикт одинаковых банков, память -------------
+
+def _queue_llm(monkeypatch, answers: list) -> list[str]:
+    """LLM отвечает по очереди из answers (исключение = сбой вызова).
+
+    Возвращает список промптов, с которыми звали LLM.
+    """
+    monkeypatch.setattr(judge, "JUDGE_SAMPLES", 3)
+    calls: list[str] = []
+    queue = list(answers)
+
+    async def fake_ask(prompt, system=None, max_tokens=400, temperature=0.0):
+        calls.append(prompt)
+        answer = queue.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("src.judge.ask_llm", fake_ask)
+    monkeypatch.setattr("src.judge.last_call_degraded", lambda: False)
+    return calls
+
+
+def _answer(client_value: int, ui_polish: int, convenience: int, reason: str) -> str:
+    return json.dumps({"new_functionality": 1, "client_value": client_value,
+                       "completeness": 1, "cross_block": 1,
+                       "backend_persistence": 1, "feature_breadth": 1,
+                       "ui_polish": ui_polish, "convenience": convenience,
+                       "reason": reason}, ensure_ascii=False)
+
+
+def _changed_bank(team: str = "team_a") -> dict:
+    return dict(_snap({"backend": "NEW", "cib": "NEW", "retail": "NEW"}), team=team)
+
+
+def test_judge_takes_median_of_three_answers(monkeypatch):
+    # тот же банк: 13 и 15 из 20 вперемешку, медиана по осям гасит выброс
+    _queue_llm(monkeypatch, [_answer(1, 1, 5, "скромно"),
+                             _answer(2, 2, 7, "щедро"),
+                             _answer(2, 2, 6, "в середине")])
+    v = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert v["judge"] == "llm"
+    assert (v["client_value"], v["ui_polish"], v["convenience"]) == (2, 2, 6)
+    assert v["reason"] == "в середине"   # текст от ответа, совпавшего с медианой
+
+
+def test_identical_banks_get_one_verdict(monkeypatch):
+    # на старте все команды равны шаблону: один набор вызовов на всех
+    calls = _queue_llm(monkeypatch, [_answer(1, 1, 5, "a"), _answer(2, 2, 7, "b"),
+                                     _answer(2, 1, 6, "c")])
+    snaps = {t: _changed_bank(t) for t in ("team_a", "team_b", "team_c")}
+    verdict = asyncio.run(judge_round(snaps, {t: _baseline("old") for t in snaps}))
+    assert len(calls) == 3
+    assert verdict["team_a"] == verdict["team_b"] == verdict["team_c"]
+
+
+def test_different_banks_are_judged_separately(monkeypatch):
+    calls = _queue_llm(monkeypatch, [_answer(1, 1, 5, "x")] * 6)
+    snaps = {"team_a": _changed_bank("team_a"),
+             "team_b": dict(_snap({"backend": "ДРУГОЕ", "cib": "NEW", "retail": "NEW"}),
+                            team="team_b")}
+    asyncio.run(judge_round(snaps, {t: _baseline("old") for t in snaps}))
+    assert len(calls) == 6
+    assert len(set(calls)) == 2
+
+
+def test_same_bank_again_reuses_verdict_without_llm(monkeypatch):
+    # коммит не поменял того, что видит судья: вердикт прежний, шума нет
+    calls = _queue_llm(monkeypatch, [_answer(2, 2, 7, "x")] * 3)
+    first = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    again = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert len(calls) == 3
+    assert again == first
+
+
+def test_one_failed_call_still_gives_llm_verdict(monkeypatch):
+    calls = _queue_llm(monkeypatch, [_answer(1, 1, 5, "a"), llm.LLMError("таймаут"),
+                                     _answer(2, 2, 7, "b")])
+    v = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert v["judge"] == "llm"
+    assert v["client_value"] == 1   # из двух ответов берём нижний
+    asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert len(calls) == 3          # два ответа из трёх — большинство, запомнили
+
+
+def test_single_surviving_answer_is_not_remembered(monkeypatch):
+    calls = _queue_llm(monkeypatch, [llm.LLMError("x"), llm.LLMError("x"),
+                                     _answer(2, 2, 7, "один"),
+                                     _answer(1, 1, 5, "a"), _answer(1, 1, 5, "b"),
+                                     _answer(1, 1, 5, "c")])
+    first = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert first["judge"] == "llm" and first["reason"] == "один"
+    second = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert len(calls) == 6          # по одному ответу не запоминали, судили заново
+    assert second["client_value"] == 1
+
+
+def test_all_calls_failed_falls_back(monkeypatch):
+    _queue_llm(monkeypatch, [llm.LLMError("x"), ValueError("мусор"), llm.LLMError("x")])
+    v = asyncio.run(judge_team(_changed_bank(), _baseline("old")))
+    assert v["judge"] == "fallback"

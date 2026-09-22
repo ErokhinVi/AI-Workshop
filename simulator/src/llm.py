@@ -5,6 +5,13 @@
 Организатор может через env OPENAI_MODEL поставить другую дешёвую модель
 (например gpt-5.4-mini или gpt-5.4-nano) — слой устойчивости подстроит
 параметры запроса под её требования.
+
+Рассуждающие модели через OpenRouter (MiMo, Gemini, Claude) по умолчанию
+думают и тратят на это лимит ответа: при max_tokens=400 текста не остаётся.
+env LLM_REASONING решает, что с этим делать: `off` — не думать совсем,
+`low`/`medium`/`high` — думать, и тогда к лимиту ответа добавляется
+LLM_REASONING_TOKENS на размышления. Пусто — параметр не шлём (OpenAI напрямую
+его не знает).
 """
 from __future__ import annotations
 
@@ -16,6 +23,8 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 LLM_TIMEOUT_S = float(os.environ.get("LLM_TIMEOUT_S", "30"))
+LLM_REASONING = os.environ.get("LLM_REASONING", "").strip().lower()
+LLM_REASONING_TOKENS = int(os.environ.get("LLM_REASONING_TOKENS", "4000"))
 
 # Порядок попыток запроса: (имя параметра лимита токенов, слать ли temperature).
 # Сперва как принимает gpt-4.1-mini; затем придирки семейства GPT-5; в крайнем
@@ -42,11 +51,26 @@ def last_call_degraded() -> bool:
     return _last_degraded
 
 
+def _reasoning(max_tokens: int) -> tuple[dict, int]:
+    """Поле reasoning для OpenRouter и лимит токенов с учётом размышлений."""
+    if LLM_REASONING in ("off", "none", "false", "0"):
+        return {"reasoning": {"enabled": False}}, max_tokens
+    if LLM_REASONING in ("minimal", "low", "medium", "high"):
+        return ({"reasoning": {"effort": LLM_REASONING}},
+                max_tokens + LLM_REASONING_TOKENS)
+    return {}, max_tokens
+
+
 def _extract(data: dict) -> str:
     try:
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"неожиданный формат ответа: {data}") from exc
+    if not isinstance(content, str) or not content.strip():
+        # Рассуждающая модель потратила весь лимит токенов на размышления и
+        # не дала текста: раунд уходит в запасную формулу, а не падает.
+        raise LLMError("модель вернула пустой ответ")
+    return content
 
 
 async def ask_llm(
@@ -76,13 +100,15 @@ async def ask_llm(
         "Content-Type": "application/json",
     }
 
+    extra, token_limit = _reasoning(max_tokens)
     last_err = "неизвестная ошибка"
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT_S) as client:
         for token_param, with_temp in _ATTEMPTS:
             payload: dict = {
                 "model": OPENAI_MODEL,
                 "messages": messages,
-                token_param: max_tokens,
+                token_param: token_limit,
+                **extra,
             }
             if with_temp:
                 payload["temperature"] = temperature

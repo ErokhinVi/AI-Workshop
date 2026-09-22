@@ -26,14 +26,35 @@
 
 Источник истины о том, что команда добавила — тексты CONTRACT.md и retail HTML
 из probe-снимка. Они подаются модели как ДАННЫЕ для оценки, не как инструкции.
+
+Шум. Даже при temperature=0 один вызов на одном и том же банке гуляет: 13 или
+15 из 20, а это 20–40 клиентов. Поэтому каждый промпт судится JUDGE_SAMPLES
+вызовами (по умолчанию 3) и берётся медиана по каждой оси. Одинаковый промпт
+(одинаковый банк) судится один раз за раунд и запоминается: на старте все
+команды равны шаблону и получают один вердикт, а коммит, который ничего не
+поменял в том, что видит судья, не двигает базу из-за шума.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import re
+import statistics
+from collections import OrderedDict
 
+from src import llm
 from src.llm import LLMError, ask_llm, last_call_degraded
+
+JUDGE_SAMPLES = max(1, int(os.environ.get("JUDGE_SAMPLES", "3")))
+_JUDGE_ERRORS = (LLMError, ValueError, KeyError, TypeError)
+# Оси, которые LLM обязан вернуть (нет — 0), и оси, которые без ответа LLM
+# достраивает детерминированный дефолт в `_verdict_from_block`.
+_CORE_AXES = ("new_functionality", "client_value", "completeness", "cross_block")
+_OPTIONAL_AXES = ("backend_persistence", "feature_breadth", "ui_polish")
+_CACHE_MAX = 256
+_block_cache: OrderedDict[str, dict] = OrderedDict()
 
 BLOCKS = ("backend", "cib", "retail")
 COMPLETENESS_WORKING = 2   # порог completeness, при котором фича считается working
@@ -456,7 +477,10 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
                  else _default_ui_polish(snap, baseline_snap))
     convenience = _coerce_convenience(block.get("convenience"))
     reason = str(block.get("reason", "")).strip()
-    tag = "llm-degraded" if last_call_degraded() else "llm"
+    degraded = block.get("_degraded")
+    if degraded is None:
+        degraded = last_call_degraded()
+    tag = "llm-degraded" if degraded else "llm"
     guarded = False
 
     allow_floor = observable and (feature_live is not False or multi_feature)
@@ -514,26 +538,101 @@ def _verdict_from_block(block: dict, snap: dict, baseline_snap: dict) -> dict:
     }
 
 
+def clear_cache() -> None:
+    """Забыть запомненные вердикты: тесты и сравнение моделей."""
+    _block_cache.clear()
+
+
+def _merge_blocks(blocks: list[dict]) -> dict:
+    """Медиана по каждой оси из нескольких ответов судьи на один промпт.
+
+    Ось, которую не вернул ни один ответ, остаётся пустой, её достроит
+    детерминированный дефолт. reason берётся из ответа, чьи оси ближе всего к
+    медиане: текст на табло должен совпадать с баллом.
+    """
+    merged: dict = {}
+    for key in _CORE_AXES:
+        merged[key] = statistics.median_low(_axis(b.get(key)) for b in blocks)
+    for key in _OPTIONAL_AXES:
+        values = [_axis(b[key]) for b in blocks if b.get(key) is not None]
+        if values:
+            merged[key] = statistics.median_low(values)
+    merged["convenience"] = statistics.median_low(
+        _coerce_convenience(b.get("convenience")) for b in blocks)
+
+    def distance(block: dict) -> float:
+        axes = sum(abs(_axis(block.get(key)) - merged[key])
+                   for key in (*_CORE_AXES, *_OPTIONAL_AXES) if key in merged)
+        conv = abs(_coerce_convenience(block.get("convenience")) - merged["convenience"])
+        return axes + conv / 10
+
+    merged["reason"] = str(min(blocks, key=distance).get("reason", "")).strip()
+    merged["_degraded"] = any(b.get("_degraded") for b in blocks)
+    return merged
+
+
+async def _ask_block(prompt: str) -> dict:
+    raw = await ask_llm(prompt, system=_JUDGE_SYSTEM, max_tokens=400,
+                        temperature=0.0)
+    degraded = last_call_degraded()
+    block = _parse_team_block(raw)
+    block["_degraded"] = degraded
+    return block
+
+
+async def _judge_prompt(prompt: str) -> dict:
+    """Медианный ответ судьи на промпт; запомненный, если такой уже был.
+
+    Бросает LLMError, если не ответил ни один из JUDGE_SAMPLES вызовов.
+    Запоминается только ответ большинства вызовов: вердикт по одному выжившему
+    вызову шумный, пусть в следующий раз судится заново.
+    """
+    key = hashlib.sha256(
+        f"{llm.OPENAI_MODEL}\n{JUDGE_SAMPLES}\n{prompt}".encode()).hexdigest()
+    cached = _block_cache.get(key)
+    if cached is not None:
+        _block_cache.move_to_end(key)
+        return dict(cached)
+    results = await asyncio.gather(*(_ask_block(prompt) for _ in range(JUDGE_SAMPLES)),
+                                   return_exceptions=True)
+    blocks: list[dict] = []
+    errors: list[BaseException] = []
+    for result in results:
+        if isinstance(result, dict):
+            blocks.append(result)
+        elif isinstance(result, _JUDGE_ERRORS):
+            errors.append(result)
+        else:
+            raise result
+    if not blocks:
+        raise LLMError(f"судья не ответил ни разу из {JUDGE_SAMPLES}: {errors[0]}")
+    merged = _merge_blocks(blocks)
+    if 2 * len(blocks) > JUDGE_SAMPLES:
+        _block_cache[key] = merged
+        while len(_block_cache) > _CACHE_MAX:
+            _block_cache.popitem(last=False)
+    return dict(merged)
+
+
+def _team_prompt(snap: dict, base: dict, active_task: str) -> str:
+    return _build_team_prompt(snap, base, snap.get("regression") or {}, active_task)
+
+
 async def judge_team(snap: dict, baseline_snap: dict | None = None,
                      *, active_task: str = "") -> dict:
-    """Один независимый LLM-вызов на одну команду. Fallback — generic из diff."""
+    """Судья по одной команде: медиана JUDGE_SAMPLES вызовов. Fallback — generic из diff."""
     base = baseline_snap if baseline_snap is not None else {}
-    regression = snap.get("regression") or {}
     try:
-        raw = await ask_llm(
-            _build_team_prompt(snap, base, regression, active_task),
-            system=_JUDGE_SYSTEM, max_tokens=400, temperature=0.0,
-        )
-        block = _parse_team_block(raw)
-        return _verdict_from_block(block, snap, base)
-    except (LLMError, ValueError, KeyError, TypeError):
+        block = await _judge_prompt(_team_prompt(snap, base, active_task))
+    except _JUDGE_ERRORS:
         return generic_fallback(snap, base)
+    return _verdict_from_block(block, snap, base)
 
 
 async def judge_round(snapshots: dict[str, dict],
                       baselines: dict[str, dict] | None = None,
                       *, active_task: str = "") -> dict:
-    """Оценить N команд N НЕЗАВИСИМЫМИ параллельными LLM-вызовами.
+    """Оценить N команд параллельно, каждую по её собственному промпту.
 
     Принимает словарь {имя_команды: probe-снапшот} и словарь baseline-снимков
     (нулевых точек); возвращает {имя_команды: {new_functionality, client_value,
@@ -541,12 +640,25 @@ async def judge_round(snapshots: dict[str, dict],
 
     На воркшопе команды живут в отдельных GitHub-репозиториях и судятся
     независимо: судья никогда не сравнивает «А с Б», а только оценивает
-    конкретный банк глазами клиента относительно его же нулевой точки.
+    конкретный банк глазами клиента относительно его же нулевой точки. Если у
+    двух команд промпт совпал до символа (на старте так у всех: банк = шаблон),
+    судья видит один и тот же банк и отвечает один раз для всех.
     """
     baselines = baselines or {}
     names = list(snapshots.keys())
-    verdicts = await asyncio.gather(*(
-        judge_team(snapshots[n], baselines.get(n), active_task=active_task)
-        for n in names
-    ))
-    return dict(zip(names, verdicts))
+    bases = {n: baselines.get(n) or {} for n in names}
+    prompts = {n: _team_prompt(snapshots[n], bases[n], active_task) for n in names}
+    unique = list(dict.fromkeys(prompts.values()))
+    results = await asyncio.gather(*(_judge_prompt(p) for p in unique),
+                                   return_exceptions=True)
+    by_prompt = dict(zip(unique, results))
+    verdicts: dict[str, dict] = {}
+    for name in names:
+        result = by_prompt[prompts[name]]
+        if isinstance(result, _JUDGE_ERRORS):
+            verdicts[name] = generic_fallback(snapshots[name], bases[name])
+        elif isinstance(result, BaseException):
+            raise result
+        else:
+            verdicts[name] = _verdict_from_block(dict(result), snapshots[name], bases[name])
+    return verdicts

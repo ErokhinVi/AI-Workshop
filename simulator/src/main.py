@@ -490,7 +490,9 @@ async def evaluate_round(snapshots: dict[str, dict] | None = None,
             if unchanged and reachable:
                 continue
             await _ensure_feature_probe(team, snap)
-        verdict = await judge_round({t: snapshots[t] for t in TEAMS},
+        # Судим только команды с новым коммитом: вердикт остальных ниже всё
+        # равно не используется, а каждый промпт стоит JUDGE_SAMPLES вызовов.
+        verdict = await judge_round({t: snapshots[t] for t in TEAMS if t in committed},
                                     _baselines, active_task=ACTIVE_TASK)
         now = _now()
         out: dict[str, dict] = {}
