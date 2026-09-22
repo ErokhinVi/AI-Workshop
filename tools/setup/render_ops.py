@@ -586,8 +586,26 @@ class Workshop:
             log("нет: " + ", ".join(missing))
         pg = self.postgres()
         log(f"Postgres {self.conf.prefix}-db: {pg.get('status') if pg else 'нет'}")
+        self.log_foreign()
         for key in ("OPENAI_API_KEY", "ADMIN_TOKEN"):
             log(f"{key}: {'задан' if self.secrets.get(key) else 'НЕТ'}")
+
+    def log_foreign(self) -> None:
+        """Чужие сервисы и базы в workspace: на Hobby они съедают общий лимит в 25."""
+        owner, ours = self.owner_id(), {t.name for t in self.targets} | {f"{self.conf.prefix}-db"}
+        foreign = [(s.get("name"), s.get("type"), "suspended" if s.get("suspended") == "suspended" else "",
+                    (s.get("createdAt") or "")[:10])
+                   for s in self.render.list_all("/services", "service")
+                   if s.get("ownerId") in (None, owner) and s.get("name") not in ours]
+        foreign += [(p.get("name"), "postgres", p.get("status") or "", (p.get("createdAt") or "")[:10])
+                    for p in self.render.list_all("/postgres", "postgres")
+                    if p.get("ownerId") in (None, owner) and p.get("name") not in ours]
+        if not foreign:
+            log("чужих сервисов в workspace нет")
+            return
+        log(f"чужих сервисов и баз в workspace: {len(foreign)}, на Hobby они в общем лимите 25:")
+        for name, kind, state, created in sorted(foreign):
+            log(f"  {name}  {kind}  {state}  создан {created}".rstrip())
 
     def sim(self, action: str) -> None:
         base = (os.environ.get("SIM_URL") or "").rstrip("/") or self.url(self.by_key["sim"])

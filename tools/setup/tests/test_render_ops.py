@@ -357,6 +357,15 @@ class RenderOpsTest(unittest.TestCase):
         self.assertEqual(code, 75, output)
         self.assertIn("повтори", output)
 
+    def test_check_lists_foreign_services_that_eat_the_limit(self):
+        self.fake.services["srv-old"] = {"id": "srv-old", "name": "raif-simulator", "ownerId": "tea-1",
+                                         "type": "web_service", "suspended": "suspended",
+                                         "createdAt": "2026-06-02T10:00:00Z", "serviceDetails": {}}
+        code, output = self.run_ops("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("чужих сервисов и баз в workspace: 1", output)
+        self.assertIn("raif-simulator  web_service  suspended  создан 2026-06-02", output)
+
     def test_several_workspaces_need_owner_id(self):
         self.fake.owners.append({"id": "usr-2", "name": "Personal", "type": "user"})
         code, output = self.run_ops("check")
