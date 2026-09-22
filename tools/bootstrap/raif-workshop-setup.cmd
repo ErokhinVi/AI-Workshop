@@ -461,7 +461,13 @@ if (-not $keyText.EndsWith("`n")) { $keyText = $keyText + "`n" }
 Write-FileNoBom -path $SshKeyPath -text $keyText
 Lock-FileToCurrentUser -path $SshKeyPath
 $fp = '?'
+$pubLine = ''
 $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+# A raif_workshop.pub left over from another key breaks ssh: it offers that
+# public key, then fails to sign. Write the matching one or drop the stale one.
+try { $pubLine = ((& ssh-keygen -y -f $SshKeyPath 2>$null) | Out-String).Trim() } catch {}
+if ($pubLine -like 'ssh-*') { Write-FileNoBom -path ($SshKeyPath + '.pub') -text ($pubLine + "`n") }
+else { Remove-Item -LiteralPath ($SshKeyPath + '.pub') -Force -ErrorAction SilentlyContinue }
 try { $fpLine = ((& ssh-keygen -lf $SshKeyPath 2>&1) | Out-String).Trim(); if ($fpLine) { $fp = $fpLine } } catch {}
 $ErrorActionPreference = $prevEAP
 Ok ('File: ' + $SshKeyPath + '  (current user only)')
@@ -664,6 +670,7 @@ Write-Host '  visible — you can only reach them through their public sites.' -
 Write-Host ''
 Write-Host '  Files the script created or updated:'
 Write-Host ('    ✓ ' + $SshKeyPath + '  (workshop private key)')
+Write-Host ('    ✓ ' + $SshKeyPath + '.pub  (its public key)')
 Write-Host ('    ✓ ' + $SshConfig + '  (Host github.com block)')
 Write-Host ('    ✓ ' + (Join-Path $env:USERPROFILE '.gitconfig') + '  (git --global)')
 Write-Host ('    ✓ ' + $keyInGit + '  (key copy for Claude)')

@@ -207,6 +207,11 @@ if ! (umask 077; write_team_key "${TEAM}" "${SSH_KEY_PATH}"); then
   die "No key for ${TEAM_HUMAN} inside this script. Organiser: rebuild it with tools/setup/make-bootstrap.py."
 fi
 chmod 600 "${SSH_KEY_PATH}"
+# A raif_workshop.pub left over from another key breaks ssh: it offers that
+# public key, then fails to sign ("contents do not match public"). Write the
+# matching one.
+ssh-keygen -y -f "${SSH_KEY_PATH}" > "${SSH_KEY_PATH}.pub" 2>/dev/null </dev/null \
+  || rm -f "${SSH_KEY_PATH}.pub"
 SSH_FP="$(ssh-keygen -lf "${SSH_KEY_PATH}" 2>/dev/null | awk '{print $2, $4}' || echo '?')"
 ok "File: ${SSH_KEY_PATH}  (mode 600)"
 note "fingerprint: ${SSH_FP}"
@@ -397,6 +402,7 @@ printf "  %sYou see and edit only your block. Other teams are invisible: you can
 cat <<EOF
   Files the script created or updated:
     ✓ ${HOME}/.ssh/raif_workshop                            (workshop private key)
+    ✓ ${HOME}/.ssh/raif_workshop.pub                        (its public key)
     ✓ ${HOME}/.ssh/config                                   (Host github.com block)
     ✓ ${HOME}/.gitconfig                                    (--global user.name/email)
     ✓ ${REPO_DIR}/.git/raif-workshop-key                    (key copy for Claude)
