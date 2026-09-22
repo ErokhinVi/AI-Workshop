@@ -9,7 +9,7 @@
 # Использование: tools/setup/ops.sh <команда> [аргументы]
 #   tools/setup/ops.sh status
 #   tools/setup/ops.sh provision
-#   tools/setup/ops.sh deploy a:cib sim
+#   tools/setup/ops.sh deploy 3:cib sim   (3 = команда 3, она же c)
 #   tools/setup/ops.sh sim start        (или sim-start)
 #   tools/setup/ops.sh teardown DELETE
 #   tools/setup/ops.sh drop DELETE raif-a-backend raif-simulator

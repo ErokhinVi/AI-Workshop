@@ -38,7 +38,7 @@ on:
           - teardown
           - drop
       args:
-        description: "Аргументы: для deploy цели (a:cib sim), для plan тариф (starter), для drop имена"
+        description: "Аргументы: для deploy цели (3:cib sim, 3 это номер команды), для plan тариф (starter), для drop имена"
         required: false
         default: ""
       confirm:

@@ -37,7 +37,7 @@
 | заморозить табло | `sim-stop` | `sim stop` |
 | пересчитать сейчас, не ждать опроса | `sim-evaluate` | `sim evaluate` |
 | здоровье всех сервисов | `status` | `status` |
-| пересобрать блок команды | `deploy`, args `a:cib` | `deploy a:cib` |
+| пересобрать блок команды: номер стола и блок | `deploy`, args `3:cib` | `deploy 3:cib` |
 
 Табло: `https://<RENDER_PREFIX>-simulator.onrender.com`, точный адрес в
 `TEAM.md` любой команды. Открывается только из сети, где *.onrender.com не

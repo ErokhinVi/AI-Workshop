@@ -294,7 +294,7 @@ Codex и пишет «привет»: агент сам проводит онб�
 | создать все на Render | `R provision` |
 | поменял teams.conf или ключ LLM | `R env` (для ops.sh сначала push и `ops-secrets`) |
 | здоровье сервисов | `R status` |
-| пересобрать | `R deploy a:cib sim` |
+| пересобрать | `R deploy 3:cib sim` |
 | тариф | `R plan starter` |
 | табло | `R sim state`, `start`, `stop`, `reset`, `evaluate` |
 | освободить лимит Hobby | `R drop <имена> --confirm DELETE` |

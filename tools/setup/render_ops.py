@@ -21,7 +21,7 @@
   env [--dry-run]            привести env сервисов к teams.conf, изменившиеся передеплоить
   services                   записать tools/setup/render-services.conf
   status                     последний деплой и /health каждого сервиса
-  deploy [цель ...]          передеплой: sim, a (три блока команды), a:cib; без целей все
+  deploy [цель ...]          передеплой: sim, 1 или a (три блока команды 1), 1:cib; без целей все
   plan <тариф>               сменить тариф всех web-сервисов: free, starter
   suspend | resume           усыпить или разбудить web-сервисы воркшопа
   teardown --confirm DELETE  удалить сервисы и Postgres воркшопа
@@ -338,6 +338,9 @@ class Workshop:
             return list(self.targets)
         chosen: list[Target] = []
         for spec in specs:
+            team, sep, block = spec.partition(":")
+            if team.isdigit() and 1 <= int(team) <= 26:  # номер команды, он же номер стола: 1 → a
+                spec = chr(ord("a") + int(team) - 1) + sep + block
             if spec in ("sim", "simulator"):
                 picked = [self.by_key["sim"]]
             elif spec in self.by_key:
@@ -345,7 +348,7 @@ class Workshop:
             else:
                 picked = [t for t in self.targets if t.letter == spec]
             if not picked:
-                raise OpsError(f"не знаю цель {spec!r}: sim, буква команды или буква:блок (a:cib)")
+                raise OpsError(f"не знаю цель {spec!r}: sim, номер или буква команды, 3:cib или c:cib")
             chosen.extend(t for t in picked if t not in chosen)
         return chosen
 

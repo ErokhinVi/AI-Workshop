@@ -405,7 +405,13 @@ class RenderOpsTest(unittest.TestCase):
         self.fake.calls.clear()
         self.run_ops("deploy", "b")
         self.assertEqual(len(self.writes()), 3)
+        self.fake.calls.clear()
+        code, output = self.run_ops("deploy", "2:cib")  # номер стола вместо буквы
+        self.assertEqual(code, 0, output)
+        self.assertEqual([c[1] for c in self.writes()], [f"/services/{ids['ws-b-cib']}/deploys"])
         code, output = self.run_ops("deploy", "z")
+        self.assertEqual(code, 1, output)
+        code, output = self.run_ops("deploy", "9")
         self.assertEqual(code, 1, output)
 
     def test_deploy_skip_missing_before_provision(self):
