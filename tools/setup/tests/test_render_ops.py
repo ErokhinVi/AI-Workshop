@@ -436,8 +436,27 @@ class RenderOpsTest(unittest.TestCase):
         (Path(os.environ["WORKSHOP_SECRETS"]) / "workshop.env").write_text(f"RENDER_API_KEY={KEY}\n")
         code, output = self.run_ops("provision")
         self.assertEqual(code, 1)
-        self.assertIn("OPENAI_API_KEY", output)
         self.assertIn("ADMIN_TOKEN", output)
+
+    def test_llm_key_can_arrive_after_provision(self):
+        env_file = Path(os.environ["WORKSHOP_SECRETS"]) / "workshop.env"
+        env_file.write_text(f"RENDER_API_KEY={KEY}\nADMIN_TOKEN={ADMIN}\n")
+        code, output = self.run_ops("provision")
+        self.assertEqual(code, 0, output)
+        self.assertIn("OPENAI_API_KEY пуст", output)
+        ids = {s["name"]: s["id"] for s in self.fake.services.values()}
+        self.assertNotIn("OPENAI_API_KEY", self.fake.env[ids["ws-a-cib"]])
+        self.assertEqual(self.fake.env[ids["ws-a-cib"]]["OPENAI_MODEL"], "model-1")
+
+        env_file.write_text(f"RENDER_API_KEY={KEY}\nOPENAI_API_KEY={OPENAI}\nADMIN_TOKEN={ADMIN}\n")
+        self.fake.calls.clear()
+        code, output = self.run_ops("env")
+        self.assertEqual(code, 0, output)
+        changed = ("ws-a-cib", "ws-b-cib", "ws-simulator")
+        self.assertEqual(sorted(c[1] for c in self.fake.calls if c[0] == "POST"),
+                         sorted(f"/services/{ids[n]}/deploys" for n in changed))
+        self.assertEqual(self.fake.env[ids["ws-simulator"]]["OPENAI_API_KEY"], OPENAI)
+        self.assertNotIn(OPENAI, output)
 
     def test_init_secrets_creates_private_file_once(self):
         target = self.tmp / "fresh"

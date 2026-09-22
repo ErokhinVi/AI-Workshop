@@ -252,6 +252,13 @@ class Workshop:
                      else f"заполни {self.conf.secrets_dir / 'workshop.env'}")
             raise OpsError(f"не хватает секретов: {', '.join(missing)}, {where}")
 
+    def need_core(self) -> None:
+        """Render и админка обязательны. Без ключа LLM сервисы поднимаются, но судья
+        и блок cib молчат, пока ключ не появится и не пройдет env."""
+        self.need("RENDER_API_KEY", "ADMIN_TOKEN")
+        if not self.secrets.get("OPENAI_API_KEY"):
+            log("внимание: OPENAI_API_KEY пуст, судья и cib без LLM. Впиши ключ, потом env")
+
     def owner_id(self) -> str:
         if self._owner:
             return self._owner
@@ -301,8 +308,9 @@ class Workshop:
 
     def env_for(self, target: Target, database_url: str | None = None) -> dict[str, str]:
         conf, secrets = self.conf, self.secrets
-        llm = {"OPENAI_API_KEY": secrets.get("OPENAI_API_KEY", ""),
-               "OPENAI_BASE_URL": conf.llm_base_url, "OPENAI_MODEL": conf.llm_model}
+        llm = {"OPENAI_BASE_URL": conf.llm_base_url, "OPENAI_MODEL": conf.llm_model}
+        if secrets.get("OPENAI_API_KEY"):  # пустой ключ не ставим: env потом допишет
+            llm["OPENAI_API_KEY"] = secrets["OPENAI_API_KEY"]
         if target.block == "simulator":
             env = {"TEAM_NAMES": ",".join(f"team_{letter}" for letter, _ in conf.teams),
                    **llm, "ADMIN_TOKEN": secrets.get("ADMIN_TOKEN", "")}
@@ -343,7 +351,7 @@ class Workshop:
     # ── создание ──
 
     def provision(self, dry_run: bool) -> None:
-        self.need("RENDER_API_KEY", "OPENAI_API_KEY", "ADMIN_TOKEN")
+        self.need_core()
         conf = self.conf
         log(f"workspace {self.owner_id()}: команд {len(conf.teams)}, сервисов {len(self.targets)}, "
             f"тариф {conf.plan}, регион {conf.region}")
@@ -429,7 +437,7 @@ class Workshop:
         log(f"+ {target.name}: создан {service.get('id')}, {self.url(target)}")
 
     def sync_env(self, dry_run: bool, database_url: str | None = None) -> list[Target]:
-        self.need("RENDER_API_KEY", "OPENAI_API_KEY", "ADMIN_TOKEN")
+        self.need_core()
         if database_url is None:
             pg = self.postgres()
             if pg and pg.get("status") == "available":

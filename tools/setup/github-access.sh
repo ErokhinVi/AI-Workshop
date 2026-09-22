@@ -129,6 +129,10 @@ RENDER_API_KEY"*)
       value="$(secret "$name")"
       if [ -z "$value" ]; then
         [ "$name" = RENDER_OWNER_ID ] && continue
+        if [ "$name" = OPENAI_API_KEY ]; then
+          echo "  внимание: OPENAI_API_KEY пуст, судья и cib без LLM. Впиши ключ и повтори ops-secrets"
+          continue
+        fi
         die "нет $name: заполни $ENV_FILE или задай в окружении"
       fi
       set_secret "$repo" "$name" "$value"
