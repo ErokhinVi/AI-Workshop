@@ -34,3 +34,4 @@ workshop.env
 
 # ID и URL сервисов Render конкретного организатора (tools/setup/render_ops.py)
 tools/setup/render-services.conf
+tools/setup/proxy-urls.conf

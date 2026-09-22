@@ -57,17 +57,20 @@ want technical mode: defer to the scenario in `CLAUDE.md` but skip the
 
 ## Services and URLs
 
-The exact Render URLs of this team's three services and the shared
-leaderboard URL are filled in during workshop setup — see the section
-below. If the placeholders are still in place, ask the organiser for the
-final URLs and update this file.
+The exact URLs of this team's three services and the shared leaderboard
+are filled in during workshop setup. If the placeholders are still in
+place, ask the organiser for the final URLs and update this file.
 
-| Block | Local | On Render |
-|---|---|---|
-| retail | `http://localhost:8001` | `<URL_RETAIL>` |
-| cib | `http://localhost:8002` | `<URL_CIB>` |
-| backend | `http://localhost:8003` | `<URL_BACKEND>` |
-| Leaderboard (organiser's simulator) | — | `<URL_SIMULATOR>` |
+The corporate network blocks `*.onrender.com`. The `workers.dev` column is
+a proxy to the same services and opens from anywhere: when a Render link
+doesn't open for the participant, give them the `workers.dev` one.
+
+| Block | Local | On Render | Via proxy (workers.dev) |
+|---|---|---|---|
+| retail | `http://localhost:8001` | `<URL_RETAIL>` | `<PROXY_RETAIL>` |
+| cib | `http://localhost:8002` | `<URL_CIB>` | `<PROXY_CIB>` |
+| backend | `http://localhost:8003` | `<URL_BACKEND>` | `<PROXY_BACKEND>` |
+| Leaderboard (organiser's simulator) | — | `<URL_SIMULATOR>` | `<PROXY_SIMULATOR>` |
 
 Show the participant their team's retail block — that's the bank the
 customer sees. The leaderboard shows every team's score head to head.

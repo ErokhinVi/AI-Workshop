@@ -173,13 +173,24 @@ R status
 
 ```bash
 tools/setup/github-access.sh render
+python3 tools/setup/cf_proxy.py deploy
+python3 tools/setup/cf_proxy.py check
 tools/setup/sync-team-repos.sh
 ```
 
 `render` кладет в каждый репозиторий команды секрет `RENDER_API_KEY` и
 переменные `RENDER_SID_*`: без них сохранения участников не деплоятся.
-`sync-team-repos.sh` вписывает настоящие URL сервисов и табло в `TEAM.md`
-команд, эти адреса агенты показывают участникам.
+
+`cf_proxy.py` ставит на Cloudflare Workers прокси перед каждым сервисом:
+корпоративная сеть режет `*.onrender.com`, а `*.workers.dev` пропускает.
+Нужен `CLOUDFLARE_API_TOKEN` в workshop.env: человек заводит бесплатный
+аккаунт Cloudflare и выпускает токен по шаблону «Edit Cloudflare Workers»
+(Account Resources: свой аккаунт, Zone Resources: All zones). Адреса ложатся
+в `tools/setup/proxy-urls.conf`, `check` ходит через них в `/health`, у всех
+200. Бесплатного плана хватает: 100 тысяч запросов в сутки.
+
+`sync-team-repos.sh` вписывает в `TEAM.md` команд настоящие URL сервисов и
+табло, прямые и через прокси. Эти адреса агенты показывают участникам.
 
 Проверка деплоя из репозитория команды (подставь репозиторий первой команды):
 
