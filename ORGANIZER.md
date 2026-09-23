@@ -120,10 +120,10 @@ GitHub вытеснял средний из трех близких пушей, 
 | `CEIL` | 1000 | 10000 | потолок базы |
 | `STATIONARY_FLOW` | 0 | | доля ценности на каждый раунд |
 | `POLL_INTERVAL_S` | 30 | | период опроса блоков |
-| `LLM_TIMEOUT_S` | 30 | | таймаут вызова LLM |
-| `OPENAI_MODEL` | `LLM_MODEL` | | модель судьи; в `SIM_ENV` меняется только у симулятора, cib команд остается на `LLM_MODEL` |
+| `LLM_TIMEOUT_S` | 30 | 60 | таймаут вызова LLM |
+| `OPENAI_MODEL` | `LLM_MODEL` | `xiaomi/mimo-v2.6-flash` | модель судьи; в `SIM_ENV` меняется только у симулятора, cib команд остается на `LLM_MODEL` |
 | `JUDGE_SAMPLES` | 3 | | сколько раз судья оценивает один банк, берется медиана |
-| `LLM_REASONING` | пусто | | рассуждающая модель OpenRouter: `off` не думать, `low`/`medium`/`high` думать |
+| `LLM_REASONING` | пусто | `off` | рассуждающая модель OpenRouter: `off` не думать, `low`/`medium`/`high` думать |
 | `LLM_REASONING_TOKENS` | 4000 | | запас токенов на размышления при `low`/`medium`/`high` |
 | `ACTIVE_TASK` | пусто | | подсказка судье, какую задачу предлагали |
 
